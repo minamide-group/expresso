@@ -34,6 +34,10 @@ object Monoid {
     def unit = Nil
     def combine(l1: List[A], l2: List[A]) = l1 ++ l2
   }
+  implicit def unitMonoid = new Monoid[Unit] {
+    def unit = ()
+    def combine(u1: Unit, u2: Unit) = ()
+  }
   def transition[Q, A, M](
     q: Q,
     w: List[A],

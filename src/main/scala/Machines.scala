@@ -191,6 +191,31 @@ object NSST {
         case (q, None) => Set()
       }
       .toMap
+
+    // Only states reachable from domain of F
+    // by inverse edges are needed.
+    val inverse =
+      newEdges
+        .toList
+        .flatMap{ case ((q, _), s) => s.map{ case (r, _) => (r, q) } }
+        .groupBy(_._1)
+        .map{ case (k, v) => k -> v.map(_._2).toSet }
+        .withDefaultValue(Set())
+    def transInv(qs: Set[NewQ]): Set[NewQ] =
+      qs.foldLeft(Set[NewQ]()){ case (acc, q) => acc union inverse(q) }
+    var invNewOnes = newOutF.keySet
+    var invReachables = invNewOnes
+    while (invNewOnes.nonEmpty) {
+      invNewOnes = transInv(invNewOnes) -- invReachables
+      invReachables ++= invNewOnes
+    }
+    newStates = invReachables
+    newEdges =
+      newEdges.flatMap{ case ((p, a), s) =>
+        if (newStates contains p) {
+          Map((p, a) -> s.filter{ case (q, _) => newStates contains q })
+        } else Map()
+      }
     new NSST(
       newStates,
       nsst.in,
@@ -198,7 +223,7 @@ object NSST {
       nsst.variables,
       newEdges,
       None,
-      newOutF
+      newOutF.filter{ case (p, _) => newStates contains p }
     )
   } // End of composeNsstAndNft
 
