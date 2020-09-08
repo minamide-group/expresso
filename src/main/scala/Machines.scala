@@ -39,6 +39,12 @@ object NSST {
 
   // Type of states of composed NSST without initial one.
   type ComposedQ[Q1, Q2, X] = (Q1, Map[X, (Q2, Q2)])
+  // Sequentially compose given NSST and NFT.
+  // TODO Currently if a given NSST has more than 2 variables this function
+  // take too long to return. It is likely that this is because the algorithm
+  // makes and considers all states ((Q2 * Q2 + 1)^X) when calculating
+  // next states of a given state.
+  // It may be that the number of states to consider can be reduced.
   def composeNsstAndNft[A, B, C, Q1, X, Q2](
     nsst: NSST[Q1, A, B, X],
     nft: NFT[Q2, B, C]
