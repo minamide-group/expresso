@@ -44,6 +44,11 @@ object DOTMaker {
     def toDOT: DOT.GraphSpec = dfa.asNFA.toDOT
   }
 
+  implicit def enrichNSST[Q, A, B, X](nsst: NSST[Q, A, B, X])
+      : DOTMaker[NSST[Q, A, B, X]] = new DOTMaker[NSST[Q, A, B, X]] {
+    def toDOT: DOT.GraphSpec = nsst.asNFA.toDOT
+  }
+
   implicit def enrichNFA[Q, A](nfa: NFA[Q, A]): DOTMaker[NFA[Q, A]] = new DOTMaker[NFA[Q, A]] {
     def toDOT: DOT.GraphSpec = {
       import DOT._

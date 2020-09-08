@@ -85,4 +85,6 @@ object Main extends App {
   val composed = NSST.composeNsstAndNft(sst, nft)
   println(composed.states.size)
   println(composed.transduce(List('b','a', 'b', 'a')))
+  import DOTMaker._
+  println(composed.toDOT)
 }

@@ -16,6 +16,14 @@ class NSST[Q, A, B, X](
     Monoid.transition(q0, w, trans).flatMap{ case (q, m) => outputAt(q, m).toSet }
   def outputAt(q: Q, m: Update[X, B]): Option[List[B]] =
     outF.get(q).map { Cop.flatMap1(_, m) }.map { eraseVar }
+
+  def asNFA: NFA[Q, A] = new NFA(
+    states,
+    in,
+    edges.map{ case ((q, a) -> s) => (q, Some(a)) -> s.map(_._1) },
+    q0,
+    outF.keySet
+  )
 }
 
 object NSST {
