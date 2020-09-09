@@ -62,91 +62,102 @@ object NSST {
       Monoid.transition(q, w, transWithKT)
     }
 
-    val ktList: List[Map[X, (Q2, Q2)]] = {
-      val q2pair = (for (q21 <- nft.states;
-                         q22 <- nft.states)
-                    yield Some((q21, q22)))
-        .toList
-        .appended(None)
-      def enumerate(size: Int): List[List[Option[(Q2, Q2)]]] =
-        if (size == 0) List(Nil)
-        else for (
-          p <- q2pair;
-          ps <- enumerate(size-1)
-        ) yield p :: ps
-      val permutations = enumerate(nsst.variables.size)
-      permutations
-        .map(pairs => (nsst.variables zip pairs).flatMap{
-               case (x, Some(p)) => List((x, p))
-               case _ => Nil
-             }.toMap)
-        .toList
+    // Returns a set of Maps which maps x in domain to an element in g(x).
+    def mapsWhoseDomainIsAndValueIsIn[X, A](
+      g: X => Iterable[A],
+      domain: Iterable[X]
+    ): Set[Map[X, A]] = {
+      def aux(g: X => Iterable[A], domain: List[X]): Set[Map[X, A]] = domain match {
+        case Nil => Set(Map())
+        case hd :: tl => {
+          val fs = aux(g, tl)
+          val added = g(hd).map(hd -> _)
+          fs.flatMap(m => added.map(m + _))
+        }
+      }
+      aux(g, domain.toList)
     }
-    val kkList: List[Map[X, (Q2, Q2)]] = {
-      val q2pair = (for (q2 <- nft.states) yield Some((q2, q2)))
-        .toList
-        .appended(None)
-      def enumerate(size: Int): List[List[Option[(Q2, Q2)]]] =
-        if (size == 0) List(Nil)
-        else for (
-          p <- q2pair;
-          ps <- enumerate(size-1)
-        ) yield p :: ps
-      val permutations = enumerate(nsst.variables.size)
-      permutations
-        .map(pairs => (nsst.variables zip pairs).flatMap{
-               case (x, Some(p)) => List((x, p))
-               case _ => Nil
-             }.toMap)
-        .toList
+
+    // Returns a set of function f s.t. domain ⊂ dom(f) ⊂ universe
+    // and f ∈ createFunctions(dom(f)).
+    def mapsWhoseDomainContains[X, A](
+      createFunctions: Set[X] => Set[Map[X, A]],
+      domain: Set[X],
+      universe: Set[X]
+    ): Set[Map[X, A]] = {
+      val diff = universe -- domain
+      diff
+        .subsets
+        .flatMap(s => createFunctions(domain ++ s))
+        .toSet
     }
+
+    // Returns a set of function f s.t. domain ⊂ dom(f) ⊂ universe
+    // and f(x) ∈ g(x).
+    def mapsWhoseDomainContiansAndValueIsIn[X, A](
+      g: X => Iterable[A],
+      domain: Set[X],
+      universe: Set[X]
+    ): Set[Map[X, A]] = mapsWhoseDomainContains(
+      mapsWhoseDomainIsAndValueIsIn(g, _),
+      domain,
+      universe
+    )
 
     def nextStates(q: NoOp, a: A): Set[(NoOp, Update[X, C])] = {
       val (q1, kt) = q
-      val got =
-      for ((q1p, m1) <- nsst.trans(q1, a);
-           ktp <- ktList
-           if nsst.variables.forall(x =>
-               { // Condition 1
-                 val vars = Cop.erase2(m1(x)).toSet
-                 vars.isEmpty || !(vars subsetOf kt.keySet) || (kt.keySet contains x) }))
-      yield {
-        // Enumerate possible variable updates with (q1p, ktp) as a next state.
-        val dom = ktp.keySet
-        val (inKT, notInKT) = nsst.variables.partition(dom contains _)
-        // mxSet(x) := A set of possible values of m(x).
-        var mxSet: Map[X, Set[Output[X, C]]] =
-          Map.from(notInKT.map(x => x -> Set(List(Cop1(x)))))
-        val trans = transitionWith(kt) _
-        mxSet ++= (for (x <- inKT) yield {
-                  val s = (for ((q2, mx) <- trans(ktp(x)._1, m1(x))
-                                // If the folloing conditions is not met,
-                                // then ms(x) is empty and thus cannot transition
-                                // from q to (q1p, ktp) by a.
-                                if q2 == ktp(x)._2)
-                           yield mx)
-                  x -> s
-                })
-        val mxList = mxSet.map{ case (x, s) => (x, s.toList) }
-        val variables = nsst.variables.toList
-        def product[T](ls: List[List[T]]): List[List[T]] = ls match {
-          case Nil => List(Nil)
-          case l :: ls => {
-            for (e <- l;
-                 p <- product(ls))
-            yield e :: p
-          }
+      // Evaluates to mapping from variable x to the set of (k'(x), t'(x), m(x))
+      // where using kt, k'(x) can transition by m1(x) to t'(x) yielding m(x).
+      def transitionByM1(m1: Update[X, B])
+          : Map[X, Set[(Q2, Q2, Output[X, C])]] = {
+        def transitionByM1x(x: X): Set[(Q2, Q2, Output[X, C])] = {
+          nft
+            .states
+            .flatMap(p => transitionWith(kt)(p, m1(x)).map{ case (q, m) => (p, q, m) })
         }
-        val mList = product(variables.map(mxList(_)))
-        val ms = mList.map(m => (variables zip m).toMap).toSet
-        ms.map(((q1p, ktp), _))
+        nsst.variables.map(x => x -> transitionByM1x(x)).toMap
       }
-      got.flatten
+      // Set of variables that kt of next state must include under m1.
+      def mustInclude(m1: Update[X, B]): Set[X] =
+        nsst.variables.filter(x => {
+                                val xs = Cop.erase2(m1(x)).toSet
+                                xs.nonEmpty && xs.subsetOf(kt.keySet)
+                              } )
+
+      val nested =
+      for ((q1p, m1) <- nsst.trans(q1, a)) yield {
+        mapsWhoseDomainContiansAndValueIsIn(
+          transitionByM1(m1)(_),
+          mustInclude(m1),
+          nsst.variables
+        ).map(m => (m.map{ case (x, (k, t, _)) => x -> (k, t) },
+                    m.map{ case (x, (_, _, m)) => x -> m }.withDefaultValue(Nil)))
+          .map{ case (kt, m) => ((q1p, kt), m) }
+      }
+      nested.flatten
     } // End of nextStates
 
     def nextStatesNewQ(q: NewQ, a: A): Set[(NewQ, Update[X, C])] = q match {
       case Some(q) => nextStates(q, a).map{ case (q, m) => (Some(q), m) }
       case None => {
+        val kkList: List[Map[X, (Q2, Q2)]] = {
+          val q2pair = (for (q2 <- nft.states) yield Some((q2, q2)))
+            .toList
+            .appended(None)
+          def enumerate(size: Int): List[List[Option[(Q2, Q2)]]] =
+            if (size == 0) List(Nil)
+            else for (
+              p <- q2pair;
+              ps <- enumerate(size-1)
+            ) yield p :: ps
+          val permutations = enumerate(nsst.variables.size)
+          permutations
+            .map(pairs => (nsst.variables zip pairs).flatMap{
+                   case (x, Some(p)) => List((x, p))
+                   case _ => Nil
+                 }.toMap)
+            .toList
+        }
         (for (kk <- kkList) yield nextStates((nsst.q0, kk), a))
           .flatMap{ s => s.map[(NewQ, Update[X, C])]{ case (q, m) => (Some(q), m) } }
           .toSet

@@ -42,6 +42,17 @@ class TestComposition extends AnyFlatSpec {
     List((0, "X#Y"))
   )
 
+  val alur21Three = NSST(
+    Set(0),
+    Set('X', 'Y', 'Z'),
+    List((0, 'a', List(
+            (0, List("X:Xa", "Y:Ya", "Z:Za")),
+            (0, List("X:Xb", "Y:Yb", "Z:Zb")),
+          ))),
+    0,
+    List((0, "X#Y#Z"))
+  )
+
   // Doubles 'a's in a given string if it has even number of them,
   // and do nothing otherwise.
   val doubleAsIfEven = NFT(
@@ -89,5 +100,14 @@ class TestComposition extends AnyFlatSpec {
     assert(composed.transduce("aa".toList) ==
              Set("aaaa#aaaa", "aab#aab", "baa#baa", "bb#bb").map(_.toList))
 
+  }
+
+  "Composition of a variant of Alur's ex 2.1 and doubleAsIfEven" should
+  "terminate in reasonable time and transduce correctly" in {
+    val composed = NSST.composeNsstAndNft(alur21Three, doubleAsIfEven)
+    info(s"Number of states: ${composed.states.size}")
+    info(s"Max number of transition destinations: ${maxTransition(composed)}")
+    assert(composed.transduce("aa".toList) ==
+             Set("aaaa#aaaa#aaaa", "ab#ab#ab", "ba#ba#ba", "bb#bb#bb").map(_.toList))
   }
 }
