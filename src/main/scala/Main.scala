@@ -1,9 +1,24 @@
 package com.github.kmn4.sst
 
-trait Cop[A, B]
-case class Cop1[A, B](a: A) extends Cop[A, B]
-case class Cop2[A, B](b: B) extends Cop[A, B]
+trait Cop[+A, +B]
+case class Cop1[A, T <: A](a: T) extends Cop[A, Nothing]
+case class Cop2[B, T <: B](b: T) extends Cop[Nothing, B]
 object Cop {
+  def map1[A, B, C](l: List[Cop[A, B]], f: A => C): List[Cop[C, B]] =
+    l.map {
+      case Cop1(a) => Cop1(f(a))
+      case Cop2(b) => Cop2(b)
+    }
+  def map2[A, B, C](l: List[Cop[A, B]], f: B => C): List[Cop[A, C]] =
+    l.map {
+      case Cop1(a) => Cop1(a)
+      case Cop2(b) => Cop2(f(b))
+    }
+  def commute[A, B](l: List[Cop[A, B]]): List[Cop[B, A]] =
+    l.map {
+      case Cop1(a) => Cop2(a)
+      case Cop2(b) => Cop1(b)
+    }
   def flatMap1[A, B](l: List[Cop[A, B]], f: A => List[Cop[A, B]]): List[Cop[A, B]] =
     l.flatMap{
       case Cop1(a) => f(a)

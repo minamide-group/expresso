@@ -90,6 +90,7 @@ class TestComposition extends AnyFlatSpec {
     info(s"Number of states: ${composed.states.size}")
     info(s"Max number of transition destinations: ${maxTransition(composed)}")
     assert(composed.transduce("abb".toList) == Set("bbbb".toList))
+    assert(composed.isCopyless)
   }
 
   "Composition of Alur's exmaple 2.1 and doubleAsIfEven" should
@@ -99,7 +100,7 @@ class TestComposition extends AnyFlatSpec {
     info(s"Max number of transition destinations: ${maxTransition(composed)}")
     assert(composed.transduce("aa".toList) ==
              Set("aaaa#aaaa", "aab#aab", "baa#baa", "bb#bb").map(_.toList))
-
+    assert(composed.isCopyless)
   }
 
   "Composition of a variant of Alur's ex 2.1 and doubleAsIfEven" should
@@ -109,5 +110,84 @@ class TestComposition extends AnyFlatSpec {
     info(s"Max number of transition destinations: ${maxTransition(composed)}")
     assert(composed.transduce("aa".toList) ==
              Set("aaaa#aaaa#aaaa", "ab#ab#ab", "ba#ba#ba", "bb#bb#bb").map(_.toList))
+    assert(composed.isCopyless)
+  }
+
+  "Composition of two NSSTs" should "be done correctly" in {
+    val n1 = NSST(
+      Set(0, 1, 2),
+      Set('X', 'Y'),
+      List(
+        (0, 'a', List(
+           (1, List("X:Xa", "Y:Ya")),
+           (1, List("X:Xa", "Y:Yb")),
+           (1, List("X:Xb", "Y:Ya")),
+           (1, List("X:Xb", "Y:Yb")),
+           (2, List("X:Xa", "Y:Ya")),
+           (2, List("X:Xa", "Y:Yb")),
+           (2, List("X:Xb", "Y:Ya")),
+           (2, List("X:Xb", "Y:Yb")))),
+        (0, 'b', List(
+           (1, List("X:Xa", "Y:Ya")),
+           (1, List("X:Xa", "Y:Yb")),
+           (1, List("X:Xb", "Y:Ya")),
+           (1, List("X:Xb", "Y:Yb")),
+           (2, List("X:Xa", "Y:Ya")),
+           (2, List("X:Xa", "Y:Yb")),
+           (2, List("X:Xb", "Y:Ya")),
+           (2, List("X:Xb", "Y:Yb")))),
+        (1, 'a', List(
+           (1, List("X:Xa", "Y:Ya")),
+           (1, List("X:Xa", "Y:Yb")),
+           (1, List("X:Xb", "Y:Ya")),
+           (1, List("X:Xb", "Y:Yb")))),
+        (1, 'b', List(
+           (1, List("X:Xa", "Y:Ya")),
+           (1, List("X:Xa", "Y:Yb")),
+           (1, List("X:Xb", "Y:Ya")),
+           (1, List("X:Xb", "Y:Yb")))),
+        (2, 'a', List(
+           (2, List("X:Xa", "Y:Ya")),
+           (2, List("X:Xa", "Y:Yb")),
+           (2, List("X:Xb", "Y:Ya")),
+           (2, List("X:Xb", "Y:Yb")))),
+        (2, 'a', List(
+           (2, List("X:Xa", "Y:Ya")),
+           (2, List("X:Xa", "Y:Yb")),
+           (2, List("X:Xb", "Y:Ya")),
+           (2, List("X:Xb", "Y:Yb"))))
+      ),
+      0,
+      List((1, "X"), (2, "XY"))
+    )
+
+    val simple = NSST(
+      Set(0),
+      Set('X'),
+      List((0, 'a', List((0, List("X:Xa"))))),
+      0,
+      List((0, "XX"))
+    )
+
+    {
+      val composed = NSST.composeNssts(simple, n1)
+      info(s"Number of states: ${composed.states.size}")
+      info(s"Max number of transition destinations: ${maxTransition(composed)}")
+      assert(composed.isCopyless)
+      assert(composed.transduce("".toList) == Set())
+      assert(composed.transduce("a".toList) == Set("aaaa".toList))
+    }
+
+    val composed = NSST.composeNssts(n1, n1)
+    info(s"Number of states: ${composed.states.size}")
+    info(s"Max number of transition destinations: ${maxTransition(composed)}")
+    assert(composed.isCopyless)
+    assert(composed.transduce("".toList) == Set())
+    assert(composed.transduce("a".toList) ==
+             Set("a", "b",
+                 "aa", "ab", "ba", "bb",
+                 "aaaa", "aaab", "aaba", "aabb", "abaa", "abab", "abba", "abbb",
+                 "bbbb", "bbba", "bbab", "bbaa", "babb", "baba", "baab", "baaa"
+             ).map(_.toList))
   }
 }
