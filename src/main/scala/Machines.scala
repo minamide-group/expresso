@@ -7,15 +7,16 @@ class NSST[Q, A, B, X](
   val variables: Set[X],
   val edges: NSST.Edges[Q, A, X, B],
   val q0: Q,
-  val outF: Map[Q, NSST.Output[X, B]]
+  val partialF: Map[Q, Set[NSST.Cupstar[X, B]]]
 ) {
   import NSST._
   implicit val monoid: Monoid[Update[X, B]] = variables
+  val outF = partialF.withDefaultValue(Set())
   def trans(q: Q, a: A): Set[(Q, Update[X, B])] = edges.withDefaultValue(Set.empty)((q, a))
   def transduce(w: List[A]): Set[List[B]] =
     Monoid.transition(q0, w, trans).flatMap{ case (q, m) => outputAt(q, m).toSet }
-  def outputAt(q: Q, m: Update[X, B]): Option[List[B]] =
-    outF.get(q).map { Cop.flatMap1(_, m) }.map { eraseVar }
+  def outputAt(q: Q, m: Update[X, B]): Set[List[B]] =
+    outF(q).map{ Cop.flatMap1(_, m) }.map(Cop.erase1)
 
   def asNFA: NFA[Q, A] = new NFA(
     states,
@@ -24,18 +25,32 @@ class NSST[Q, A, B, X](
     q0,
     outF.keySet
   )
+
+  def isCopyless: Boolean = {
+    edges.flatMap{ case (_, s) => s }.forall{ case (_, m) => NSST.isCopyless(m) }
+  }
 }
 
 object NSST {
-  type Update[X, B] = Map[X, Output[X, B]]
+  type Update[X, B] = Map[X, Cupstar[X, B]]
   type Edges[Q, A, X, B] = Map[(Q, A), Set[(Q, Update[X, B])]]
-  type Output[X, B] = List[Cop[X, B]]
+  type Cupstar[X, B] = List[Cop[X, B]]
   implicit def updateMonoid[X, B](xs: Iterable[X]): Monoid[Update[X, B]] = new Monoid[Update[X, B]] {
     def combine(m1: Update[X, B], m2: Update[X, B]): Update[X, B] =
       for ((k, v) <- m2) yield (k -> Cop.flatMap1(v, m1(_)))
     def unit: Update[X, B] = Map.from(xs.map(x => x -> List(Cop1[X, B](x))))
   }
-  def eraseVar[X, B](l: Output[X, B]): List[B] = Cop.erase1(l)
+  def eraseVar[X, B](l: Cupstar[X, B]): List[B] = Cop.erase1(l)
+  def isCopyless[X, B](update: Update[X, B]): Boolean = {
+    val vars = update.keySet
+    def count(x: X): Int = update.foldLeft(0){
+      case (acc, (_ , rhs)) => rhs.foldLeft(0) {
+        case (acc, Cop1(y)) if y == x => acc + 1
+        case (acc, _) => acc
+      }
+    }
+    vars.forall(count(_) <= 1)
+  }
 
   // Type of states of composed NSST without initial one.
   type ComposedQ[Q1, Q2, X] = (Q1, Map[X, (Q2, Q2)])
@@ -52,8 +67,8 @@ object NSST {
     type NoOp = ComposedQ[Q1, Q2, X]
     type NewQ = Option[NoOp]
 
-    def transitionWith(kt: Map[X, (Q2, Q2)])(q: Q2, w: Output[X, B]) = {
-      def transWithKT(q: Q2, sigma: Cop[X, B]): Set[(Q2, Output[X, C])] = sigma match {
+    def transitionWith(kt: Map[X, (Q2, Q2)])(q: Q2, w: Cupstar[X, B]) = {
+      def transWithKT(q: Q2, sigma: Cop[X, B]): Set[(Q2, Cupstar[X, C])] = sigma match {
         case Cop1(x) => kt.get(x).flatMap{
           case (k, t) => if (q == k) Some((t, List(Cop1[X, C](x)))) else None
         }.toSet
@@ -109,8 +124,8 @@ object NSST {
       // Evaluates to mapping from variable x to the set of (k'(x), t'(x), m(x))
       // where using kt, k'(x) can transition by m1(x) to t'(x) yielding m(x).
       def transitionByM1(m1: Update[X, B])
-          : Map[X, Set[(Q2, Q2, Output[X, C])]] = {
-        def transitionByM1x(x: X): Set[(Q2, Q2, Output[X, C])] = {
+          : Map[X, Set[(Q2, Q2, Cupstar[X, C])]] = {
+        def transitionByM1x(x: X): Set[(Q2, Q2, Cupstar[X, C])] = {
           nft
             .states
             .flatMap(p => transitionWith(kt)(p, m1(x)).map{ case (q, m) => (p, q, m) })
@@ -183,30 +198,24 @@ object NSST {
       for (q <- newStates) yield q -> {
         q match {
           case Some((q1, kt)) => {
-            nsst.outF.get(q1).flatMap{
+            nsst.outF(q1).flatMap{
               alpha => {
                 val s = transitionWith(kt)(nft.q0, alpha)
                   .filter{ case (q2, _) => nft.finals contains q2 }
-                if (s.nonEmpty) Some(s.head._2)
-                else None
+                s.map(_._2)
               } }
           }
           case None => {
-            nsst.outF.get(nsst.q0).flatMap{
+            nsst.outF(nsst.q0).flatMap{
               alpha => {
                 val s = nft.transduce(eraseVar(alpha))
-                if (s.nonEmpty) Some(s.head.map(Cop2[X, C](_)))
-                else None
+                s.map(cs => cs.map(Cop2[X, C](_))): Set[Cupstar[X, C]]
               }
             }
           }
         }
       }
     }
-      .flatMap{
-        case (q, Some(l)) => Set((q, l))
-        case (q, None) => Set()
-      }
       .toMap
 
     // Only states reachable from domain of F
@@ -220,7 +229,7 @@ object NSST {
         .withDefaultValue(Set())
     def transInv(qs: Set[NewQ]): Set[NewQ] =
       qs.foldLeft(Set[NewQ]()){ case (acc, q) => acc union inverse(q) }
-    var invNewOnes = newOutF.keySet
+    var invNewOnes = newOutF.filter{ case (_, s) => s.nonEmpty }.keySet
     var invReachables = invNewOnes
     while (invNewOnes.nonEmpty) {
       invNewOnes = transInv(invNewOnes) -- invReachables
@@ -251,7 +260,7 @@ object NSST {
     q0: Int,
     outF: Iterable[(Int, String)]
   ): NSST[Int, Char, Char, Char] = {
-    def stringToOutput(s: String): Output[Char, Char] =
+    def stringToCupstar(s: String): Cupstar[Char, Char] =
       s.map[Cop[Char, Char]]{ c => if (c.isUpper) Cop1(c) else Cop2(c) }.toList
     val newEdges =
       edges
@@ -259,12 +268,12 @@ object NSST {
           case (p, a, l) => {
             (p, a) ->
             l.map{ case (q, m) =>
-              (q, m.map{ s => s.head -> stringToOutput(s.substring(2)) }.toMap) }
+              (q, m.map{ s => s.head -> stringToCupstar(s.substring(2)) }.toMap) }
               .toSet
           }
         }
         .toMap
-    val newF = outF.map{ case (q, s) => q -> stringToOutput(s) }.toMap
+    val newF = outF.map{ case (q, s) => q -> Set(stringToCupstar(s)) }.toMap
     new NSST(
       states.toSet,
       edges.map(_._2).toSet,

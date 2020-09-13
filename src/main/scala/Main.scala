@@ -69,7 +69,7 @@ object Main extends App {
                        )))
     ),
     q0 = 0,
-    outF = Map(0 -> List(Cop2('a'), Cop1('x'), Cop2('b'), Cop1('y')))
+    partialF = Map(0 -> Set(List(Cop2('a'), Cop1('x'), Cop2('b'), Cop1('y'))))
   )
   val nft = new NFT[Int, Char, Char](
     states = Set(0, 1),
