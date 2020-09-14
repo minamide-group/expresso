@@ -4,7 +4,7 @@ package com.github.kmn4.sst
 object DOT {
   type ID = String
 
-  private def quote(s: String) = '"' + s.replace("\"", "\\\"") + '"'
+  private def quote(s: String) = s""""${s.replace("\"", "\\\"")}""""
 
   case class Attribute(name: ID, value: ID) {
     // \" instead of ${'"'} does not compile due to https://github.com/scala/bug/issues/6476

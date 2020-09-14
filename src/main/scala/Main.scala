@@ -1,41 +1,41 @@
 package com.github.kmn4.sst
 
-trait Cop[+A, +B]
+sealed trait Cop[+A, +B] {
+  def map1[C](f: A => C): Cop[C, B] = Cop.map1(this, f)
+  def map2[C](f: B => C): Cop[A, C] = Cop.map2(this, f)
+  def commute: Cop[B, A] = Cop.commute(this)
+}
 case class Cop1[A, T <: A](a: T) extends Cop[A, Nothing]
 case class Cop2[B, T <: B](b: T) extends Cop[Nothing, B]
 object Cop {
-  def map1[A, B, C](l: List[Cop[A, B]], f: A => C): List[Cop[C, B]] =
-    l.map {
-      case Cop1(a) => Cop1(f(a))
-      case Cop2(b) => Cop2(b)
-    }
-  def map2[A, B, C](l: List[Cop[A, B]], f: B => C): List[Cop[A, C]] =
-    l.map {
-      case Cop1(a) => Cop1(a)
-      case Cop2(b) => Cop2(f(b))
-    }
-  def commute[A, B](l: List[Cop[A, B]]): List[Cop[B, A]] =
-    l.map {
+  def flatten[A](a: Cop[A, A]): A = a match { case Cop1(a) => a; case Cop2(a) => a }
+  def map1[A, B, C](ab: Cop[A, B], f: A => C): Cop[C, B] = ab match {
+    case Cop1(a) => Cop1(f(a))
+    case Cop2(b) => Cop2(b)
+  }
+  def map2[A, B, C](ab: Cop[A, B], f: B => C): Cop[A, C] = ab match {
+    case Cop1(a) => Cop1(a)
+    case Cop2(b) => Cop2(f(b))
+  }
+  def commute[A, B](ab: Cop[A, B]): Cop[B, A] = ab match {
       case Cop1(a) => Cop2(a)
       case Cop2(b) => Cop1(b)
-    }
-  def flatMap1[A, B](l: List[Cop[A, B]], f: A => List[Cop[A, B]]): List[Cop[A, B]] =
-    l.flatMap{
-      case Cop1(a) => f(a)
-      case Cop2(b) => List(Cop2(b))
-    }
-  def flatMap2[A, B](l: List[Cop[A, B]], f: B => List[Cop[A, B]]): List[Cop[A, B]] =
-    l.flatMap{
-      case Cop1(a) => List(Cop1(a))
-      case Cop2(b) => f(b)
-    }
-  def erase1[A, B](l: List[Cop[A, B]]): List[B] = l.flatMap{
-    case Cop1(a) => Nil
-    case Cop2(b) => List(b)
   }
-  def erase2[A, B](l: List[Cop[A, B]]): List[A] = l.flatMap{
-    case Cop1(a) => List(a)
-    case Cop2(b) => Nil
+  def flatMap1[A, B, C](ab: Cop[A, B], f: A => Cop[C, B]): Cop[C, B] = ab match {
+    case Cop1(a) => f(a)
+    case Cop2(b) => Cop2(b)
+  }
+  def flatMap2[A, B, C](ab: Cop[A, B], f: B => Cop[A, C]): Cop[A, C] = ab match {
+    case Cop1(a) => Cop1(a)
+    case Cop2(b) => f(b)
+  }
+  def erase1[A, B](ab: Cop[A, B]): Option[B] = ab match {
+    case Cop1(a) => None
+    case Cop2(b) => Some(b)
+  }
+  def erase2[A, B](ab: Cop[A, B]): Option[A] = ab match {
+    case Cop1(a) => Some(a)
+    case Cop2(b) => None
   }
 }
 
@@ -65,13 +65,13 @@ object Monoid {
         case (q, m1) => delta(q, a).map{ case (q, m2) => (q, monoid.combine(m1, m2)) }
       }
     }
+  def fold[M](ms: List[M])(implicit monoid : Monoid[M]): M = ms.fold(monoid.unit)(monoid.combine)
 }
 
 object Main extends App {
   val sst = new NSST[Int, Char, Char, Char](
     states = Set(0),
     in = Set('a', 'b'),
-    out = Set('a', 'b'),
     variables = Set('x', 'y'),
     edges = Map(
       (0, 'a') -> Set((0, Map(
@@ -89,7 +89,6 @@ object Main extends App {
   val nft = new NFT[Int, Char, Char](
     states = Set(0, 1),
     in = Set('a', 'b'),
-    out = Set('a', 'b'),
     edges = Map(
       (0, 'a') -> Set((1, List())),
       (0, 'b') -> Set((0, List('b', 'b'))),
