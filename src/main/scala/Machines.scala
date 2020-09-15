@@ -84,7 +84,7 @@ class NSST[Q, A, B, X](
   def asMonoidNFT: NFT[Q, A, Update[X, B]] = new NFT(
     states,
     in,
-    edges.map{ case ((q, a), s) => ((q, a), s.map{ case (r, m) => (r, List(m)) }) },
+    edges.view.mapValues{ _.map{ case (r, m) => (r, List(m)) } }.toMap,
     q0,
     outF.filter { case (q, s) => s.nonEmpty }.keySet
   )
