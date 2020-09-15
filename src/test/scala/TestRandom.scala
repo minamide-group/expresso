@@ -207,13 +207,13 @@ class TestRandom extends AnyFlatSpec {
     }
   }
   "Composition of randomly generated NSSTs" should "be done correctly" in {
-    for (_ <- 0 until 100) {
+    for (_ <- 0 until 1000) {
       val n1 = randomNsstCustomized()
       val n2 = randomNsstCustomized()
       val composedTransduction = NSST.composeNsstOfNssts(n1, n2).transduce _
       val metaComposed = metaComposition(n1, n2)
       for (_ <- 0 until 10) {
-        val w = nextAs(List('a', 'b'), 3)
+        val w = nextAs(List('a', 'b'), 4)
         assert(composedTransduction(w) == metaComposed(w))
       }
     }
