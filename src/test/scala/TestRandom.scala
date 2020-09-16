@@ -207,16 +207,22 @@ class TestRandom extends AnyFlatSpec {
     }
   }
   "Composition of randomly generated NSSTs" should "be done correctly" in {
+    import scala.math.max
+    var maxStates = 0
     for (_ <- 0 until 1000) {
       val n1 = randomNsstCustomized()
       val n2 = randomNsstCustomized()
-      val composedTransduction = NSST.composeNsstOfNssts(n1, n2).transduce _
+      val composed = NSST.composeNsstOfNssts(n1, n2)
+      assert(composed.isCopyless)
+      maxStates = max(maxStates, composed.states.size)
+      val composedTransduction = composed.transduce _
       val metaComposed = metaComposition(n1, n2)
       for (_ <- 0 until 10) {
         val w = nextAs(List('a', 'b'), 4)
         assert(composedTransduction(w) == metaComposed(w))
       }
     }
+    info(s"Maximum state size: ${maxStates}")
   }
 
 }

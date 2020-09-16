@@ -46,6 +46,19 @@ object Concepts {
       m.flatMap { case (x, xas) => aux(x, xas) }.withDefaultValue(Nil)
     )
   }
+
+  def closure[Q](start: Set[Q], edges: Q => Set[Q]): Set[Q] = {
+    def trans(qs: Set[Q]): Set[Q] =
+      qs.foldLeft(Set.empty[Q]){ case (acc, q) => acc union edges(q) }
+    var newQs = start
+    var clos = start
+    while (newQs.nonEmpty) {
+      newQs = trans(newQs) -- clos
+      clos ++= newQs
+    }
+    clos
+  }
+
 }
 
 /** Nondeterministic streaming string transducer */
@@ -154,8 +167,8 @@ object NSST {
       aux(g, domain.toList)
     }
 
-    // Returns a set of function f s.t. domain ⊂ dom(f) ⊂ universe
-    // and f ∈ createFunctions(dom(f)).
+    /** Returns a set of function f s.t. domain ⊂ dom(f) ⊂ universe
+      * and f ∈ createFunctions(dom(f)). */
     def mapsWhoseDomainContains[X, A](
       createFunctions: Set[X] => Set[Map[X, A]],
       domain: Set[X],
@@ -212,8 +225,8 @@ object NSST {
            possibleKTM.map{ case (x, (_, _, m)) => x -> m }.withDefaultValue(Nil)
          )).map{ case (kt, m) => ((q1p, kt), m) }
        }
-     nested.flatten
-   } // End of nextStates
+      nested.flatten
+    } // End of nextStates
 
    val initialStates: Set[NQ] = {
      val kkList: List[Map[X, (Q2, Q2)]] = {
@@ -269,15 +282,9 @@ object NSST {
        .groupBy(_._1)
        .map{ case (k, v) => k -> v.map(_._2).toSet }
        .withDefaultValue(Set())
-   def transInv(qs: Set[NQ]): Set[NQ] =
-     qs.foldLeft(Set[NQ]()){ case (acc, q) => acc union inverse(q) }
-   var invNewOnes = newOutF.filter{ case (_, s) => s.nonEmpty }.keySet
-   var invReachables = invNewOnes
-   while (invNewOnes.nonEmpty) {
-     invNewOnes = transInv(invNewOnes) -- invReachables
-     invReachables ++= invNewOnes
-   }
-   newStates = invReachables
+   newStates = closure(
+     newOutF.filter{ case (_, s) => s.nonEmpty }.keySet,
+     inverse)
    newEdges =
      newEdges.flatMap{ case ((p, a), s) =>
        if (newStates contains p) {
@@ -544,7 +551,7 @@ object MSST {
         val m = assignFold(s, alpha)
         val assigned = beta.flatMap {
           case Cop1(y) => m(y)
-          case Cop2(c) => List(Cop2(Cop2(c)))
+          case Cop2(b) => List(Cop2(Cop2(b)))
         }
         erase1(assigned)
       }
