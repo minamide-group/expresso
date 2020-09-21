@@ -2,7 +2,7 @@ package com.github.kmn4.sst
 
 import org.scalatest.flatspec._
 
-class TestRandom extends AnyFlatSpec {
+object TestRandom {
   import Concepts._
   import scala.util.{Random => R}
   def nextAs[A](as: Seq[A], maxRepeat: Int): List[A] =
@@ -152,6 +152,10 @@ class TestRandom extends AnyFlatSpec {
       maxTransition
     )
   }
+}
+
+class TestRandom extends AnyFlatSpec {
+  import TestRandom._
   "Construction of NSST from NSST and NGSM" should "be done correctly" in {
     for (_ <- 0 until 100) {
       val nsst = randomNsstCustomized()

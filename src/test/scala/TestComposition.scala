@@ -1,8 +1,6 @@
 package com.github.kmn4.sst
 
 import org.scalatest.flatspec._
-import org.scalatest.concurrent.TimeLimits._
-import org.scalatest.time._
 import scala.math.max
 
 class TestComposition extends AnyFlatSpec {

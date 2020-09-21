@@ -74,9 +74,17 @@ class NSST[Q, A, B, X](
   import Concepts._
   implicit val monoid: Monoid[Update[X, B]] = variables
   val outF: Map[Q, Set[Cupstar[X, B]]] = partialF.withDefaultValue(Set())
+  val out: Set[B] = Set.from {
+    for ((_, s) <- edges;
+         (_, m) <- s;
+         (_, alpha) <- m;
+         b <- erase1(alpha))
+    yield b
+  }
+
   def trans(q: Q, a: A): Set[(Q, Update[X, B])] = edges.withDefaultValue(Set.empty)((q, a))
   def transduce(w: List[A]): Set[List[B]] =
-    Monoid.transition(q0, w, trans).flatMap{ case (q, m) => outputAt(q, m).toSet }
+    Monoid.transition(Set(q0), w, trans).flatMap{ case (q, m) => outputAt(q, m).toSet }
   def outputAt(q: Q, m: Update[X, B]): Set[List[B]] =
     outF(q).map{ flatMap1(_, m) }.map(erase1)
 
@@ -132,7 +140,7 @@ object NSST {
       }.toSet
       case Cop2(a) => nft.trans(q, a).map{ case (q, w) => (q, w.map(Cop2(_))) }
     }
-    Monoid.transition(q, w, transWithKT)
+    Monoid.transition(Set(q), w, transWithKT)
   }
 
   // Type of states of composed NSST without initial one.
@@ -369,6 +377,91 @@ object NSST {
     MSST.convertMsstToNsst(composeMSST(n1, n2))
   }
 
+  def countOf2[A, B](alpha: Cupstar[A, B]): Map[B, Int] =
+    erase1(alpha)
+      .groupBy(identity)
+      .map { case (b, l) => b -> l.length }
+      .withDefaultValue(0)
+  def countCharOfX[X, A](m: Update[X, A]): Map[X, Map[A, Int]] =
+    m.map { case (x, alpha) => x -> countOf2(alpha) }
+  def convertNsstToCountingNft[Q, A, B, X](nsst: NSST[Q, A, B, X]): MNFT[(Q, Set[X]), A, Map[B, Int]] = {
+    type NQ = (Q, Set[X])
+    type O = Map[B, Int]
+    // Returns a set of p' s.t. string containing p' updated by m will contain p.
+    def invert(m: Update[X, B], p: Set[X]): Set[Set[X]] = {
+      val varsOf: Map[X, Set[X]] = Map.from {
+        for ((x, xbs) <- m) yield x -> (erase2(xbs).toSet)
+      }
+      // Because m is copyless, x is unique for each y.
+      val inverse: Map[X, X] = Map.from {
+        for ((x, ys) <- varsOf; y <- ys)
+        yield y -> x
+      }
+      val must = for (y <- p if inverse.isDefinedAt(y)) yield inverse(y)
+      if (must.flatMap(varsOf(_)) != p) {
+        return Set.empty
+      }
+      val empties = varsOf.withFilter { case (x, xs) => xs.isEmpty }.map(_._1).toSet
+      empties.subsets()
+        .map(must ++ _)
+        .toSet
+    }
+    val out: List[B] = nsst.out.toList
+    implicit val monoid: Monoid[Map[B, Int]] = Monoid.vectorMonoid(out)
+    // Ψ_{Gamma}^m in paper
+    def nextStates(nq: NQ, a: A): Set[(NQ, O)] = {
+      val (q1, p1) = nq
+      Set.from {
+        for ((q2, m) <- nsst.trans(q1, a); p2 <- invert(m, p1))
+        yield {
+          val v = {
+            val countInM = countCharOfX(m)
+            // toList is necesasry because it is possible be that two varibles give the same vector.
+            Monoid.fold(p2.toList.map(countInM(_)))
+          }
+          ((q2, p2), v)
+        }
+      }
+    }
+    val initials = nsst.variables.subsets().map((nsst.q0, _)).toSet
+    var newStates: Set[NQ] = initials
+    var newEdges: Map[(NQ, A), Set[(NQ, O)]] = Map.empty
+    var stack: List[NQ] = newStates.toList
+    while (stack.nonEmpty) {
+      val q = stack.head
+      stack = stack.tail
+      for (a <- nsst.in) {
+        val edges = nextStates(q, a)
+        newEdges += (q, a) -> edges
+        val newOnes = edges.map(_._1) -- newStates
+        newStates ++= newOnes
+        stack = newOnes.toList ++ stack
+      }
+    }
+    val acceptF: Map[NQ, Set[O]] = Map.from {
+      for ((q, p) <- newStates)
+      yield (q, p) -> {
+        for (alpha <- nsst.outF(q) if erase2(alpha).toSet == p)
+        yield countOf2(alpha)
+      }
+    }
+    new MNFT[NQ, A, O](
+      newStates,
+      nsst.in,
+      newEdges,
+      initials,
+      acceptF
+    )
+  }
+
+  def parikhImage[Q, A, B, X](nsst: NSST[Q, A, B, X]): Semilinear[Map[B, Int]] = {
+    val mnft = convertNsstToCountingNft(nsst)
+    val regex = MNFT.outputRegex(mnft)
+    val s = Semilinear.fromRegex(regex)(Monoid.vectorMonoid(nsst.out)(Monoid.intAdditiveMonoid))
+    // Remove duplicate linear set
+    Semilinear(s.ls.toSet.toList)
+  }
+
   def apply(
     states: Iterable[Int],
     vars: Iterable[Char],
@@ -406,18 +499,16 @@ object NSST {
 class NFT[Q, A, B](
   val states: Set[Q],
   val in: Set[A],
-  val edges: NFT.Edges[Q, A, B],
+  val edges: Map[(Q, A), Set[(Q, List[B])]],
   val q0: Q,
   val finals: Set[Q]
 ) {
   def trans(q: Q, a: A): Set[(Q, List[B])] = edges.withDefaultValue(Set.empty)((q, a))
   def transduce(w: List[A]): Set[List[B]] =
-    Monoid.transition(q0, w, trans).filter{ case (q, _) => finals contains q }.map(_._2)
+    Monoid.transition(Set(q0), w, trans).filter{ case (q, _) => finals contains q }.map(_._2)
 }
 
 object NFT {
-  type Edges[Q, A, B] = Map[(Q, A), Set[(Q, List[B])]]
-
   def apply(
     states: Iterable[Int],
     edges: Iterable[(Int, Char, Int, String)],
@@ -438,6 +529,65 @@ object NFT {
   }
 }
 
+/** Monoid NFT */
+class MNFT[Q, A, M](
+  val states: Set[Q],
+  val in: Set[A],
+  partialEdges: Map[(Q, A), Set[(Q, M)]],
+  val initials: Set[Q],
+  partialF: Map[Q, Set[M]],
+  )(
+  implicit val monoid: Monoid[M]
+) {
+  val edges = partialEdges.withDefaultValue(Set.empty)
+  val acceptF = partialF.withDefaultValue(Set.empty)
+  def trans(q: Q, a: A): Set[(Q, M)] = edges((q, a))
+  def transduce(w: List[A]): Set[M] =
+    for ((q, m) <- Monoid.transition(initials, w, trans);
+         mf <- acceptF(q))
+    yield monoid.combine(m, mf)
+
+}
+
+object MNFT {
+  def outputRegex[Q, A, M](mnft: MNFT[Q, A, M]): RegExp[M] = {
+    type NQ = Cop[Q, Boolean] // true: initial state, false: final state
+    type E = Map[(NQ, NQ), RegExp[M]]
+    var edges: E = {
+      val graph = for (((q1, a), s) <- mnft.edges;
+                       (q2, m) <- s)
+                  yield ((Cop1(q1), Cop1(q2)), m)
+      val fromInitial = mnft.initials.map(q0 => (Cop2(true), Cop1(q0)) -> CharExp(mnft.monoid.unit))
+      def regexOf(l: Iterable[M]): RegExp[M] =
+        l.map(CharExp(_)).foldLeft[RegExp[M]](EmptyExp){ case (acc, e) => OrExp(acc, e) }
+      val toFinal: E = mnft.acceptF.withFilter{ case (_, s) => s.nonEmpty }
+        .map{ case (qf, s) => (Cop1(qf), Cop2(false)) -> regexOf(s) }
+      graph.toList
+        .groupBy(_._1)
+        .view
+        .mapValues(l => regexOf(l.map{ case (_, m) => m }))
+        .concat(fromInitial)
+        .concat(toFinal)
+        .toMap
+    }
+    val qs = mnft.states.map[NQ](Cop1(_))
+    var nqs = qs + Cop2(true) + Cop2(false)
+    for (q <- qs) {
+      for (p <- nqs; r <- nqs if p != q && r != q) {
+        val o1 = edges.get((p, r))
+        val o2 = for (pq <- edges.get((p, q));
+                      qq <- edges.get((q, q));
+                      qr <- edges.get((q, r)))
+                 yield CatExp(pq, CatExp(StarExp(qq), qr))
+        edges += (p, r) -> OrExp(o1.getOrElse(EmptyExp), o2.getOrElse(EmptyExp))
+      }
+      nqs -= q
+    }
+    assert(nqs == Set(true, false).map(Cop2(_)))
+    edges((Cop2(true), Cop2(false)))
+  }
+}
+
 /** Nondeterministic monoid SST */
 class MSST[Q, A, B, X, Y](
   val states: Set[Q],
@@ -455,7 +605,7 @@ class MSST[Q, A, B, X, Y](
   val outF = partialF.withDefaultValue(Set())
   def trans(q: Q, a: A): Set[(Q, Update[X, Update[Y, B]])] = edges.withDefaultValue(Set.empty)((q, a))
   def transduce(w: List[A]): Set[List[B]] =
-    Monoid.transition(q0, w, trans).flatMap{ case (q, m) => outputAt(q, m).toSet }
+    Monoid.transition(Set(q0), w, trans).flatMap{ case (q, m) => outputAt(q, m).toSet }
   def outputAt(q: Q, m: Update[X, Update[Y, B]]): Set[List[B]] =
     outF(q).map{ case (alpha, beta) =>
       val updateY = Monoid.fold(erase1(flatMap1(alpha, m(_))))
