@@ -557,7 +557,7 @@ object MNFT {
       val graph = for (((q1, a), s) <- mnft.edges;
                        (q2, m) <- s)
                   yield ((Cop1(q1), Cop1(q2)), m)
-      val fromInitial = mnft.initials.map(q0 => (Cop2(true), Cop1(q0)) -> CharExp(mnft.monoid.unit))
+      val fromInitial = mnft.initials.map(q0 => (Cop2(true), Cop1(q0)) -> EpsExp)
       def regexOf(l: Iterable[M]): RegExp[M] =
         l.map(CharExp(_)).foldLeft[RegExp[M]](EmptyExp){ case (acc, e) => OrExp(acc, e) }
       val toFinal: E = mnft.acceptF.withFilter{ case (_, s) => s.nonEmpty }
@@ -579,12 +579,12 @@ object MNFT {
                       qq <- edges.get((q, q));
                       qr <- edges.get((q, r)))
                  yield CatExp(pq, CatExp(StarExp(qq), qr))
-        edges += (p, r) -> OrExp(o1.getOrElse(EmptyExp), o2.getOrElse(EmptyExp))
+        edges += (p, r) -> OrExp(o1.getOrElse(EmptyExp), o2.getOrElse(EmptyExp)).optimized
       }
       nqs -= q
     }
     assert(nqs == Set(true, false).map(Cop2(_)))
-    edges((Cop2(true), Cop2(false)))
+    edges((Cop2(true), Cop2(false))).optimized
   }
 }
 
