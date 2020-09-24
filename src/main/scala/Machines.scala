@@ -109,6 +109,49 @@ class NSST[Q, A, B, X](
     q0,
     outF.filter { case (q, s) => s.nonEmpty }.keySet
   )
+
+  def isEmpty: Boolean = {
+    val reachables = closure(
+      Set(q0),
+      edges
+        .toList
+        .groupBy(_._1._1)
+        .view
+        .mapValues(_.flatMap{ case (_, s) => s.map(_._1)}.toSet)
+        .toMap
+        .withDefaultValue(Set.empty)
+    )
+    (reachables intersect partialF.filter{ case (_, s) => s.nonEmpty }.map(_._1).toSet).isEmpty
+  }
+
+  def renamed: NSST[Int, A, B, Int] = {
+    val stateMap = (states zip LazyList.from(0)).toMap
+    val varMap = (variables zip LazyList.from(0)).toMap
+    val newEdges =
+      edges
+        .map{ case ((q, a), s) => (stateMap(q), a) ->
+                 s.map { case (r, m) => {
+                          (
+                            stateMap(r),
+                            m.map { case (x, xb) => (varMap(x), xb.map(_.map1(varMap))) }
+                          )
+                        } }
+        }
+    val newF =
+      partialF
+        .map { case (q, s) => (
+                stateMap(q),
+                s.map { xb => xb.map(_.map1(varMap)) }
+              ) }
+    new NSST(
+      stateMap.map(_._2).toSet,
+      in,
+      varMap.map(_._2).toSet,
+      newEdges,
+      stateMap(q0),
+      newF
+    )
+  }
 }
 
 object NSST {
@@ -215,24 +258,29 @@ object NSST {
         }
         nsst.variables.map(x => x -> transitionByM1x(x)).toMap
       }
-     // Set of variables that kt of next state must include under m1.
-     def mustInclude(m1: Update[X, B]): Set[X] =
-       nsst.variables.filter(x => {
-                             val xs = erase2(m1(x)).toSet
-                             xs.nonEmpty && xs.subsetOf(kt.keySet)
-                           } )
+      // Set of variables that kt of next state must include under m1.
+      def mustInclude(m1: Update[X, B]): Set[X] =
+         nsst.variables.filter(x => {
+                               val xs = erase2(m1(x)).toSet
+                               xs.nonEmpty && xs.subsetOf(kt.keySet)
+                             } )
+      def empties(m1: Update[X, B]): Set[X] = nsst.variables.filter(x => erase2(m1(x)).toSet.isEmpty)
 
-     val nested =
-       for ((q1p, m1) <- nsst.trans(q1, a)) yield {
-         mapsWhoseDomainContainsAndValueIsIn(
-           transitionByM1(m1)(_),
-           mustInclude(m1),
-           nsst.variables
-         ).map(possibleKTM => (
-           possibleKTM.map{ case (x, (k, t, _)) => x -> (k, t) },
-           possibleKTM.map{ case (x, (_, _, m)) => x -> m }.withDefaultValue(Nil)
-         )).map{ case (kt, m) => ((q1p, kt), m) }
-       }
+      val nested =
+        for ((q1p, m1) <- nsst.trans(q1, a)) yield {
+          val must = mustInclude(m1)
+          // If `must` updated by m1 does not give domain of current kt,
+          // then one cannot transition by m1.
+          if (must.flatMap(x => erase2(m1(x))) != kt.keySet) return Set()
+          mapsWhoseDomainContainsAndValueIsIn(
+            transitionByM1(m1)(_),
+            must,
+            must ++ empties(m1)
+          ).map(possibleKTM => (
+                  possibleKTM.map{ case (x, (k, t, _)) => x -> (k, t) },
+                  possibleKTM.map{ case (x, (_, _, m)) => x -> m }.withDefaultValue(Nil)
+                )).map{ case (kt, m) => ((q1p, kt), m) }
+        }
       nested.flatten
     } // End of nextStates
 
@@ -372,9 +420,12 @@ object NSST {
 
   def composeNsstOfNssts[Q1, Q2, A, B, C, X, Y](n1: NSST[Q1, A, B, X], n2: NSST[Q2, B, C, Y]) = {
     if (!n1.isCopyless) {
-      throw new Exception("Tried to compose copyfull NSST with NSST.")
+      throw new Exception(s"Tried to compose NSST, but first NSST was copyfull: ${n1.edges}")
     }
-    MSST.convertMsstToNsst(composeMSST(n1, n2))
+    if (!n2.isCopyless) {
+      throw new Exception(s"Tried to compose NSST, but second NSST was copyfull: ${n2.edges}")
+    }
+    MSST.convertMsstToNsst(composeMSST(n1, n2)).renamed
   }
 
   def countOf2[A, B](alpha: Cupstar[A, B]): Map[B, Int] =
