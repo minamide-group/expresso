@@ -81,10 +81,10 @@ object Monoid {
 
 object Main extends App {
   val sst = new NSST[Int, Char, Char, Char](
-    states = Set(0),
-    in = Set('a', 'b'),
-    variables = Set('x', 'y'),
-    edges = Map(
+      Set(0),
+      Set('a', 'b'),
+      Set('x', 'y'),
+      Map(
       (0, 'a') -> Set((0, Map(
                          'x' -> List(Cop1('y'), Cop1('x')),
                          'y' -> List(Cop2('a'))
@@ -93,9 +93,9 @@ object Main extends App {
                          'x' -> List(Cop1('y'), Cop1('x')),
                          'y' -> List(Cop2('b'))
                        )))
-    ),
-    q0 = 0,
-    partialF = Map(0 -> Set(List(Cop2('a'), Cop1('x'), Cop2('b'), Cop1('y'))))
+      ),
+      0,
+      Map(0 -> Set(List(Cop2('a'), Cop1('x'), Cop2('b'), Cop1('y'))))
   )
   val nft = new NFT[Int, Char, Char](
     states = Set(0, 1),

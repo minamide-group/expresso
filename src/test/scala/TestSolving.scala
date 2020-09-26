@@ -127,6 +127,56 @@ class TestSolving extends AnyFlatSpec {
         y -> (List(Cop1(y)) ++ (if (y == x) w.map(Cop2(_)) else Nil))
       )
       .toMap
+  // Returns `alphabet` to `alphabet` NSST whose state set and variable set is {0, ..., n}.
+  // On each state i the NSST appends input character to variable i.
+  // It transitions to next state when it reads `None`, and output `0 None 1 None ... n None` on state n.
+  // So the NSST reads string of the form "w0 None w1 None ... w(n-1) None" and
+  // outputs "w0 None w1 None ... w(n-1) None None" (because it doesn't append any char to wn).
+  def solverNsstTemplate(n: Int, alphabet: Set[Char]): NSST[Int, Option[Char], Option[Char], Int] = {
+    type Q = Int
+    type X = Int
+    type A = Option[Char]
+    type B = Option[Char]
+    val states = Set.from(0 to n)
+    val xs = Set.from(0 to n)
+    val q0 = 0
+    val outF: Map[Q, Set[Concepts.Cupstar[X, B]]] =
+      Map(
+        n -> Set(xs.toList.sorted.foldRight[Concepts.Cupstar[X, B]](Nil) {
+          case (x, acc) => List(Cop1(x), Cop2(None)) ++ acc
+        })
+      )
+    val updates = Concepts.updateMonoid(xs)
+    type Edges = Iterable[((Q, A), Set[(Q, Concepts.Update[X, B])])]
+    val edges: Edges = {
+      val appendingEdges: Edges =
+        for (i <- states; a <- alphabet if i != n)
+        yield (i, Some(a)) -> Set((i, updates.unit + (i -> List(Cop1(i), Cop2(Some(a))))))
+      val toNextEdges: Edges =
+        for (i <- states; if i != n)
+        yield (i, None) -> Set((i+1, updates.unit))
+      appendingEdges ++ toNextEdges
+    }
+    new NSST(
+      states,
+      (alphabet.map[Option[Char]](Some(_))) + None,
+      xs,
+      edges.toMap,
+      q0,
+      outF
+    )
+  }
+  // Returns NSST whose states `q`s are embedded to Cop2(q).
+  def embedStates2[P, Q, A, B, X](n: NSST[Q, A, B, X]): NSST[Cop[P, Q], A, B, X] = {
+    new NSST(
+      n.states.map(Cop2(_)),
+      n.in,
+      n.variables,
+      n.edges.map { case ((q, a), s) => (Cop2(q), a) -> s.map{ case (r, m) => (Cop2(r), m) } },
+      Cop2(n.q0),
+      n.partialF.map { case (q, s) => Cop2(q) -> s }
+    )
+  }
   // Construct NSST which replaces `target` in `j`-th input string with `word`,
   // and output it as `i`-th string.
   def replaceAllNSST(
@@ -146,45 +196,27 @@ class TestSolving extends AnyFlatSpec {
     type B = Option[Char]
     type Update = Concepts.Update[X, B]
     val xs = Set.from(0 to i)
-    val monoid: Monoid[Update] = Concepts.updateMonoid(xs)
+    val updates: Monoid[Update] = Concepts.updateMonoid(xs)
+    val base: NSST[Q, A, B, X] = embedStates2(solverNsstTemplate(i, in))
     val dfa = postfixDFA(target, in)
-    val edges: Map[(Q, A), Set[(Q, Update)]] = {
-      val notFromJ: Map[(Q, A), Set[(Q, Update)]] = {
-        val states = (0 until i).withFilter(_ != j)
-        val loop: Map[(Q, A), Set[(Q, Update)]] = Map.from {
-          for (q <- states; a <- in)
-            yield (Cop2(q), Some(a)) -> Set(
-              (Cop2(q), appendWordTo(q, xs, List(Some(a))))
-            )
-        }
-        val toNext: Map[(Q, A), Set[(Q, Update)]] = Map.from {
-          for (q <- states)
-            yield (Cop2(q), None) -> {
-              val next = if (q == j - 1) Cop1(dfa.q0) else Cop2(q + 1)
-              Set((next, monoid.unit))
-            }
-        }
-        (loop ++ toNext).toMap
+    type Edges = Iterable[((Q, A), Set[(Q, Update)])]
+    val edges: Edges = {
+      val notFromJ: Edges = {
+        val baseEdges = base.edges.filter{ case ((q, _), _) => q != Cop2(j) }
+        // On state j-1, machine should transition to Cop1(q0) by reading None.
+        baseEdges.updated((Cop2(j-1), None), Set((Cop1(dfa.q0), updates.unit)))
       }
-      val jthComponent: Map[(Q, A), Set[(Q, Update)]] = Map.from {
+      val jthComponent: Edges = {
         val states = dfa.states -- dfa.finalStates
-        val toNext: Map[(Q, A), Set[(Q, Update)]] =
-          states
-            .map[((Q, A), Set[(Q, Update)])](q =>
-              (Cop1(q), None) ->
-                Set(
-                  (
-                    Cop2(j + 1),
-                    appendWordTo(
-                      i,
-                      xs,
-                      target.substring(0, q).toList.map(a => Some(a))
-                    )
-                  )
-                )
-            )
-            .toMap
-        val edgesFromDfa: Map[(Q, A), Set[(Q, Update)]] = Map.from {
+        // On each state q, DFA has prefix of target string.
+        // If translated SST reads None, it should append the stored string to variable i.
+        val toNext: Edges =
+          states.map(q => (Cop1(q), None) -> {
+                       val stored = target.substring(0, q)
+                       val appendStored = appendWordTo(i, xs, stored.toList.map(a => Some(a)))
+                       Set((Cop2(j + 1), appendStored))
+                     })
+        val edgesFromDfa: Edges = {
           for (q <- states; a <- in)
             yield (Cop1(q), Some(a)) -> Set {
               val t = dfa.transition((q, a))
@@ -201,7 +233,7 @@ class TestSolving extends AnyFlatSpec {
                     qStored.substring(0, qStored.length - t).toList.map(Some(_))
                   )
                 }
-              val m = monoid.combine(
+              val m = updates.combine(
                 appendWordTo(j, xs, List(Some(a))),
                 appendWordTo(
                   i,
@@ -227,21 +259,149 @@ class TestSolving extends AnyFlatSpec {
           case (x, acc) => List(Cop1(x), Cop2(None)) ++ acc
         })
       )
-    new NSST(
+    new NSST[Q, A, B, X](
       states,
       in.map(Some(_): Option[Char]) + None,
       xs,
-      edges,
+      edges.toMap,
       q0,
       outF
     ).renamed
   }
+  // Construct NSST which output concatenation of `j`-th and `k`-th input in this order.
+  def concatNSST(i: Int, j: Int, k: Int, alphabet: Set[Char]): NSST[Int, Option[Char], Option[Char], Int] = {
+    type Q = Int
+    type A = Option[Char]
+    type B = Option[Char]
+    trait X
+    trait Y extends X
+    case object J extends Y
+    case object K extends Y
+    case class Z(l: Int) extends X
+    // Almost same code as solverNsstTemplate, but here variable set has two addtional ones.
+    val states = Set.from(0 to i)
+    val xs: Set[X] = Set.from(0 to i).map(Z.apply) ++ Set(J, K)
+    val q0 = 0
+    val outF: Map[Q, Set[Concepts.Cupstar[X, B]]] =
+      Map(
+        i -> Set(List.from(0 to i).foldRight[Concepts.Cupstar[X, B]](Nil) {
+          case (x, acc) => List(Cop1(Z(x)), Cop2(None)) ++ acc
+        })
+      )
+    val updates = Concepts.updateMonoid(xs)
+    type Edges = Iterable[((Q, A), Set[(Q, Concepts.Update[X, B])])]
+    val edges: Edges = {
+      // On states j or k, append an char also to Cop2(J) or Cop2(K).
+      val appendingEdges: Edges =
+        for (q <- states; a <- alphabet if q != i)
+        yield (q, Some(a)) -> {
+          val m = updates.unit + (Z(q) -> List(Cop1(Z(q)), Cop2(Some(a)))) ++
+            (if (q == j) { Some((J -> List(Cop1(J), Cop2(Some(a))))) } else { None }) ++
+            (if (q == k) { Some((K -> List(Cop1(K), Cop2(Some(a))))) } else { None })
+          Set((q, m))
+        }
+      // On state i-1, assign concat of j' and k' into i, and clear them.
+      val toNextEdges: Edges =
+        for (q <- states; if q != i)
+        yield (q, None) -> {
+          val m = if (q == i-1) {
+            updates.unit +
+              (Z(i) -> List(Cop1(J), Cop1(K))) +
+              (J -> Nil) +
+              (K -> Nil)
+          } else {
+            updates.unit
+          }
+          Set((q+1, m))
+        }
+      appendingEdges ++ toNextEdges
+    }
+    new NSST[Q, A, B, X](
+      states,
+      alphabet.map[Option[Char]](Some.apply) + None,
+      xs,
+      edges.toMap,
+      q0,
+      outF
+    ).renamed
+  }
+  // Construct NSST which outputs exactly the same string as input,
+  // if it is consist of `n` strings and its `i`-th (starting from 0) one
+  // is in language represented by `re`.
+  def regexNSST(n: Int, i: Int, re: RegExp[Char], alphabet: Set[Char])
+      : NSST[Int, Option[Char], Option[Char], Int] = {
+    type DQ = Int
+    val dfa: DFA[DQ, Char] = new RegExp2NFA(re).construct().toDFA.minimized
+    type Q = Cop[DQ, Int]
+    type A = Option[Char]
+    type B = Option[Char]
+    type X = Int
+
+    val base: NSST[Q, A, B, X] = {
+      val states = Set.from(0 to n)
+      val xs = Set.from(0 until n)
+      val q0 = 0
+      val outF: Map[Int, Set[Concepts.Cupstar[X, B]]] =
+        Map(
+          n -> Set(xs.toList.sorted.foldRight[Concepts.Cupstar[X, B]](Nil) {
+            case (x, acc) => List(Cop1(x), Cop2(None)) ++ acc
+          })
+        )
+      val updates = Concepts.updateMonoid(xs)
+      type Edges = Iterable[((Int, A), Set[(Int, Concepts.Update[X, B])])]
+      val edges: Edges = {
+        val appendingEdges: Edges =
+          for (i <- states; a <- alphabet if i != n)
+          yield (i, Some(a)) -> Set((i, updates.unit + (i -> List(Cop1(i), Cop2(Some(a))))))
+        val toNextEdges: Edges =
+          for (i <- states; if i != n)
+          yield (i, None) -> Set((i+1, updates.unit))
+        appendingEdges ++ toNextEdges
+      }
+      embedStates2(
+        new NSST(
+          states,
+          (alphabet.map[Option[Char]](Some(_))) + None,
+          xs,
+          edges.toMap,
+          q0,
+          outF
+        )
+      )
+    }
+
+    type Update = Concepts.Update[X, B]
+    type Edge = ((Q, A), Set[(Q, Update)])
+    type Edges = Iterable[Edge]
+    // Replace state i with states of DFA.
+    val states = base.states - Cop2(i) ++ dfa.states.map(Cop1.apply)
+    val updates = Concepts.updateMonoid(base.variables)
+    val edges: Edges = {
+      base.edges +
+        ((Cop2(i-1), None) -> Set((Cop1(dfa.q0), updates.unit)): Edge) ++
+        dfa.finalStates.map[Edge](q => (Cop1(q), None) -> Set((Cop2(i+1), updates.unit))) ++
+        dfa.transition.map[Edge] { case ((q, a), r) => {
+                              val m = updates.unit + (i -> List(Cop1(i), Cop2(Some(a))))
+                              ((Cop1(q), Some(a)) -> Set((Cop1(r), m)))
+                            }
+        }
+    }
+    val q0 = if (i == 0) Cop1(dfa.q0) else Cop2(0)
+    new NSST[Q, A, B, X](
+      states,
+      base.in,
+      base.variables,
+      edges.toMap,
+      q0,
+      base.partialF
+    ).renamed
+  }
+  def toOptionList(s: String): List[Option[Char]] = s.toList.map(c => if (c == '#') None else Some(c))
   "Zhu's experiment case 2" should "be sat" in {
     val p = postfixDFA("aab", Set('a', 'b', 'c'))
     assert(p.accept("aaab".toList))
     assert(!p.accept("abab".toList))
     assert(!p.accept("ababaaba".toList))
-    def toOptionList(s: String): List[Option[Char]] = s.toList.map(c => if (c == '#') None else Some(c))
     val aab = replaceAllNSST("aab", "b", 1, 0, "ab".toSet)
     assert(aab.transduce(toOptionList("aaab#")) == Set(toOptionList("aaab#ab#")))
     assert(aab.transduce(toOptionList("aaaa#")) == Set(toOptionList("aaaa#aaaa#")))
@@ -287,9 +447,53 @@ class TestSolving extends AnyFlatSpec {
     assert(composed.transduce(toOptionList("<sc<sc>>#")) == Set(toOptionList("<sc<sc>>#<sc>#")))
   }
 
-  "Zhu's experiment case 3" should "be sat" in {
-    val in = "a<sc>".toSet
-    val sc20 = replaceAllNSST("<sc>", "a", 2, 0, in)
-    val sc31 = replaceAllNSST("<sc>", "a", 3, 1, in)
+  // "Zhu's experiment case 3" should "be sat" in {
+  //   val in = "a<sc>".toSet
+  //   val sc20 = replaceAllNSST("<sc>", "a", 2, 0, in)
+  //   val sc31 = replaceAllNSST("<sc>", "a", 3, 1, in)
+  //   val concat = concatNSST(2, 1, 0, Set('a', 'b'))
+  //   assert(concat.transduce(toOptionList("ab#ba#")) == Set(toOptionList("ab#ba#baab#")))
+  //   val concat23 = concatNSST(4, 2, 3, in)
+  //   val re: RegExp[Char] = "a<sc>a".foldLeft[RegExp[Char]](EpsExp){ case (acc, c) => CatExp(acc, CharExp(c)) }
+  //   val reSST = regexNSST(5, 4, re, in)
+  //   assert(reSST.transduce(toOptionList("####a<sc>a#")) == Set(toOptionList("####a<sc>a#")))
+  //   assert(reSST.transduce(toOptionList("####a<sc>#")) == Set())
+  //   val start = System.nanoTime()
+  //   // sc20 -> sc31 -> concat -> reSST
+  //   val s1 = NSST.composeNsstOfNssts(concat, reSST)
+  //   val s2 = NSST.composeNsstOfNssts(sc31, s1)
+  //   val s3 = NSST.composeNsstOfNssts(sc20, s2)
+  //   info(s"elapsed:\t${(System.nanoTime() - start) / 1000000} ms")
+  //   info(s"states:\t${s1.states.size}")
+  //   info(s"variables:\t${s1.variables.size}")
+  //   info(s"transition:\t${s1.edges.size}")
+  //   assert(!s3.isEmpty)
+  // }
+
+  "Zhu's experiment case 4" should "be unsat" in {
+    val in = Set('a', 'b')
+    def cat(n: Int) = concatNSST(n+1, n, n, in)
+    val re1 = {
+      val ab = CatExp(CharExp('a'), CharExp('b'))
+      regexNSST(2, 1, CatExp(ab, StarExp(ab)), in)
+    }
+    def re(k: Int) = {
+      val aa = CatExp(CharExp('a'), CharExp('a'))
+      regexNSST(k+1, k, CatExp(aa, StarExp(aa)), in)
+    }
+    def test(k: Int) = {
+      val start = System.nanoTime()
+      val composed =
+        (Seq(cat(0), re1) ++ (1 until k).map(re))
+          .foldRight(re(k))(NSST.composeNsstOfNssts)
+      assert(composed.isEmpty)
+      info(s"[k=$k]")
+      info(s"elapsed:\t${(System.nanoTime() - start) / 1000000} ms")
+      info(s"states:\t${composed.states.size}")
+      info(s"variables:\t${composed.variables.size}")
+      info(s"transition:\t${composed.edges.size}")
+    }
+    test(2)
+    test(3) // 3072 variables
   }
 }

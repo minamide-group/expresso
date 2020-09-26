@@ -7,8 +7,9 @@ object Concepts {
   type Cupstar[X, B] = List[Cop[X, B]]
   type Update[X, B] = Map[X, Cupstar[X, B]]
   implicit def updateMonoid[X, B](xs: Iterable[X]): Monoid[Update[X, B]] = new Monoid[Update[X, B]] {
-    def combine(m1: Update[X, B], m2: Update[X, B]): Update[X, B] =
-      for ((x, xbs) <- m2) yield (x -> flatMap1(xbs, m1(_)))
+    def combine(m1: Update[X, B], m2: Update[X, B]): Update[X, B] = Map.from {
+      for (x <- xs) yield (x -> flatMap1(m2(x), m1(_)))
+    }
     def unit: Update[X, B] = Map.from(xs.map(x => x -> List(Cop1(x))))
   }
   def flatMap1[A, B, C](abs: Cupstar[A, B], f: A => Cupstar[C, B]): Cupstar[C, B] =
@@ -66,12 +67,21 @@ class NSST[Q, A, B, X](
   val states: Set[Q],
   val in: Set[A],
   val variables: Set[X],
-  val edges: NSST.Edges[Q, A, X, B],
+  edgesArg: NSST.Edges[Q, A, X, B],
   val q0: Q,
   val partialF: Map[Q, Set[Concepts.Cupstar[X, B]]]
 ) {
   import NSST._
   import Concepts._
+
+  val edges: NSST.Edges[Q, A, X, B] = {
+    edgesArg
+      .view
+      .mapValues(s => s.filter{ case (q, _) => states contains q })
+      .filter{ case ((q, _), _) => states contains q }
+      .toMap
+  }
+
   implicit val monoid: Monoid[Update[X, B]] = variables
   val outF: Map[Q, Set[Cupstar[X, B]]] = partialF.withDefaultValue(Set())
   val out: Set[B] = Set.from {
@@ -963,4 +973,65 @@ class NFA[Q, A]
 
     new DFA(statesDFA, alpha, transitionDFA, q0DFA, finalStatesDFA)
   }
+}
+
+private class RegExp2NFA(re: RegExp[Char]) {
+  private var state = -1
+
+
+  private def freshState(): Int = {
+    state += 1
+    state
+  }
+
+
+  private def aux(re: RegExp[Char]): NFA[Int, Char] = re match {
+    case EpsExp =>
+      val q = freshState()
+      new NFA(Set(q), Set(), Map(), q, Set(q))
+    case EmptyExp =>
+      val q = freshState()
+      new NFA(Set(q), Set(), Map(), q, Set())
+    case CharExp(c) =>
+      val s = freshState()
+      val t = freshState()
+      new NFA(Set(s, t), Set(c), Map((s, Some(c)) -> Set(t)), s, Set(t))
+    case OrExp(e1, e2) =>
+      val n1 = aux(e1)
+      val n2 = aux(e2)
+      val s = freshState()
+      new NFA(
+        n1.states union n2.states union Set(s),
+        n1.alpha union n2.alpha,
+        n1.transition ++ n2.transition
+          ++ Map((s, None) -> Set(n1.q0, n2.q0)),
+        s,
+        n1.finalStates union n2.finalStates
+      )
+    case CatExp(e1, e2) =>
+      val n1 = aux(e1)
+      val n2 = aux(e2)
+      new NFA(
+        n1.states union n2.states,
+        n1.alpha union n2.alpha,
+        n1.transition ++ n2.transition
+          ++ n1.finalStates.map(q => ((q, None), n1.transition((q, None)) + n2.q0)).toMap,
+        n1.q0,
+        n2.finalStates
+      )
+    case StarExp(e) =>
+      val n = aux(e)
+      val s = freshState()
+      new NFA(
+        n.states + s,
+        n.alpha,
+        n.transition + ((s, None) -> Set(n.q0))
+          ++ n.finalStates.map(q => ((q, None), n.transition((q, None)) + s)).toMap,
+        s,
+        Set(n.q0)
+      )
+  }
+
+
+  def construct(): NFA[Int, Char] = aux(re)
 }
