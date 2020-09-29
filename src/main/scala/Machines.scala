@@ -10,6 +10,8 @@ object Concepts {
     def combine(m1: Update[X, B], m2: Update[X, B]): Update[X, B] = Map.from {
       for (x <- xs) yield (x -> flatMap1(m2(x), m1(_)))
     }
+    // Some codes assume that updates contain definition for all variables,
+    // so cannot use `Map.empty.withDefault(x => x -> List(Cop1(x)))` as `unit`.
     def unit: Update[X, B] = Map.from(xs.map(x => x -> List(Cop1(x))))
   }
   def flatMap1[A, B, C](abs: Cupstar[A, B], f: A => Cupstar[C, B]): Cupstar[C, B] =
@@ -162,6 +164,8 @@ class NSST[Q, A, B, X](
       newF
     )
   }
+
+  def presburgerFormula = NSST.parikhImagePresburger(this)
 }
 
 object NSST {
@@ -262,8 +266,7 @@ object NSST {
           : Map[X, Set[(Q2, Q2, Cupstar[X, C])]] = {
         def transitionByM1x(x: X): Set[(Q2, Q2, Cupstar[X, C])] = {
           val transWithKT = transitionWith(nft, kt) _
-          for (p <- nft.states;
-               (q, m) <- transWithKT(p, m1(x)))
+          for (p <- nft.states; (q, m) <- transWithKT(p, m1(x)))
             yield (p, q, m)
         }
         nsst.variables.map(x => x -> transitionByM1x(x)).toMap
@@ -276,7 +279,7 @@ object NSST {
                              } )
       def empties(m1: Update[X, B]): Set[X] = nsst.variables.filter(x => erase2(m1(x)).toSet.isEmpty)
 
-      val nested =
+      Set.from {
         for ((q1p, m1) <- nsst.trans(q1, a)) yield {
           val must = mustInclude(m1)
           // If `must` updated by m1 does not give domain of current kt,
@@ -291,7 +294,7 @@ object NSST {
                   possibleKTM.map{ case (x, (_, _, m)) => x -> m }.withDefaultValue(Nil)
                 )).map{ case (kt, m) => ((q1p, kt), m) }
         }
-      nested.flatten
+      }.flatten
     } // End of nextStates
 
    val initialStates: Set[NQ] = {
@@ -450,9 +453,11 @@ object NSST {
     type O = Map[B, Int]
     // Returns a set of p' s.t. string containing p' updated by m will contain p.
     def invert(m: Update[X, B], p: Set[X]): Set[Set[X]] = {
+      // Map from x to a set of variables in m(x).
       val varsOf: Map[X, Set[X]] = Map.from {
         for ((x, xbs) <- m) yield x -> (erase2(xbs).toSet)
       }
+      // Map from y to x s.t. m(x) contains y.
       // Because m is copyless, x is unique for each y.
       val inverse: Map[X, X] = Map.from {
         for ((x, ys) <- varsOf; y <- ys)
@@ -523,6 +528,28 @@ object NSST {
     Semilinear(s.ls.toSet.toList)
   }
 
+  def parikhImagePresburger[Q, A, B, X](n: NSST[Q, A, B, X]) = {
+    import Parikh._
+    val formula = Parikh.countingMnftToPresburgerFormula(NSST.convertNsstToCountingNft(n))
+    type E = (Int, Image[B], Int)
+    type X = EnftVar[Int, B, E]
+    class Renamer() {
+      var i = 0
+      private def newVar() = {
+        i += 1
+        i
+      }
+      var eMap: Map[E, String] = Map.empty
+      var qMap: Map[Int, String] = Map.empty
+      def renamer(x: X): String = x match {
+        case BNum(b) => b.toString()
+        case ENum(e) => eMap.getOrElse(e, { val s = s"x${newVar()}"; eMap += e -> s; s })
+        case Dist(q) => qMap.getOrElse(q, { val s = s"x${newVar()}"; qMap += q -> s; s })
+      }
+    }
+    Formula.renameVars(formula, new Renamer().renamer _)
+  }
+
   def apply(
     states: Iterable[Int],
     vars: Iterable[Char],
@@ -591,49 +618,95 @@ object NFT {
 }
 
 /** Monoid NFT */
-class MNFT[Q, A, M](
+class MNFT[Q, A, M: Monoid](
   val states: Set[Q],
   val in: Set[A],
   partialEdges: Map[(Q, A), Set[(Q, M)]],
   val initials: Set[Q],
   partialF: Map[Q, Set[M]],
-  )(
-  implicit val monoid: Monoid[M]
-) {
+  ) {
   val edges = partialEdges.withDefaultValue(Set.empty)
   val acceptF = partialF.withDefaultValue(Set.empty)
   def trans(q: Q, a: A): Set[(Q, M)] = edges((q, a))
   def transduce(w: List[A]): Set[M] =
     for ((q, m) <- Monoid.transition(initials, w, trans);
          mf <- acceptF(q))
-    yield monoid.combine(m, mf)
+    yield implicitly[Monoid[M]].combine(m, mf)
 
+  def toENFT: ENFT[Int, A, M] = {
+    trait NQ
+    case class OfQ(q: Q) extends NQ
+    case object Init extends NQ // New initial state
+    case object Fin extends NQ // New final state
+    val newStates = states.map[NQ](OfQ.apply) + Init + Fin
+    type Edge = ((NQ, Option[A]), Set[(NQ, M)])
+    val newEdges: Iterable[Edge] = {
+      val fromInit: Edge =
+        (Init, None) -> initials.map(q => (OfQ(q), implicitly[Monoid[M]].unit)).toSet
+      val toFinal: Iterable[Edge] = {
+        for (q <- acceptF.keySet)
+        yield (OfQ(q), None) -> acceptF(q).map((Fin, _)).toSet
+      }
+      edges
+        .map[Edge]{ case ((q, a), s) => ((OfQ(q), Some(a)), s.map{ case (r, m) => (OfQ(r), m) }) } ++
+        toFinal ++
+        Iterable(fromInit)
+    }
+    new ENFT[NQ, A, M](
+      newStates,
+      in,
+      newEdges.toMap,
+      Init,
+      Fin
+    ).renamed
+  }
+
+  def unifyInitAndFinal = toENFT
+}
+
+/** Monoid NFT with epsilon transition.
+  * Inital state and final state of this class Must be singleton.
+  */
+class ENFT[Q, A, M: Monoid](
+  val states: Set[Q],
+  val in: Set[A],
+  partialEdges: Map[(Q, Option[A]), Set[(Q, M)]],
+  val initial: Q,
+  val finalState: Q
+) {
+  val edges = partialEdges.withDefaultValue(Set.empty)
+  def renamed: ENFT[Int, A, M] = {
+    val stateMap = (states zip LazyList.from(0)).toMap
+    val newEdges = for (((q, a), s) <- partialEdges)
+                   yield (stateMap(q), a) -> s.map{ case (q, m) => (stateMap(q), m) }
+    new ENFT(
+      stateMap.map(_._2).toSet,
+      in,
+      newEdges,
+      stateMap(initial),
+      stateMap(finalState)
+    )
+  }
 }
 
 object MNFT {
   def outputRegex[Q, A, M](mnft: MNFT[Q, A, M]): RegExp[M] = {
-    type NQ = Cop[Q, Boolean] // true: initial state, false: final state
+    type NQ = Int
+    val unified = mnft.unifyInitAndFinal
     type E = Map[(NQ, NQ), RegExp[M]]
     var edges: E = {
-      val graph = for (((q1, a), s) <- mnft.edges;
-                       (q2, m) <- s)
-                  yield ((Cop1(q1), Cop1(q2)), m)
-      val fromInitial = mnft.initials.map(q0 => (Cop2(true), Cop1(q0)) -> EpsExp)
+      val graph = for (((q1, a), s) <- unified.edges; (q2, m) <- s) yield ((q1, q2), m)
       def regexOf(l: Iterable[M]): RegExp[M] =
         l.map(CharExp(_)).foldLeft[RegExp[M]](EmptyExp){ case (acc, e) => OrExp(acc, e) }
-      val toFinal: E = mnft.acceptF.withFilter{ case (_, s) => s.nonEmpty }
-        .map{ case (qf, s) => (Cop1(qf), Cop2(false)) -> regexOf(s) }
       graph.toList
         .groupBy(_._1)
         .view
         .mapValues(l => regexOf(l.map{ case (_, m) => m }))
-        .concat(fromInitial)
-        .concat(toFinal)
         .toMap
     }
-    val qs = mnft.states.map[NQ](Cop1(_))
-    var nqs = qs + Cop2(true) + Cop2(false)
-    for (q <- qs) {
+    var nqs = unified.states
+    // States elimination
+    for (q <- nqs -- Set(unified.initial, unified.finalState)) {
       for (p <- nqs; r <- nqs if p != q && r != q) {
         val o1 = edges.get((p, r))
         val o2 = for (pq <- edges.get((p, q));
@@ -645,7 +718,7 @@ object MNFT {
       nqs -= q
     }
     assert(nqs == Set(true, false).map(Cop2(_)))
-    edges((Cop2(true), Cop2(false))).optimized
+    edges((unified.initial, unified.finalState)).optimized
   }
 }
 

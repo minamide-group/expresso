@@ -2,7 +2,7 @@ package com.github.kmn4.sst
 
 import org.scalatest.flatspec._
 
-class TestParikh extends AnyFlatSpec {
+class TestParikhSemilinear extends AnyFlatSpec {
   "NSST.countCharOfX" should "be correct" in {
     def updateFrom(s: String): Concepts.Update[Char, Char] =
       s.split(',').map(s => {

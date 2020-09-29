@@ -86,3 +86,170 @@ object Semilinear {
     s"&${s.ls.map(Linear.toLaTeX).mkString("\\\\\\cup&")}"
 
 }
+
+object Parikh {
+  /** Types and constructers for Presburger formula */
+  sealed trait Formula[X] {
+    def smtlib: String = Formula.formulaToSMTLIB(this)
+  }
+  sealed trait Term[X]
+  case class Const[X](i: Int) extends Term[X]
+  case class Var[X](x: X) extends Term[X]
+  case class Add[X](t1: Term[X], t2: Term[X]) extends Term[X]
+  case class Sub[X](t1: Term[X], t2: Term[X]) extends Term[X]
+  case class Mult[X](c: Const[X], t: Term[X]) extends Term[X]
+  case class Top[X]() extends Formula[X]
+  case class Bot[X]() extends Formula[X]
+  case class Eq[X](t1: Term[X], t2: Term[X]) extends Formula[X]
+  case class Lt[X](t1: Term[X], t2: Term[X]) extends Formula[X]
+  case class Le[X](t1: Term[X], t2: Term[X]) extends Formula[X]
+  case class Gt[X](t1: Term[X], t2: Term[X]) extends Formula[X]
+  case class Ge[X](t1: Term[X], t2: Term[X]) extends Formula[X]
+  case class Conj[X](f1: Formula[X], f2: Formula[X]) extends Formula[X]
+  case class Disj[X](f1: Formula[X], f2: Formula[X]) extends Formula[X]
+  case class Exists[X](v: Var[X], f: Formula[X]) extends Formula[X]
+
+  object Term {
+    def renameVars[X, Y](t: Term[X], renamer: X => Y): Term[Y] = {
+      def aux(t: Term[X]): Term[Y] = t match {
+        case Const(i) => Const(i)
+        case Var(x) => Var(renamer(x))
+        case Add(t1, t2) => Add(aux(t1), aux(t2))
+        case Sub(t1, t2) => Sub(aux(t1), aux(t2))
+        case Mult(Const(i), t) => Mult(Const(i), aux(t))
+      }
+      aux(t)
+    }
+    def termToSMTLIB[X](t: Term[X]): String = t match {
+      case Const(i) => i.toString()
+      case Var(x) => x.toString()
+      case Add(t1, t2) => s"(+ ${termToSMTLIB(t1)} ${termToSMTLIB(t2)})"
+      case Sub(t1, t2) => s"(- ${termToSMTLIB(t1)} ${termToSMTLIB(t2)})"
+      case Mult(t1, t2) => s"(* ${termToSMTLIB(t1)} ${termToSMTLIB(t2)})"
+    }
+  }
+
+  object Formula {
+    def renameVars[X, Y](f: Formula[X], renamer: X => Y): Formula[Y] = {
+      val tm: Term[X] => Term[Y] = Term.renameVars(_, renamer)
+      def aux(f: Formula[X]): Formula[Y] = f match {
+        case Top() => Top()
+        case Bot() => Bot()
+        case Eq(t1, t2) => Eq(tm(t1), tm(t2))
+        case Lt(t1, t2) => Lt(tm(t1), tm(t2))
+        case Le(t1, t2) => Le(tm(t1), tm(t2))
+        case Gt(t1, t2) => Gt(tm(t1), tm(t2))
+        case Ge(t1, t2) => Ge(tm(t1), tm(t2))
+        case Conj(f1, f2) => Conj(aux(f1), aux(f2))
+        case Disj(f1, f2) => Disj(aux(f1), aux(f2))
+        case Exists(Var(x), f) => Exists(Var(renamer(x)), aux(f))
+      }
+      aux(f)
+    }
+    def formulaToSMTLIB[X](f: Formula[X]): String = f match {
+      case Top() => "(= 0 0)"
+      case Bot() => "(= 0 1)"
+      case Eq(t1, t2) => s"(= ${Term.termToSMTLIB(t1)} ${Term.termToSMTLIB(t2)})"
+      case Lt(t1, t2) => s"(< ${Term.termToSMTLIB(t1)} ${Term.termToSMTLIB(t2)})"
+      case Le(t1, t2) => s"(<= ${Term.termToSMTLIB(t1)} ${Term.termToSMTLIB(t2)})"
+      case Gt(t1, t2) => s"(> ${Term.termToSMTLIB(t1)} ${Term.termToSMTLIB(t2)})"
+      case Ge(t1, t2) => s"(>= ${Term.termToSMTLIB(t1)} ${Term.termToSMTLIB(t2)})"
+      case Conj(f1, f2) => s"(and ${formulaToSMTLIB(f1)} ${formulaToSMTLIB(f2)})"
+      case Disj(f1, f2) => s"(or ${formulaToSMTLIB(f1)} ${formulaToSMTLIB(f2)})"
+      case Exists(Var(x), f) => s"(exists ((${x.toString()} Int)) ${formulaToSMTLIB(f)})"
+    }
+  }
+
+  type Image[A] = Map[A, Int]
+  sealed trait EnftVar[Q, B, E]
+  case class BNum[Q, B, E](b: B) extends EnftVar[Q, B, E]
+  case class ENum[Q, B, E](e: E) extends EnftVar[Q, B,E]
+  case class Dist[Q, B, E](q: Q) extends EnftVar[Q, B,E]
+  // case class IsInit[Q, B, E](q: Q) extends EnftVar[Q, B,E]
+  // case class IsFin[Q, B, E](q: Q) extends EnftVar[Q, B,E]
+  def countingEnftToPresburgerFormula[Q, A, B](
+    enft: ENFT[Q, A, Image[B]]
+  ): Formula[EnftVar[Q, B, (Q, Image[B], Q)]] = {
+    type Edge = (Q, Image[B], Q)
+    type X = EnftVar[Q, B, Edge]
+    val states = enft.states.toSeq
+    val edges: Seq[Edge] = List.from {
+      for (((q, a), s) <- enft.edges; (r, v) <- s)
+      yield (q, v, r)
+    }
+    val edgesFrom: Map[Q, Seq[Edge]] = edges.groupBy(_._1).withDefaultValue(Seq.empty)
+    val edgesTo: Map[Q, Seq[Edge]] = edges.groupBy(_._3).withDefaultValue(Seq.empty)
+    val input: Map[Q, Term[X]] = states.map(q => q ->
+      Add[X](
+        edgesTo(q).foldRight[Term[X]](Const(0)){ case (e, acc) => Add(acc, Var(ENum(e))) },
+        if (q == enft.initial) Const(1) else Const(0)
+      )
+    ).toMap
+    val output: Map[Q, Term[X]] = states.map(q => q ->
+      Add[X](
+        edgesFrom(q).foldRight[Term[X]](Const(0)){ case (e, acc) => Add(acc, Var(ENum(e))) },
+        if (q == enft.finalState) Const(1) else Const(0)
+      )
+    ).toMap
+    val euler: Formula[X] = {
+      val clauses = states.map(q => Eq(Sub(input(q), output(q)), Const(0)))
+      // `caluses` cannot be empty bacause MNFT has at least one state.
+      clauses.reduce[Formula[X]](Conj.apply)
+    }
+    val connectivity: Formula[X] = {
+      val clauses =
+        states.map(q => {
+                     val unreachable = Conj[X](
+                       Eq(Var(Dist(q)), Const(-1)),
+                       Eq(output(q), Const(0))
+                     )
+                     val reachable = {
+                       val isInit:  Formula[X] =
+                         if (q == enft.initial) Eq(Var(Dist(q)), Const(0))
+                         else Bot()
+                       val reachedFromSomewhere = edgesTo(q).map(
+                         e => {
+                           val (p, v, _) = e
+                           List[Formula[X]](
+                             Eq(Var(Dist(q)), Add(Var(Dist(p)), Const(1))),
+                             Gt(Var(ENum(e)), Const(0)),
+                             Ge(Var(Dist(p)), Const(0))
+                           ).reduce[Formula[X]](Conj.apply)
+                         }
+                       )
+                       reachedFromSomewhere.fold(isInit)(Disj.apply)
+                     }
+                     Disj(unreachable, reachable)
+                   })
+      clauses.reduce[Formula[X]](Conj.apply)
+    }
+    val bs = edges.foldLeft[Set[B]](Set.empty){ case (acc, (_, v, _)) => acc union v.keySet }
+    val parikh: Formula[X] = {
+      val clauses = bs.map[Formula[X]](b =>
+        {
+          val sum: Term[X] =
+            edges
+              .map[Term[X]]{ case (q, v, r) => Mult(Const(v.getOrElse(b, 0)), Var(ENum((q, v, r)))) }
+              .foldRight[Term[X]](Const(0))(Add.apply)
+          Eq(Var(BNum(b)), sum)
+        }
+      )
+      clauses.fold[Formula[X]](Top())(Conj.apply)
+    }
+    val boundedVars: Seq[X] = states.map[X](q => Dist(q)) ++ edges.map(e => ENum(e))
+    val vars: Seq[X] = boundedVars ++ bs.map(BNum.apply)
+    val positive: Formula[X] =
+      vars.map[Formula[X]] {
+        case BNum(b) => Ge(Var(BNum(b)), Const(0))
+        case ENum(e) => Ge(Var(ENum(e)), Const(0))
+        case Dist(q) => Ge(Var(Dist(q)), Const(-1))
+      }.fold(Top())(Conj.apply)
+    val conj: Formula[X] = List(euler, connectivity, parikh, positive).reduce[Formula[X]](Conj.apply)
+    boundedVars.map(Var.apply).foldRight(conj)(Exists.apply)
+  }
+  def countingMnftToPresburgerFormula[Q, A, B](
+    mnft: MNFT[Q, A, Image[B]]
+  ): Formula[EnftVar[Int, B, (Int, Image[B], Int)]] = {
+    countingEnftToPresburgerFormula(mnft.unifyInitAndFinal)
+  }
+}
