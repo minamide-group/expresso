@@ -1,5 +1,7 @@
 package com.github.kmn4.sst
 
+import scala.collection.immutable.Queue
+
 /**
   * Types and functions relatively independent of concrete machines.
   */
@@ -62,6 +64,27 @@ object Concepts {
     clos
   }
 
+  /** Breadth-first search for an input by which given system can transition to final state. */
+  def transitionSystemBFS[Q, A](
+    states: Set[Q],
+    in: Iterable[A],
+    trans: (Q, A) => Set[Q],
+    q0: Q,
+    finals: Set[Q]
+  ): List[A] = {
+    var visited: Set[Q] = Set.empty
+    var toVisit: Queue[(Q, List[A])] = Queue((q0, Nil))
+    while (toVisit.nonEmpty) {
+      val (q, as) = toVisit.head
+      toVisit = toVisit.tail
+      if (finals contains q) return as.reverse
+      val fromQ = in.flatMap(a => trans(q, a).map((_, a :: as))).toSet
+      val notVisited = fromQ.filterNot(visited contains _._1)
+      visited ++= notVisited.map(_._1)
+      toVisit = toVisit.appendedAll(notVisited)
+    }
+    throw new Exception("Given system is empty.")
+  }
 }
 
 /** Nondeterministic streaming string transducer */
@@ -165,7 +188,23 @@ class NSST[Q, A, B, X](
     )
   }
 
-  def presburgerFormula = NSST.parikhImagePresburger(this)
+  def presburgerFormula: Parikh.Formula[String] = NSST.parikhImagePresburger(this)
+
+  /** Returns an input string that give some output.
+    * If this NSST is empty, then exception will be thrown.
+    */
+  def takeInput: List[A] = {
+    transitionSystemBFS[Q, A](
+      states,
+      in,
+      {
+        val m = edges.view.mapValues(_.map(_._1)).toMap.withDefaultValue(Set.empty)
+        (q, a) => m((q, a))
+      },
+      q0,
+      outF.filter{ case (_, s) => s.nonEmpty }.keySet
+    )
+  }
 }
 
 object NSST {

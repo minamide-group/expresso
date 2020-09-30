@@ -86,6 +86,8 @@ class TestSolving extends AnyFlatSpec {
     info(s"variables:\t${t2.variables.size}")
     info(s"transition:\t${t2.edges.size}")
     assert(t2.transduce("aba#".toList) == Set("aba#bbb#abbba#".toList))
+    info(s"witness: ${t2.takeInput}")
+    info(s"output: ${t2.transduce(t2.takeInput)}")
   }
 
   // Construct DFA which accepts strings whose postfix is target.
@@ -378,6 +380,7 @@ class TestSolving extends AnyFlatSpec {
     ).renamed
   }
   def toOptionList(s: String): List[Option[Char]] = s.toList.map(c => if (c == '#') None else Some(c))
+  def fromOptionList(l: List[Option[Char]]): String = l.map(_.getOrElse('#')).mkString
   "Zhu's experiment case 2" should "be sat" in {
     val p = postfixDFA("aab", Set('a', 'b', 'c'))
     assert(p.accept("aaab".toList))
@@ -426,6 +429,7 @@ class TestSolving extends AnyFlatSpec {
     info(s"transition:\t${composed.edges.size}")
     assert(!composed.isEmpty)
     assert(composed.transduce(toOptionList("<sc<sc>>#")) == Set(toOptionList("<sc<sc>>#<sc>#")))
+    info(s"witness: ${fromOptionList(composed.takeInput)}")
   }
 
   def compositionRight[Q, A, X](l: Seq[NSST[Q, A, A, X]]): NSST[Int, A, A, Int] = {
@@ -460,31 +464,46 @@ class TestSolving extends AnyFlatSpec {
   //   assert(!composed.isEmpty)
   // }
 
-  "Zhu's experiment case 5" should "be unsat" in {
-    val in = Set('a', 'b')
-    def cat(n: Int) = concatNSST(n+1, n, n, in)
-    val re1 = {
-      val ab = CatExp(CharExp('a'), CharExp('b'))
-      regexNSST(2, 1, CatExp(ab, StarExp(ab)), in)
-    }
-    def re(k: Int) = {
-      val aa = CatExp(CharExp('a'), CharExp('a'))
-      regexNSST(k+1, k, CatExp(aa, StarExp(aa)), in)
-    }
-    def test(k: Int) = {
-      val start = System.nanoTime()
-      val composed = compositionRight((Seq(cat(0), re1) ++ (1 until k).map(cat) ++ Seq(re(k))))
-      assert(composed.isEmpty)
-      info(s"[k=$k]")
-      info(s"elapsed:\t${(System.nanoTime() - start) / 1000000} ms")
-      info(s"states:\t${composed.states.size}")
-      info(s"variables:\t${composed.variables.size}")
-      info(s"transition:\t${composed.edges.size}")
-    }
-    // testTransduce(cat(1), "a#b#", "a#b#bb#")
-    // testTransduce(re1, "a#ab#", "a#ab#")
-    // testTransduce(re1, "a##")
-    test(2)
-    test(3)
+  // "Zhu's experiment case 5" should "be unsat" in {
+  //   val in = Set('a', 'b')
+  //   def cat(n: Int) = concatNSST(n+1, n, n, in)
+  //   val re1 = {
+  //     val ab = CatExp(CharExp('a'), CharExp('b'))
+  //     regexNSST(2, 1, CatExp(ab, StarExp(ab)), in)
+  //   }
+  //   def re(k: Int) = {
+  //     val aa = CatExp(CharExp('a'), CharExp('a'))
+  //     regexNSST(k+1, k, CatExp(aa, StarExp(aa)), in)
+  //   }
+  //   def test(k: Int) = {
+  //     val start = System.nanoTime()
+  //     val composed = compositionRight((Seq(cat(0), re1) ++ (1 until k).map(cat) ++ Seq(re(k))))
+  //     assert(composed.isEmpty)
+  //     info(s"[k=$k]")
+  //     info(s"elapsed:\t${(System.nanoTime() - start) / 1000000} ms")
+  //     info(s"states:\t${composed.states.size}")
+  //     info(s"variables:\t${composed.variables.size}")
+  //     info(s"transition:\t${composed.edges.size}")
+  //   }
+  //   // testTransduce(cat(1), "a#b#", "a#b#bb#")
+  //   // testTransduce(re1, "a#ab#", "a#ab#")
+  //   // testTransduce(re1, "a##")
+  //   test(2)
+  //   test(3)
+  // }
+
+  "Variant of Zhu's benchmark int3" should "be sat" in {
+    val alpha = "abc".toSet
+    val s1 = replaceAllNSST("ab", "c", 1, 0, alpha)
+    val s2 = replaceAllNSST("ac", "aaa", 2, 1, alpha)
+    val parikh = parikhNSST(3, alpha)
+    val composed = NSST.composeNsstOfNssts(s1, s2)
+    val parikhComposed =
+      NSST.composeNsstOfNssts(
+        s1,
+        NSST.composeNsstOfNssts(s2, parikh)
+      )
+    assert(!composed.isEmpty)
+    info(parikhComposed.presburgerFormula.smtlib)
   }
 }

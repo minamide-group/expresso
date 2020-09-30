@@ -35,6 +35,14 @@ class TestParikhPresburger extends AnyFlatSpec {
       List((0, "X"))
     )
     info(s"doublesSingle: ${doublesSingle.presburgerFormula.smtlib}")
+    val append6or10 = NSST(
+      Set(0),
+      Set('X'),
+      List((0, 'a', List((0, List("X:Xaaaaaa")), (0, List("X:Xaaaaaaaaaa"))))),
+      0,
+      List((0, "X"))
+    )
+    info(s"append6or10: ${append6or10.presburgerFormula.smtlib}")
   }
 
   "Calculating Parikh image of randomly generated NSST" should "be done in reasonable time" in {
@@ -77,15 +85,16 @@ class TestParikhPresburger extends AnyFlatSpec {
     info(s"NSST states: ${maxLenNSST.states.size}\tedges: ${maxLenNSST.edges.size}")
     info(s"elapsed ${maxLenElapsed / 1000000} ms")
     info(s"length: ${maxLen}")
-    val f = new java.io.File("/home/kamasaki/Documents/programming-z3/testParikh.smt2")
-    val w = new java.io.PrintWriter(f)
-    w.write("(declare-const a Int)\n")
-    w.write("(declare-const b Int)\n")
-    w.write("(assert ")
-    w.write(maxLenNSST.presburgerFormula.smtlib)
-    w.write(")\n")
-    w.write("(check-sat)\n")
-    w.write("(get-model)\n")
-    w.close()
+    // val path = ""
+    // val f = new java.io.File(path)
+    // val w = new java.io.PrintWriter(f)
+    // w.write("(declare-const a Int)\n")
+    // w.write("(declare-const b Int)\n")
+    // w.write("(assert ")
+    // w.write(maxLenNSST.presburgerFormula.smtlib)
+    // w.write(")\n")
+    // w.write("(check-sat)\n")
+    // w.write("(get-model)\n")
+    // w.close()
   }
 }
