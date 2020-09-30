@@ -95,7 +95,7 @@ object Parikh {
   sealed trait Term[X]
   case class Const[X](i: Int) extends Term[X]
   case class Var[X](x: X) extends Term[X]
-  case class Add[X](t1: Term[X], t2: Term[X]) extends Term[X]
+  case class Add[X](ts: Seq[Term[X]]) extends Term[X]
   case class Sub[X](t1: Term[X], t2: Term[X]) extends Term[X]
   case class Mult[X](c: Const[X], t: Term[X]) extends Term[X]
   case class Top[X]() extends Formula[X]
@@ -105,16 +105,16 @@ object Parikh {
   case class Le[X](t1: Term[X], t2: Term[X]) extends Formula[X]
   case class Gt[X](t1: Term[X], t2: Term[X]) extends Formula[X]
   case class Ge[X](t1: Term[X], t2: Term[X]) extends Formula[X]
-  case class Conj[X](f1: Formula[X], f2: Formula[X]) extends Formula[X]
-  case class Disj[X](f1: Formula[X], f2: Formula[X]) extends Formula[X]
-  case class Exists[X](v: Var[X], f: Formula[X]) extends Formula[X]
+  case class Conj[X](fs: Seq[Formula[X]]) extends Formula[X]
+  case class Disj[X](fs: Seq[Formula[X]]) extends Formula[X]
+  case class Exists[X](vs: Seq[Var[X]], f: Formula[X]) extends Formula[X]
 
   object Term {
     def renameVars[X, Y](t: Term[X], renamer: X => Y): Term[Y] = {
       def aux(t: Term[X]): Term[Y] = t match {
         case Const(i) => Const(i)
         case Var(x) => Var(renamer(x))
-        case Add(t1, t2) => Add(aux(t1), aux(t2))
+        case Add(ts) => Add(ts.map(aux))
         case Sub(t1, t2) => Sub(aux(t1), aux(t2))
         case Mult(Const(i), t) => Mult(Const(i), aux(t))
       }
@@ -123,7 +123,7 @@ object Parikh {
     def termToSMTLIB[X](t: Term[X]): String = t match {
       case Const(i) => i.toString()
       case Var(x) => x.toString()
-      case Add(t1, t2) => s"(+ ${termToSMTLIB(t1)} ${termToSMTLIB(t2)})"
+      case Add(ts) => s"""(+ 0 ${ts.map(termToSMTLIB).mkString(" ")})"""
       case Sub(t1, t2) => s"(- ${termToSMTLIB(t1)} ${termToSMTLIB(t2)})"
       case Mult(t1, t2) => s"(* ${termToSMTLIB(t1)} ${termToSMTLIB(t2)})"
     }
@@ -140,9 +140,9 @@ object Parikh {
         case Le(t1, t2) => Le(tm(t1), tm(t2))
         case Gt(t1, t2) => Gt(tm(t1), tm(t2))
         case Ge(t1, t2) => Ge(tm(t1), tm(t2))
-        case Conj(f1, f2) => Conj(aux(f1), aux(f2))
-        case Disj(f1, f2) => Disj(aux(f1), aux(f2))
-        case Exists(Var(x), f) => Exists(Var(renamer(x)), aux(f))
+        case Conj(fs) => Conj(fs.map(aux))
+        case Disj(fs) => Disj(fs.map(aux))
+        case Exists(xs, f) => Exists(xs.map{ case Var(x) => Var(renamer(x)) }, aux(f))
       }
       aux(f)
     }
@@ -154,9 +154,18 @@ object Parikh {
       case Le(t1, t2) => s"(<= ${Term.termToSMTLIB(t1)} ${Term.termToSMTLIB(t2)})"
       case Gt(t1, t2) => s"(> ${Term.termToSMTLIB(t1)} ${Term.termToSMTLIB(t2)})"
       case Ge(t1, t2) => s"(>= ${Term.termToSMTLIB(t1)} ${Term.termToSMTLIB(t2)})"
-      case Conj(f1, f2) => s"(and ${formulaToSMTLIB(f1)} ${formulaToSMTLIB(f2)})"
-      case Disj(f1, f2) => s"(or ${formulaToSMTLIB(f1)} ${formulaToSMTLIB(f2)})"
-      case Exists(Var(x), f) => s"(exists ((${x.toString()} Int)) ${formulaToSMTLIB(f)})"
+      case Conj(fs) => {
+        val fsString = fs.map(formulaToSMTLIB).mkString(" ")
+        s"(and true $fsString)"
+      }
+      case Disj(fs) => {
+        val fsString = fs.map(formulaToSMTLIB).mkString(" ")
+        s"(or false $fsString)"
+      }
+      case Exists(xs, f) => {
+        val xsString = xs.map{ case Var(x) => s"(${x.toString()} Int)" }.mkString(" ")
+        s"(exists (${xsString}) ${formulaToSMTLIB(f)})"
+      }
     }
   }
 
@@ -181,28 +190,27 @@ object Parikh {
     val edgesTo: Map[Q, Seq[Edge]] = edges.groupBy(_._3).withDefaultValue(Seq.empty)
     val input: Map[Q, Term[X]] = states.map(q => q ->
       Add[X](
-        edgesTo(q).foldRight[Term[X]](Const(0)){ case (e, acc) => Add(acc, Var(ENum(e))) },
-        if (q == enft.initial) Const(1) else Const(0)
+        edgesTo(q).map[Term[X]](e => Var(ENum(e))).appended(
+          if (q == enft.initial) Const(1) else Const(0)
+        )
       )
     ).toMap
     val output: Map[Q, Term[X]] = states.map(q => q ->
       Add[X](
-        edgesFrom(q).foldRight[Term[X]](Const(0)){ case (e, acc) => Add(acc, Var(ENum(e))) },
-        if (q == enft.finalState) Const(1) else Const(0)
+        edgesFrom(q).map[Term[X]](e => Var(ENum(e))).appended(
+          if (q == enft.finalState) Const(1) else Const(0)
+        )
       )
     ).toMap
     val euler: Formula[X] = {
       val clauses = states.map(q => Eq(Sub(input(q), output(q)), Const(0)))
       // `caluses` cannot be empty bacause MNFT has at least one state.
-      clauses.reduce[Formula[X]](Conj.apply)
+      Conj(clauses)
     }
     val connectivity: Formula[X] = {
       val clauses =
         states.map(q => {
-                     val unreachable = Conj[X](
-                       Eq(Var(Dist(q)), Const(-1)),
-                       Eq(output(q), Const(0))
-                     )
+                     val unreachable = Conj[X](Seq(Eq(Var(Dist(q)), Const(-1)), Eq(output(q), Const(0))))
                      val reachable = {
                        val isInit:  Formula[X] =
                          if (q == enft.initial) Eq(Var(Dist(q)), Const(0))
@@ -210,42 +218,41 @@ object Parikh {
                        val reachedFromSomewhere = edgesTo(q).map(
                          e => {
                            val (p, v, _) = e
-                           List[Formula[X]](
-                             Eq(Var(Dist(q)), Add(Var(Dist(p)), Const(1))),
-                             Gt(Var(ENum(e)), Const(0)),
-                             Ge(Var(Dist(p)), Const(0))
-                           ).reduce[Formula[X]](Conj.apply)
+                           Conj(List[Formula[X]](
+                                  Eq(Var(Dist(q)), Add(Seq(Var(Dist(p)), Const(1)))),
+                                  Gt(Var(ENum(e)), Const(0)),
+                                  Ge(Var(Dist(p)), Const(0))))
                          }
                        )
-                       reachedFromSomewhere.fold(isInit)(Disj.apply)
+                       Disj(reachedFromSomewhere.appended(isInit))
                      }
-                     Disj(unreachable, reachable)
+                     Disj(Seq(unreachable, reachable))
                    })
-      clauses.reduce[Formula[X]](Conj.apply)
+      Conj(clauses)
     }
     val bs = edges.foldLeft[Set[B]](Set.empty){ case (acc, (_, v, _)) => acc union v.keySet }
     val parikh: Formula[X] = {
-      val clauses = bs.map[Formula[X]](b =>
+      val clauses = bs.toSeq.map[Formula[X]](b =>
         {
-          val sum: Term[X] =
-            edges
-              .map[Term[X]]{ case (q, v, r) => Mult(Const(v.getOrElse(b, 0)), Var(ENum((q, v, r)))) }
-              .foldRight[Term[X]](Const(0))(Add.apply)
+          val sum: Term[X] = Add(
+            edges.map[Term[X]]{ case (q, v, r) => Mult(Const(v.getOrElse(b, 0)), Var(ENum((q, v, r)))) }
+          )
           Eq(Var(BNum(b)), sum)
         }
       )
-      clauses.fold[Formula[X]](Top())(Conj.apply)
+      Conj(clauses)
     }
     val boundedVars: Seq[X] = states.map[X](q => Dist(q)) ++ edges.map(e => ENum(e))
     val vars: Seq[X] = boundedVars ++ bs.map(BNum.apply)
-    val positive: Formula[X] =
+    val positive: Formula[X] = Conj(
       vars.map[Formula[X]] {
         case BNum(b) => Ge(Var(BNum(b)), Const(0))
         case ENum(e) => Ge(Var(ENum(e)), Const(0))
         case Dist(q) => Ge(Var(Dist(q)), Const(-1))
-      }.fold(Top())(Conj.apply)
-    val conj: Formula[X] = List(euler, connectivity, parikh, positive).reduce[Formula[X]](Conj.apply)
-    boundedVars.map(Var.apply).foldRight(conj)(Exists.apply)
+      }
+    )
+    val conj: Formula[X] = Conj(List(euler, connectivity, parikh, positive))
+    Exists(boundedVars.map(Var.apply), conj)
   }
   def countingMnftToPresburgerFormula[Q, A, B](
     mnft: MNFT[Q, A, Image[B]]

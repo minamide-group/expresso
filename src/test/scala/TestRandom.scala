@@ -216,7 +216,7 @@ class TestRandom extends AnyFlatSpec {
     for (_ <- 0 until 1000) {
       val n1 = randomNsstCustomized()
       val n2 = randomNsstCustomized()
-      val composed = NSST.composeNsstOfNssts(n1, n2)
+      val composed = NSST.composeNsstOfNssts(n1, n2).optimized
       assert(composed.isCopyless)
       maxStates = max(maxStates, composed.states.size)
       val composedTransduction = composed.transduce _

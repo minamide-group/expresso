@@ -188,6 +188,84 @@ class NSST[Q, A, B, X](
     )
   }
 
+  /** Returns optimized NSST.
+    *
+    * Removes redundant variables.
+    */
+  def optimized: NSST[Q, A, B, X] = {
+    type Cupstar = Concepts.Cupstar[X, B]
+    def varsIn(alpha: Cupstar): Set[X] = alpha.foldLeft[Set[X]](Set.empty){
+      case (acc, xb) => xb match {
+        case Cop1(x) => acc + x
+        case Cop2(_) => acc
+      } }
+    val edgesGraph = Seq.from {
+      for (((q, a), s) <- edges; (r, m) <- s)
+      yield (q, a, m, r)
+    }
+    import scala.collection.mutable.{Map => MMap, Set => MSet}
+    // Determine variables not used in output.
+    val usedVarsAt: MMap[Q, MSet[X]] = MMap.from{
+      outF.view.mapValues{ case s => MSet.from{ s.flatMap(varsIn _) } }
+    }.withDefaultValue(MSet.empty)
+    var updated = false
+    do {
+      updated = false
+      for ((q, _, m, r) <- edgesGraph) {
+        val addToQ = usedVarsAt(r).flatMap(x => varsIn(m(x)))
+        if (!(addToQ subsetOf usedVarsAt(q))) {
+          updated = true
+          usedVarsAt(q) ++= addToQ
+        }
+      }
+    } while (updated)
+
+    // Determine variables which is always empty.
+    val nonEmptyAt: MMap[Q, MSet[X]] = MMap.empty.withDefaultValue(MSet.empty)
+    def isCharIn(alpha: Cupstar): Boolean = alpha.exists{
+      case Cop2(_) => true
+      case _ => false
+    }
+    do {
+      updated = false
+      for ((q, _, m, r) <- edgesGraph) {
+        val charAssigned = variables.filter(x => isCharIn(m(x)))
+        val nonEmptyVarAssigned = variables.filter(x => varsIn(m(x)).exists(nonEmptyAt(q).contains))
+        val addToR = charAssigned ++ nonEmptyVarAssigned
+        if (!(addToR subsetOf nonEmptyAt(r))) {
+          updated = true
+          nonEmptyAt(r) ++= addToR
+        }
+      }
+    } while (updated)
+
+    val newVars = states.flatMap(usedVarsAt) intersect states.flatMap(nonEmptyAt)
+    def deleteNotUsed(alpha: Cupstar): Cupstar =
+      alpha.filter{ case Cop1(x) => newVars contains x; case _ => true }
+    val newEdges: Edges[Q, A, X, B] = Map.from {
+      for (((q, a), s) <- edges)
+      yield (q, a) -> s.map { case (q, m) =>
+        (
+          q,
+          newVars.map(x => x -> deleteNotUsed(m(x))).toMap
+        )
+      }
+    }
+    val newOutF = outF
+      .view
+      .mapValues(_.map(deleteNotUsed))
+      .toMap
+      .filter{ case (_, s) => s.nonEmpty }
+    new NSST(
+      states,
+      in,
+      newVars,
+      newEdges,
+      q0,
+      newOutF
+    )
+  }
+
   def presburgerFormula: Parikh.Formula[String] = NSST.parikhImagePresburger(this)
 
   /** Returns an input string that give some output.
@@ -227,8 +305,9 @@ object NSST {
     }._1
   }
 
-  // Returns a set of pairs of state and string over X cup B such that
-  // nft can transition to from q by w with kt.
+  /** Returns a set of pairs of state and string over X cup B such that
+    * nft can transition to from q by w with kt.
+    */
   def transitionWith[Q, A, B, X](nft: NFT[Q, A, B], kt: Map[X, (Q, Q)])(q: Q, w: Cupstar[X, A]) = {
     def transWithKT(q: Q, sigma: Cop[X, A]): Set[(Q, Cupstar[X, B])] = sigma match {
       case Cop1(x) => kt.get(x).flatMap{
@@ -241,7 +320,7 @@ object NSST {
 
   // Type of states of composed NSST without initial one.
   type ComposedQ[Q1, Q2, X] = (Q1, Map[X, (Q2, Q2)])
-  // Sequentially compose given NSST and NFT.
+  /** Sequentially compose given NSST and NFT. */
   def composeNsstAndNft[A, B, C, Q1, X, Q2](
     nsst: NSST[Q1, A, B, X],
     nft: NFT[Q2, B, C]
@@ -255,7 +334,7 @@ object NSST {
     // New states wrapped by Option
     type WNQ = Option[NQ]
 
-    // Returns a set of function f s.t. dom(f) = domain and ∀ x in domain, f(x) ∈ g(x).
+    /** Returns a set of function f s.t. dom(f) = domain and ∀ x in domain, f(x) ∈ g(x). */
     def mapsWhoseDomainIsAndValueIsIn[X, A](
       g: X => Iterable[A],
       domain: Iterable[X]
@@ -285,8 +364,7 @@ object NSST {
         .toSet
     }
 
-    // Returns a set of function f s.t. domain ⊂ dom(f) ⊂ universe
-    // and f(x) ∈ g(x).
+    /** Returns a set of function f s.t. domain ⊂ dom(f) ⊂ universe and f(x) ∈ g(x). */
     def mapsWhoseDomainContainsAndValueIsIn[X, A](
       g: X => Iterable[A],
       domain: Set[X],
@@ -556,7 +634,7 @@ object NSST {
       newEdges,
       initials,
       acceptF
-    )
+    ).optimized
   }
 
   def parikhImage[Q, A, B, X](nsst: NSST[Q, A, B, X]): Semilinear[Map[B, Int]] = {
@@ -569,7 +647,8 @@ object NSST {
 
   def parikhImagePresburger[Q, A, B, X](n: NSST[Q, A, B, X]) = {
     import Parikh._
-    val formula = Parikh.countingMnftToPresburgerFormula(NSST.convertNsstToCountingNft(n))
+    val coutingNft = NSST.convertNsstToCountingNft(n)
+    val formula = Parikh.countingMnftToPresburgerFormula(coutingNft)
     type E = (Int, Image[B], Int)
     type X = EnftVar[Int, B, E]
     class Renamer() {
@@ -581,7 +660,7 @@ object NSST {
       var eMap: Map[E, String] = Map.empty
       var qMap: Map[Int, String] = Map.empty
       def renamer(x: X): String = x match {
-        case BNum(b) => b.toString()
+        case BNum(b) => s"y${b}"
         case ENum(e) => eMap.getOrElse(e, { val s = s"x${newVar()}"; eMap += e -> s; s })
         case Dist(q) => qMap.getOrElse(q, { val s = s"x${newVar()}"; qMap += q -> s; s })
       }
@@ -671,6 +750,43 @@ class MNFT[Q, A, M: Monoid](
     for ((q, m) <- Monoid.transition(initials, w, trans);
          mf <- acceptF(q))
     yield implicitly[Monoid[M]].combine(m, mf)
+
+  /** Returns optimized MNFT.
+    *
+    * Remove all unreachable states and states from which it cannot transition to
+    * any state where output function is non-empty.
+    */
+  def optimized: MNFT[Q, A, M] = {
+    val reachable =
+      Concepts.closure(
+        initials,
+        edges.map{ case ((q, _), s) => q -> s.map(_._1) }.withDefaultValue(Set.empty)
+      )
+    val invReachable = {
+      val invEdges = edges
+        .toList
+        .map{ case ((q, _), s) => (q, s) }
+        .flatMap{ case (q, s) => s.map{ case (r, _) => (r, q) } }
+        .groupBy(_._1)
+        .view
+        .mapValues(_.map(_._2).toSet)
+        .toMap
+        .withDefaultValue(Set.empty)
+      Concepts.closure(partialF.filter{ case (q, s) => s.nonEmpty }.keySet, invEdges)
+    }
+    val newEdges = edges
+      .flatMap{ case ((q, a), s) =>
+        if (invReachable contains q) {
+          Map((q, a) -> s.filter{ case (q, _) => invReachable contains q })
+        } else Map.empty }
+    new MNFT[Q, A, M](
+      invReachable,
+      in,
+      newEdges,
+      initials intersect invReachable,
+      acceptF.filter{ case (q, _) => invReachable contains q }
+    )
+  }
 
   def toENFT: ENFT[Int, A, M] = {
     trait NQ
