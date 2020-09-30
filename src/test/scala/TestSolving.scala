@@ -378,6 +378,35 @@ class TestSolving extends AnyFlatSpec {
       q0,
       base.partialF
     ).renamed
+  } // End of regexNSST
+  /** Returns NSST which transduces a string of form "w0 None ... w(n-1) None" to
+    * "w'0 ... w'(n-1)" where each length of w'i is equal to that of wi and
+    * each w'i is made up of only one integer i, which is distinct from other w'j.
+    */
+  def parikhNSST(n: Int, alpha: Set[Char]): NSST[Int, Option[Char], Int, Int] = {
+    val states = Set.from(0 to n)
+    type Q = Int
+    type A = Option[Char]
+    type B = Int
+    type X = Int
+    type Update = Concepts.Update[X, B]
+    type Edge = ((Q, A), Set[(Q, Update)])
+    val edges: Iterable[Edge] = {
+      val loop: Iterable[Edge] =
+        for (q <- 0 until n; a <- alpha)
+        yield (q, Some(a)) -> Set((q, Map(0 -> List(Cop1(0), Cop2(q)))))
+      val next: Iterable[Edge] =
+        for (q <- 0 until n) yield { ((q, None) -> Set((q+1, Map(0 -> List(Cop1(0)))))): Edge }
+      loop ++ next
+    }
+    new NSST(
+      states,
+      alpha.map[Option[Char]](Some.apply) + None,
+      Set(0),
+      edges.toMap,
+      0,
+      Map(n -> Set(List(Cop1(0))))
+    )
   }
   def toOptionList(s: String): List[Option[Char]] = s.toList.map(c => if (c == '#') None else Some(c))
   def fromOptionList(l: List[Option[Char]]): String = l.map(_.getOrElse('#')).mkString
@@ -495,15 +524,40 @@ class TestSolving extends AnyFlatSpec {
   "Variant of Zhu's benchmark int3" should "be sat" in {
     val alpha = "abc".toSet
     val s1 = replaceAllNSST("ab", "c", 1, 0, alpha)
-    val s2 = replaceAllNSST("ac", "aaa", 2, 1, alpha)
+    val s2 = replaceAllNSST("ac", "aaaa", 2, 1, alpha)
     val parikh = parikhNSST(3, alpha)
+    val start = System.nanoTime()
+    def elapsedMillis(): Long = (System.nanoTime() - start) / 1000000
+    def printTime(s: String) = {
+      info(s)
+      info(s"elapsed:\t${elapsedMillis()} ms")
+    }
     val composed = NSST.composeNsstOfNssts(s1, s2)
+    printTime("composed")
+    info(s"states: ${composed.states.size}")
+    info(s"edges: ${composed.edges.size}")
     val parikhComposed =
       NSST.composeNsstOfNssts(
         s1,
         NSST.composeNsstOfNssts(s2, parikh)
-      )
+      ).optimized
+    info(s"""${parikhComposed.transduce(toOptionList("aab#"))}""")
+    printTime("prikhComposed")
+    info(s"states:\t${parikhComposed.states.size}")
+    info(s"edges:\t${parikhComposed.edges.size}")
+    info(s"variables:\t${parikhComposed.variables.size}")
     assert(!composed.isEmpty)
-    info(parikhComposed.presburgerFormula.smtlib)
+    printTime("composed is not empty")
+    val formula = parikhComposed.presburgerFormula
+    printTime("formula")
+    val smtlib = formula.smtlib
+    printTime("smtlib")
+    info(smtlib)
+    val enft = NSST.convertNsstToCountingNft(parikhComposed).toENFT
+    val v: Map[Int, Int] = Map(0 -> 3, 1 -> 2, 2 -> 4)
+    printTime("Start to search for witness")
+    val witness = enft.takeInputFor(v)
+    printTime("Got witness")
+    info(s"witness: ${fromOptionList(witness)}") // => "aab#"
   }
 }

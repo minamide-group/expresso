@@ -842,6 +842,31 @@ class ENFT[Q, A, M: Monoid](
       stateMap(finalState)
     )
   }
+
+  /** Returns an input by which the machine cat output `wanted`. */
+  def takeInputFor(wanted: M): List[A] = {
+    // TODO too slow; make faster
+    val inO = in.map[Option[A]](Some.apply) + None
+    val monoid = implicitly[Monoid[M]]
+    var queue: Queue[(Q, List[A], M)] = Queue((initial, Nil, monoid.unit))
+    while (queue.nonEmpty) {
+      val (q, as1, m1) = queue.head
+      queue = queue.tail
+      if (m1 == wanted && finalState == q) return as1.reverse
+      queue ++= {
+        for (o <- inO; (q, m2) <- edges((q, o)))
+        yield {
+          val as = o match {
+            case None => as1
+            case Some(a) => a :: as1
+          }
+          val m = monoid.combine(m1, m2)
+          (q, as, m)
+        }
+      }
+    }
+    ???
+  }
 }
 
 object MNFT {
