@@ -108,34 +108,6 @@ class TestComposition extends AnyFlatSpec {
     assert(doubleAsIfEven.transduce("baab".toList) == Set("baaaab".toList))
   }
 
-  "Composition" should "" in {
-    val composed = NSST.composeNsstAndNft(nsst, nft)
-    info(s"Number of states: ${composed.states.size}")
-    info(s"Max number of transition destinations: ${maxTransition(composed)}")
-    assert(composed.transduce("abb".toList) == Set("bbbb".toList))
-    assert(composed.isCopyless)
-  }
-
-  "Composition of Alur's exmaple 2.1 and doubleAsIfEven" should
-  "map string w to w'#w' where w' == w[aa/a]" in {
-    val composed = NSST.composeNsstAndNft(alur21, doubleAsIfEven)
-    info(s"Number of states: ${composed.states.size}")
-    info(s"Max number of transition destinations: ${maxTransition(composed)}")
-    assert(composed.transduce("aa".toList) ==
-             Set("aaaa#aaaa", "aab#aab", "baa#baa", "bb#bb").map(_.toList))
-    assert(composed.isCopyless)
-  }
-
-  "Composition of a variant of Alur's ex 2.1 and doubleAsIfEven" should
-  "terminate in reasonable time and transduce correctly" in {
-    val composed = NSST.composeNsstAndNft(alur21Three, doubleAsIfEven)
-    info(s"Number of states: ${composed.states.size}")
-    info(s"Max number of transition destinations: ${maxTransition(composed)}")
-    assert(composed.transduce("aa".toList) ==
-             Set("aaaa#aaaa#aaaa", "ab#ab#ab", "ba#ba#ba", "bb#bb#bb").map(_.toList))
-    assert(composed.isCopyless)
-  }
-
   // {a, b}^* \ {ε} ∋ w ↦ {u | #u = #w or #u = 2#w} ⊂ {a, b}^*
   val sameOrTwiceLen = NSST(
     Set(0, 1, 2),
@@ -193,9 +165,12 @@ class TestComposition extends AnyFlatSpec {
   )
   "Construction of MSST" should "be done correctly" in {
     {
-      // val composed = NSST.composeNssts(doubles, sameOrTwiceLen)
-      val composed = NSST.composeMSST(doubles, doubles)
+      // val composed = SST.composeNSSTsBackward(doubles.toSingleOutput, sameOrTwiceLen.toSingleOutput)
+      val composed = NSST.composeNsstsToMsst(doubles, doubles)
       info(s"Number of states: ${composed.states.size}")
+      info(s"states:\t${composed.states}")
+      info(s"edges:\t${composed.edges}")
+      info(s"outF:\t${composed.outF}")
       // info(s"Max number of transition destinations: ${maxTransition(composed)}")
       // assert(composed.isCopyless)
       assert(composed.transduce("".toList) == Set("".toList))
@@ -209,7 +184,7 @@ class TestComposition extends AnyFlatSpec {
                Set("aaaa#aaaa#aaaa".toList))
       assert(doubleAsIfEvenSST.transduce("ab#ab#ab".toList) ==
                Set("ab#ab#ab".toList))
-      val composed = NSST.composeMSST(alur21Three, doubleAsIfEvenSST)
+      val composed = NSST.composeNsstsToMsst(alur21Three, doubleAsIfEvenSST)
       assert(composed.transduce("aa".toList) ==
                Set("aaaa#aaaa#aaaa", "ab#ab#ab", "ba#ba#ba", "bb#bb#bb").map(_.toList))
 
@@ -223,14 +198,14 @@ class TestComposition extends AnyFlatSpec {
           "aaaa", "aaab", "aaba", "aabb", "abaa", "abab", "abba", "abbb",
           "bbbb", "bbba", "bbab", "bbaa", "babb", "baba", "baab", "baaa"
         ).map(_.toList))
-      val n1AfterSimple = NSST.composeMSST(doubles, sameOrTwiceLen)
+      val n1AfterSimple = NSST.composeNsstsToMsst(doubles, sameOrTwiceLen)
       info(s"Number of states of [sameOrTwiceLen after doubles]: ${n1AfterSimple.states.size}")
       assert(n1AfterSimple.transduce("a".toList) ==
                Set("aa", "ab", "ba", "bb",
                    "aaaa", "aaab", "aaba", "aabb", "abaa", "abab", "abba", "abbb",
                    "bbbb", "bbba", "bbab", "bbaa", "babb", "baba", "baab", "baaa"
                ).map(_.toList))
-      val n1AfterN1 = NSST.composeMSST(sameOrTwiceLen, sameOrTwiceLen)
+      val n1AfterN1 = NSST.composeNsstsToMsst(sameOrTwiceLen, sameOrTwiceLen)
       info(s"Number of states of [sameOrTwiceLen after sameOrTwiceLen]: ${n1AfterSimple.states.size}")
       assert(n1AfterN1.transduce("a".toList) ==
         Set("a", "b", "aa", "ab", "ba", "bb",
@@ -242,7 +217,7 @@ class TestComposition extends AnyFlatSpec {
   }
 
   "Composition of two NSSTs" should "be done correctly" in {
-     val composed = NSST.composeNsstOfNssts(sameOrTwiceLen, sameOrTwiceLen)
+     val composed = NSST.composeNsstsToNsst(sameOrTwiceLen, sameOrTwiceLen)
      info(s"Number of states: ${composed.states.size}")
      info(s"Max number of transition destinations: ${maxTransition(composed)}")
      assert(composed.isCopyless)
