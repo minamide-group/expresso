@@ -24,7 +24,7 @@ class TestComposition extends AnyFlatSpec {
   )
 
   def maxTransition[Q, A, B, X](nsst: NSST[Q, A, B, X]): Int = {
-    nsst.edges.foldLeft(0) { case (acc, (k, v)) => max(acc, v.size) }
+    nsst.delta.foldLeft(0) { case (acc, (k, v)) => max(acc, v.size) }
   }
 
   // a^n ↦ { w#w | len(w) == n }

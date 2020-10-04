@@ -106,31 +106,30 @@ class NSST[Q, A, B, X](
     val states: Set[Q],
     val in: Set[A],
     val variables: Set[X],
-    edgesArg: NSST.Edges[Q, A, X, B],
+    val edges: Set[(Q, A, Concepts.Update[X, B], Q)],
     val q0: Q,
     val partialF: Map[Q, Set[Concepts.Cupstar[X, B]]]
 ) {
   import NSST._
   import Concepts._
 
-  val edges: NSST.Edges[Q, A, X, B] = {
-    edgesArg.view
-      .mapValues(s => s.filter { case (q, _) => states contains q })
-      .filter { case ((q, _), _) => states contains q }
-      .toMap
-  }
-
   implicit val monoid: Monoid[Update[X, B]] = variables
   val outF: Map[Q, Set[Cupstar[X, B]]] = partialF.withDefaultValue(Set())
   val out: Set[B] = Set.from {
-    for ((_, s) <- edges;
-         (_, m) <- s;
+    for ((_, _, m, _) <- edges;
          (_, alpha) <- m;
          b <- erase1(alpha))
       yield b
   }
 
-  def transOne(q: Q, a: A): Set[(Q, Update[X, B])] = edges.withDefaultValue(Set.empty)((q, a))
+  val delta: Map[(Q, A), Set[(Q, Update[X, B])]] =
+    graphToMap[
+      (Q, A, Update[X, B], Q),
+      (Q, A),
+      (Q, Update[X, B])
+    ](edges, { case (q, a, m, r) => (q, a) -> ((r, m)) })
+
+  def transOne(q: Q, a: A): Set[(Q, Update[X, B])] = delta.withDefaultValue(Set.empty)((q, a))
   def transition(qs: Set[Q], w: List[A]): Set[(Q, Update[X, B])] =
     Monoid.transition(qs, w, (q: Q, a: A) => transOne(q, a))
   def outputAt(q: Q, m: Update[X, B]): Set[List[B]] =
@@ -138,24 +137,16 @@ class NSST[Q, A, B, X](
   def transduce(w: List[A]): Set[List[B]] =
     transition(Set(q0), w).flatMap { case (q, m) => outputAt(q, m) }
 
-  def asNFA: NFA[Q, A] = new NFA(
-    states,
-    in,
-    edges.map { case ((q, a) -> s) => (q, Some(a)) -> s.map(_._1) },
-    q0,
-    outF.keySet
-  )
-
   def isCopyless: Boolean = {
-    val e = edges.flatMap { case (_, s) => s }.forall { case (_, m) => NSST.isCopylessUpdate(m) }
-    val f = outF.forall { case (_, s) => s.forall(isCopylessOutput(_)) }
+    val e = edges.forall { case (_, _, m, _) => isCopylessUpdate(m) }
+    val f = outF.forall { case (_, s)        => s.forall(isCopylessOutput(_)) }
     e && f
   }
 
   def asMonoidNFT: NFT[Q, A, Update[X, B]] = new NFT(
     states,
     in,
-    edges.view.mapValues { _.map { case (r, m) => (r, List(m)) } }.toMap,
+    delta.view.mapValues { _.map { case (r, m) => (r, List(m)) } }.toMap,
     q0,
     outF.filter { case (q, s) => s.nonEmpty }.keySet
   )
@@ -163,12 +154,11 @@ class NSST[Q, A, B, X](
   def isEmpty: Boolean = {
     val reachables = closure(
       Set(q0),
-      edges.toList
-        .groupBy(_._1._1)
-        .view
-        .mapValues(_.flatMap { case (_, s) => s.map(_._1) }.toSet)
-        .toMap
-        .withDefaultValue(Set.empty)
+      graphToMap[
+        (Q, A, Update[X, B], Q),
+        Q,
+        Q
+      ](edges, { case (q, _, _, r) => q -> r })
     )
     (reachables intersect partialF.filter { case (_, s) => s.nonEmpty }.map(_._1).toSet).isEmpty
   }
@@ -179,16 +169,8 @@ class NSST[Q, A, B, X](
     val newEdges =
       edges
         .map {
-          case ((q, a), s) =>
-            (stateMap(q), a) ->
-              s.map {
-                case (r, m) => {
-                  (
-                    stateMap(r),
-                    m.map { case (x, xb) => (varMap(x), xb.map(_.map1(varMap))) }
-                  )
-                }
-              }
+          case (q, a, m, r) =>
+            (stateMap(q), a, m.map { case (x, xbs) => varMap(x) -> xbs.map(_.map1(varMap)) }, stateMap(r))
         }
     val newF =
       partialF
@@ -213,10 +195,6 @@ class NSST[Q, A, B, X](
     */
   def removeRedundantVars: NSST[Q, A, B, X] = {
     type Cupstar = Concepts.Cupstar[X, B]
-    val edgesGraph = Seq.from {
-      for (((q, a), s) <- edges; (r, m) <- s)
-        yield (q, a, m, r)
-    }
     import scala.collection.mutable.{Map => MMap, Set => MSet}
     // Determine variables not used in output.
     val usedVarsAt: MMap[Q, MSet[X]] = MMap
@@ -227,7 +205,7 @@ class NSST[Q, A, B, X](
     var updated = false
     do {
       updated = false
-      for ((q, _, m, r) <- edgesGraph) {
+      for ((q, _, m, r) <- edges) {
         val addToQ = usedVarsAt(r).flatMap(x => varsIn(m(x)))
         if (!(addToQ subsetOf usedVarsAt(q))) {
           updated = true
@@ -244,7 +222,7 @@ class NSST[Q, A, B, X](
     }
     do {
       updated = false
-      for ((q, _, m, r) <- edgesGraph) {
+      for ((q, _, m, r) <- edges) {
         val charAssigned = variables.filter(x => isCharIn(m(x)))
         val nonEmptyVarAssigned = variables.filter(x => varsIn(m(x)).exists(nonEmptyAt(q).contains))
         val addToR = charAssigned ++ nonEmptyVarAssigned
@@ -258,16 +236,10 @@ class NSST[Q, A, B, X](
     val newVars = states.flatMap(usedVarsAt) intersect states.flatMap(nonEmptyAt)
     def deleteNotUsed(alpha: Cupstar): Cupstar =
       alpha.filter { case Cop1(x) => newVars contains x; case _ => true }
-    val newEdges: Edges[Q, A, X, B] = Map.from {
-      for (((q, a), s) <- edges)
-        yield (q, a) -> s.map {
-          case (q, m) =>
-            (
-              q,
-              newVars.map(x => x -> deleteNotUsed(m(x))).toMap
-            )
-        }
-    }
+    def newUpdate(m: Update[X, B]): Update[X, B] =
+      newVars.map(x => x -> deleteNotUsed(m(x))).toMap
+    val newEdges =
+      edges.map{ case (q, a, m, r) => (q, a, newUpdate(m), r) }
     val newOutF = outF.view
       .mapValues(_.map(deleteNotUsed))
       .toMap
@@ -290,8 +262,13 @@ class NSST[Q, A, B, X](
   def takeInput: List[A] = {
     transitionSystemBFS[Q, A](
       states,
-      in, {
-        val m = edges.view.mapValues(_.map(_._1)).toMap.withDefaultValue(Set.empty)
+      in,
+      {
+        val m = graphToMap[
+          (Q, A, Update[X, B], Q),
+          (Q, A),
+          Q
+        ](edges, { case (q, a, m, r) => (q, a) -> r })
         (q, a) => m((q, a))
       },
       q0,
@@ -307,10 +284,7 @@ class NSST[Q, A, B, X](
       states.map[Option[Q]](Some.apply) + None,
       in,
       newVars,
-      edges.flatMap {
-        case ((q, a), s) =>
-          s.map { case (r, m) => (Some(q), a, embedUpdate(m) + (None -> Nil), Some(r)) }
-      }.toList,
+      edges.map{ case (q, a, m, r) => (Some(q), a, embedUpdate(m) + (None -> Nil), Some(r))  }.toList,
       outF
         .flatMap[(Option[Q], Update[Option[X], B], Option[Q])] {
           case (q, s) =>
@@ -463,17 +437,12 @@ object NSST {
 
     type NQ = (Q1, Map[X, (Q2, Q2)])
 
-    val edges1 = List.from {
-      for (((q, a), s) <- n1.edges; (r, m) <- s)
-        yield (q, a, m, r)
-    }
-
     val invTrans: Map[Q1, Set[(Q1, A, Update[X, B])]] =
       graphToMap[
         (Q1, A, Update[X, B], Q1),
         Q1,
         (Q1, A, Update[X, B])
-      ](edges1, { case (q, a, m, r) => r -> (q, a, m) })
+      ](n1.edges, { case (q, a, m, r) => r -> (q, a, m) })
 
     val nft = n2.asMonoidNFT
     def previousStates(nq: NQ): Set[(NQ, A, Update[X, Update[Y, C]])] = {
@@ -723,28 +692,17 @@ object NSST {
   ): NSST[Int, Char, Char, Char] = {
     def stringToCupstar(s: String): Cupstar[Char, Char] =
       s.map[Cop[Char, Char]] { c => if (c.isUpper) Cop1(c) else Cop2(c) }.toList
+    def stringsToUpdate(ss: Iterable[String]): Update[Char, Char] =
+      ss.map(s => s.head -> stringToCupstar(s.substring(2))).toMap
     val newEdges =
       edges
-        .groupBy { case (p, a, _) => (p, a) }
-        .map {
-          case ((p, a), l) =>
-            (p, a) ->
-              l.flatMap(_._3)
-                .map {
-                  case (q, m) =>
-                    (
-                      q,
-                      m.map(s => s.head -> stringToCupstar(s.substring(2))).toMap
-                    )
-                }
-                .toSet
-        }
+        .flatMap{ case (q, a, s) => s.map{ case (r, m) => (q, a, stringsToUpdate(m), r) } }
     val newF = outF.map { case (q, s) => q -> Set(stringToCupstar(s)) }.toMap
     new NSST(
       states.toSet,
       edges.map(_._2).toSet,
       vars.toSet,
-      newEdges,
+      newEdges.toSet,
       q0,
       newF
     )
@@ -1079,18 +1037,16 @@ object MSST {
       val const = xs.map(x => x -> id).toMap
       (msst.q0, const)
     }
-    // The following algorithm can be extracted to an isolated function
-    // and be used in composeNsstAndNft().
     var newStates: Set[NQ] = Set(newQ0)
-    var newEdges: Map[(NQ, A), Set[(NQ, Update[Z, B])]] = Map()
+    var newEdges: List[(NQ, A, Update[Z, B], NQ)] = Nil
     var stack = List(newQ0)
     while (stack.nonEmpty) {
       val q = stack.head
       stack = stack.tail
       for (a <- msst.in) {
-        val edges = nextStates(q, a)
-        newEdges += (q, a) -> edges
-        val newOnes = edges.map(_._1) -- newStates
+        val nexts = nextStates(q, a)
+        newEdges ++:= nexts.map{ case (r, m) => (q, a, m, r) }
+        val newOnes = nexts.map(_._1) -- newStates
         newStates ++= newOnes
         stack = newOnes.toList ++ stack
       }
@@ -1111,7 +1067,7 @@ object MSST {
       newStates,
       msst.in,
       zs,
-      newEdges,
+      newEdges.toSet,
       newQ0,
       newOutF
     )

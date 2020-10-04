@@ -47,14 +47,13 @@ object TestRandom {
     var states = Set(q0)
     var stack = List(q0)
     var outF = Map.empty[Q, Set[Cupstar[X, B]]]
-    var edges = Map.empty[(Q, A), Set[(Q, Update[X, B])]]
+    var edges = List.empty[(Q, A, Update[X, B], Q)]
     while (stack nonEmpty) {
       val q = stack.head
       stack = stack.tail
       val fAtQ = for (_ <- 0 until R.nextInt(maxFNum + 1)) yield randomF(vars, out, maxRepeatB)
       outF = outF + (q -> fAtQ.toSet)
-      for (a <- in) yield {
-        var destinations = Set.empty[(Q, Update[X, B])]
+      for (a <- in) {
         for (_ <- 0 until R.nextInt(maxTransition + 1)) {
           val r =
             if (states.size < maxStates && R.nextBoolean()) {
@@ -65,16 +64,15 @@ object TestRandom {
             } else {
               R.shuffle(states).head
             }
-          destinations += ((r, randomUpdate(vars, out, maxRepeatB)))
+          edges ::= (q, a, randomUpdate(vars, out, maxRepeatB), r)
         }
-        edges = edges + ((q, a) -> destinations)
       }
     }
     new NSST(
       states,
       in,
       vars,
-      edges,
+      edges.toSet,
       q0,
       outF
     )
