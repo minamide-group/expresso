@@ -191,49 +191,59 @@ class NSST[Q, A, B, X](
     )
   }
 
-  /** Returns NSST redundant variables removed.
-    */
-  def removeRedundantVars: NSST[Q, A, B, X] = {
-    type Cupstar = Concepts.Cupstar[X, B]
+
+  lazy val usedVarsAt: Map[Q, Set[X]] = {
     import scala.collection.mutable.{Map => MMap, Set => MSet}
-    // Determine variables not used in output.
-    val usedVarsAt: MMap[Q, MSet[X]] = MMap
+    val res: MMap[Q, MSet[X]] = MMap
       .from {
-        outF.view.mapValues { case s => MSet.from { s.flatMap(varsIn _) } }
+        outF.view.mapValues { case s => MSet.from { s.flatMap(varsIn) } }
       }
-      .withDefaultValue(MSet.empty)
+      .withDefault(_ => MSet.empty)
     var updated = false
     do {
       updated = false
       for ((q, _, m, r) <- edges) {
-        val addToQ = usedVarsAt(r).flatMap(x => varsIn(m(x)))
-        if (!(addToQ subsetOf usedVarsAt(q))) {
+        val addToQ = res(r).flatMap(x => varsIn(m(x)))
+        if (!(addToQ subsetOf res(q))) {
           updated = true
-          usedVarsAt(q) ++= addToQ
+          val atQ = res(q)
+          res(q) = atQ ++ addToQ
         }
       }
     } while (updated)
 
-    // Determine variables which is always empty.
-    val nonEmptyAt: MMap[Q, MSet[X]] = MMap.empty.withDefaultValue(MSet.empty)
+    Map.from{ res.map{ case (q, s) => q -> Set.from(s) } }.withDefaultValue(Set.empty)
+  }
+  lazy val nonEmptyVarsAt: Map[Q, Set[X]] = {
+    import scala.collection.mutable.{Map => MMap, Set => MSet}
+    type Cupstar = Concepts.Cupstar[X, B]
+    val res: MMap[Q, MSet[X]] = MMap.empty.withDefault(_ => MSet.empty)
     def isCharIn(alpha: Cupstar): Boolean = alpha.exists {
       case Cop2(_) => true
       case _       => false
     }
+    var updated = false
     do {
       updated = false
       for ((q, _, m, r) <- edges) {
         val charAssigned = variables.filter(x => isCharIn(m(x)))
-        val nonEmptyVarAssigned = variables.filter(x => varsIn(m(x)).exists(nonEmptyAt(q).contains))
+        val nonEmptyVarAssigned = variables.filter(x => varsIn(m(x)).exists(res(q).contains))
         val addToR = charAssigned ++ nonEmptyVarAssigned
-        if (!(addToR subsetOf nonEmptyAt(r))) {
+        if (!(addToR subsetOf res(r))) {
           updated = true
-          nonEmptyAt(r) ++= addToR
+          val atR = res(r)
+          res(r) = atR ++ addToR
         }
       }
     } while (updated)
 
-    val newVars = states.flatMap(usedVarsAt) intersect states.flatMap(nonEmptyAt)
+    Map.from{ res.map{ case (q, s) => q -> Set.from(s) } }.withDefaultValue(Set.empty)
+  }
+  /** Returns NSST redundant variables removed.
+    */
+  def removeRedundantVars: NSST[Q, A, B, X] = {
+    type Cupstar = Concepts.Cupstar[X, B]
+    val newVars = states.flatMap(usedVarsAt) intersect states.flatMap(nonEmptyVarsAt)
     def deleteNotUsed(alpha: Cupstar): Cupstar =
       alpha.filter { case Cop1(x) => newVars contains x; case _ => true }
     def newUpdate(m: Update[X, B]): Update[X, B] =
