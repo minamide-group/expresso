@@ -6,12 +6,14 @@ object TestRandom {
   import Concepts._
   import scala.util.{Random => R}
   def nextAs[A](as: Seq[A], maxRepeat: Int): List[A] =
-    List.fill(R.nextInt(maxRepeat+1))(as(R.nextInt(as.size)))
+    List.fill(R.nextInt(maxRepeat + 1))(as(R.nextInt(as.size)))
   def randomF[X, A](xs: Set[X], as: Set[A], maxRepeatA: Int): Cupstar[X, A] = {
     val useXs: List[X] = R.shuffle(xs.toList).take(R.nextInt(xs.size))
     val aVec = as.toVector
-    useXs.foldLeft(nextAs(aVec, maxRepeatA).map[Cop[X, A]](Cop2(_))){ case (acc, x) =>
-      nextAs(aVec, maxRepeatA).map(Cop2(_)) ++ List(Cop1(x)) ++ acc }
+    useXs.foldLeft(nextAs(aVec, maxRepeatA).map[Cop[X, A]](Cop2(_))) {
+      case (acc, x) =>
+        nextAs(aVec, maxRepeatA).map(Cop2(_)) ++ List(Cop1(x)) ++ acc
+    }
   }
   def randomUpdate[X, A](xs: Iterable[X], as: Set[A], maxRepeatA: Int): Update[X, A] = {
     def randomM1X: M1[X] = {
@@ -19,26 +21,27 @@ object TestRandom {
       R.shuffle(xl)
         .foldLeft((Map.empty[X, List[X]], R.shuffle(xl))) {
           case ((m, xx), x) => {
-            val (took, rst) = xx.splitAt(R.nextInt(xx.length+1))
+            val (took, rst) = xx.splitAt(R.nextInt(xx.length + 1))
             (m + (x -> took), rst)
           }
-      }._1
+        }
+        ._1
     }
     def randomM2XA: M2[X, A] = {
       for (x <- xs; b <- List(true, false))
-      yield (x, b) -> nextAs(as.toList, maxRepeatA)
+        yield (x, b) -> nextAs(as.toList, maxRepeatA)
     }.toMap
     gamma(xs.toSet)(randomM1X, randomM2XA)
   }
   def randomNSST[Q, A, B, X](
-    newState: () => Q,
-    in: Set[A],
-    out: Set[B],
-    vars: Set[X],
-    maxStates: Int,
-    maxFNum: Int,
-    maxRepeatB: Int,
-    maxTransition: Int
+      newState: () => Q,
+      in: Set[A],
+      out: Set[B],
+      vars: Set[X],
+      maxStates: Int,
+      maxFNum: Int,
+      maxRepeatB: Int,
+      maxTransition: Int
   ): NSST[Q, A, B, X] = {
     val q0 = newState()
     var states = Set(q0)
@@ -48,11 +51,11 @@ object TestRandom {
     while (stack nonEmpty) {
       val q = stack.head
       stack = stack.tail
-      val fAtQ = for (_ <- 0 until R.nextInt(maxFNum+1)) yield randomF(vars, out, maxRepeatB)
+      val fAtQ = for (_ <- 0 until R.nextInt(maxFNum + 1)) yield randomF(vars, out, maxRepeatB)
       outF = outF + (q -> fAtQ.toSet)
       for (a <- in) yield {
         var destinations = Set.empty[(Q, Update[X, B])]
-        for (_ <- 0 until R.nextInt(maxTransition+1)) {
+        for (_ <- 0 until R.nextInt(maxTransition + 1)) {
           val r =
             if (states.size < maxStates && R.nextBoolean()) {
               val r = newState()
@@ -77,8 +80,8 @@ object TestRandom {
     )
   }
   def metaComposition[Q1, Q2, A, B, C, X, Y](
-    n1: NSST[Q1, A, B, X],
-    n2: NSST[Q2, B, C, Y]
+      n1: NSST[Q1, A, B, X],
+      n2: NSST[Q2, B, C, Y]
   ): List[A] => Set[List[C]] = (w: List[A]) => {
     val out1 = n1.transduce(w)
     out1.flatMap(n2.transduce(_))

@@ -14,28 +14,28 @@ case class StarExp[A, B <: A](b: RegExp[B]) extends RegExp[A]
 
 object RegExp {
   def size[A](re: RegExp[A]): Int = re match {
-    case EpsExp => 1
-    case EmptyExp => 1
-    case CharExp(_) => 1
-    case OrExp(e1, e2) => 1 + size(e1) + size(e2)
+    case EpsExp         => 1
+    case EmptyExp       => 1
+    case CharExp(_)     => 1
+    case OrExp(e1, e2)  => 1 + size(e1) + size(e2)
     case CatExp(e1, e2) => 1 + size(e1) + size(e2)
-    case StarExp(e) => 1 + size(e)
+    case StarExp(e)     => 1 + size(e)
   }
   def optimizeOne[A](re: RegExp[A]): RegExp[A] = re match {
-    case OrExp(EmptyExp, e) => e
-    case OrExp(e, EmptyExp) => e
-    case CatExp(EmptyExp, e) => EmptyExp
-    case CatExp(e, EmptyExp) => EmptyExp
-    case CatExp(EpsExp, e) => e
-    case CatExp(e, EpsExp) => e
+    case OrExp(EmptyExp, e)                  => e
+    case OrExp(e, EmptyExp)                  => e
+    case CatExp(EmptyExp, e)                 => EmptyExp
+    case CatExp(e, EmptyExp)                 => EmptyExp
+    case CatExp(EpsExp, e)                   => e
+    case CatExp(e, EpsExp)                   => e
     case StarExp(EmptyExp) | StarExp(EpsExp) => EpsExp
-    case re => re
+    case re                                  => re
   }
   def optimize[A](re: RegExp[A]): RegExp[A] = re match {
-    case OrExp(e1, e2) => OrExp(e1.optimized, e2.optimized).optimizedOne
+    case OrExp(e1, e2)  => OrExp(e1.optimized, e2.optimized).optimizedOne
     case CatExp(e1, e2) => OrExp(e1.optimized, e2.optimized).optimizedOne
-    case StarExp(e) => StarExp(e.optimized).optimizedOne
-    case re => re
+    case StarExp(e)     => StarExp(e.optimized).optimizedOne
+    case re             => re
   }
 }
 
@@ -49,9 +49,11 @@ object Linear {
 
   def toLaTeX(l: Linear[Map[Char, Int]]): String = {
     def fromVec(v: Map[Char, Int]): String = {
-      s"""\\left(\\begin{array}{lr}${v.map{ case (c, i) => s"$c:&$i" }.mkString("\\\\")}\\end{array}\\right)"""
+      s"""\\left(\\begin{array}{lr}${v
+        .map { case (c, i) => s"$c:&$i" }
+        .mkString("\\\\")}\\end{array}\\right)"""
     }
-    val ss = l.vs.map(fromVec).zipWithIndex.map{ case (s, i) => s"c_{${i+1}}$s" }
+    val ss = l.vs.map(fromVec).zipWithIndex.map { case (s, i) => s"c_{${i + 1}}$s" }
     s"""\\left\\{${(ss + fromVec(l.origin)).mkString("+")}\\right\\}"""
   }
 }
@@ -60,8 +62,8 @@ case class Semilinear[M](ls: List[Linear[M]])
 
 object Semilinear {
   def fromRegex[M](re: RegExp[M])(implicit monoid: Monoid[M]): Semilinear[M] = re match {
-    case EmptyExp => Semilinear(List.empty)
-    case EpsExp => fromRegex(CharExp(monoid.unit))
+    case EmptyExp   => Semilinear(List.empty)
+    case EpsExp     => fromRegex(CharExp(monoid.unit))
     case CharExp(m) => Semilinear(List(Linear(m, Set.empty)))
     case OrExp(e1, e2) => {
       val s1 = fromRegex(e1)
@@ -71,14 +73,17 @@ object Semilinear {
     case CatExp(e1, e2) => {
       val s1 = fromRegex(e1)
       val s2 = fromRegex(e2)
-      List.from(for (l1 <- s1.ls; l2 <- s2.ls) yield Linear.add(l1, l2))
-        .foldRight(Semilinear(List.empty[Linear[M]])){ case (l, acc) => Semilinear(l :: acc.ls) }
+      List
+        .from(for (l1 <- s1.ls; l2 <- s2.ls) yield Linear.add(l1, l2))
+        .foldRight(Semilinear(List.empty[Linear[M]])) { case (l, acc) => Semilinear(l :: acc.ls) }
     }
     case StarExp(e) => {
       val s = fromRegex(e)
       s.ls
         .map(Linear.star(_))
-        .foldRight(Semilinear(List(Linear(monoid.unit, Set.empty)))) { case (s, acc) => Semilinear(s.ls ++ acc.ls) }
+        .foldRight(Semilinear(List(Linear(monoid.unit, Set.empty)))) {
+          case (s, acc) => Semilinear(s.ls ++ acc.ls)
+        }
     }
   }
 
@@ -88,6 +93,7 @@ object Semilinear {
 }
 
 object Parikh {
+
   /** Types and constructers for Presburger formula */
   sealed trait Formula[X] {
     def smtlib: String = Formula.formulaToSMTLIB(this)
@@ -112,19 +118,19 @@ object Parikh {
   object Term {
     def renameVars[X, Y](t: Term[X], renamer: X => Y): Term[Y] = {
       def aux(t: Term[X]): Term[Y] = t match {
-        case Const(i) => Const(i)
-        case Var(x) => Var(renamer(x))
-        case Add(ts) => Add(ts.map(aux))
-        case Sub(t1, t2) => Sub(aux(t1), aux(t2))
+        case Const(i)          => Const(i)
+        case Var(x)            => Var(renamer(x))
+        case Add(ts)           => Add(ts.map(aux))
+        case Sub(t1, t2)       => Sub(aux(t1), aux(t2))
         case Mult(Const(i), t) => Mult(Const(i), aux(t))
       }
       aux(t)
     }
     def termToSMTLIB[X](t: Term[X]): String = t match {
-      case Const(i) => i.toString()
-      case Var(x) => x.toString()
-      case Add(ts) => s"""(+ 0 ${ts.map(termToSMTLIB).mkString(" ")})"""
-      case Sub(t1, t2) => s"(- ${termToSMTLIB(t1)} ${termToSMTLIB(t2)})"
+      case Const(i)     => i.toString()
+      case Var(x)       => x.toString()
+      case Add(ts)      => s"""(+ 0 ${ts.map(termToSMTLIB).mkString(" ")})"""
+      case Sub(t1, t2)  => s"(- ${termToSMTLIB(t1)} ${termToSMTLIB(t2)})"
       case Mult(t1, t2) => s"(* ${termToSMTLIB(t1)} ${termToSMTLIB(t2)})"
     }
   }
@@ -133,22 +139,22 @@ object Parikh {
     def renameVars[X, Y](f: Formula[X], renamer: X => Y): Formula[Y] = {
       val tm: Term[X] => Term[Y] = Term.renameVars(_, renamer)
       def aux(f: Formula[X]): Formula[Y] = f match {
-        case Top() => Top()
-        case Bot() => Bot()
-        case Eq(t1, t2) => Eq(tm(t1), tm(t2))
-        case Lt(t1, t2) => Lt(tm(t1), tm(t2))
-        case Le(t1, t2) => Le(tm(t1), tm(t2))
-        case Gt(t1, t2) => Gt(tm(t1), tm(t2))
-        case Ge(t1, t2) => Ge(tm(t1), tm(t2))
-        case Conj(fs) => Conj(fs.map(aux))
-        case Disj(fs) => Disj(fs.map(aux))
-        case Exists(xs, f) => Exists(xs.map{ case Var(x) => Var(renamer(x)) }, aux(f))
+        case Top()         => Top()
+        case Bot()         => Bot()
+        case Eq(t1, t2)    => Eq(tm(t1), tm(t2))
+        case Lt(t1, t2)    => Lt(tm(t1), tm(t2))
+        case Le(t1, t2)    => Le(tm(t1), tm(t2))
+        case Gt(t1, t2)    => Gt(tm(t1), tm(t2))
+        case Ge(t1, t2)    => Ge(tm(t1), tm(t2))
+        case Conj(fs)      => Conj(fs.map(aux))
+        case Disj(fs)      => Disj(fs.map(aux))
+        case Exists(xs, f) => Exists(xs.map { case Var(x) => Var(renamer(x)) }, aux(f))
       }
       aux(f)
     }
     def formulaToSMTLIB[X](f: Formula[X]): String = f match {
-      case Top() => "(= 0 0)"
-      case Bot() => "(= 0 1)"
+      case Top()      => "(= 0 0)"
+      case Bot()      => "(= 0 1)"
       case Eq(t1, t2) => s"(= ${Term.termToSMTLIB(t1)} ${Term.termToSMTLIB(t2)})"
       case Lt(t1, t2) => s"(< ${Term.termToSMTLIB(t1)} ${Term.termToSMTLIB(t2)})"
       case Le(t1, t2) => s"(<= ${Term.termToSMTLIB(t1)} ${Term.termToSMTLIB(t2)})"
@@ -163,7 +169,7 @@ object Parikh {
         s"(or false $fsString)"
       }
       case Exists(xs, f) => {
-        val xsString = xs.map{ case Var(x) => s"(${x.toString()} Int)" }.mkString(" ")
+        val xsString = xs.map { case Var(x) => s"(${x.toString()} Int)" }.mkString(" ")
         s"(exists (${xsString}) ${formulaToSMTLIB(f)})"
       }
     }
@@ -172,36 +178,46 @@ object Parikh {
   type Image[A] = Map[A, Int]
   sealed trait EnftVar[Q, B, E]
   case class BNum[Q, B, E](b: B) extends EnftVar[Q, B, E]
-  case class ENum[Q, B, E](e: E) extends EnftVar[Q, B,E]
-  case class Dist[Q, B, E](q: Q) extends EnftVar[Q, B,E]
+  case class ENum[Q, B, E](e: E) extends EnftVar[Q, B, E]
+  case class Dist[Q, B, E](q: Q) extends EnftVar[Q, B, E]
   // case class IsInit[Q, B, E](q: Q) extends EnftVar[Q, B,E]
   // case class IsFin[Q, B, E](q: Q) extends EnftVar[Q, B,E]
   def countingEnftToPresburgerFormula[Q, A, B](
-    enft: ENFT[Q, A, Image[B]]
+      enft: ENFT[Q, A, Image[B]]
   ): Formula[EnftVar[Q, B, (Q, Image[B], Q)]] = {
     type Edge = (Q, Image[B], Q)
     type X = EnftVar[Q, B, Edge]
     val states = enft.states.toSeq
     val edges: Seq[Edge] = List.from {
       for (((q, a), s) <- enft.edges; (r, v) <- s)
-      yield (q, v, r)
+        yield (q, v, r)
     }
     val edgesFrom: Map[Q, Seq[Edge]] = edges.groupBy(_._1).withDefaultValue(Seq.empty)
     val edgesTo: Map[Q, Seq[Edge]] = edges.groupBy(_._3).withDefaultValue(Seq.empty)
-    val input: Map[Q, Term[X]] = states.map(q => q ->
-      Add[X](
-        edgesTo(q).map[Term[X]](e => Var(ENum(e))).appended(
-          if (q == enft.initial) Const(1) else Const(0)
-        )
+    val input: Map[Q, Term[X]] = states
+      .map(q =>
+        q ->
+          Add[X](
+            edgesTo(q)
+              .map[Term[X]](e => Var(ENum(e)))
+              .appended(
+                if (q == enft.initial) Const(1) else Const(0)
+              )
+          )
       )
-    ).toMap
-    val output: Map[Q, Term[X]] = states.map(q => q ->
-      Add[X](
-        edgesFrom(q).map[Term[X]](e => Var(ENum(e))).appended(
-          if (q == enft.finalState) Const(1) else Const(0)
-        )
+      .toMap
+    val output: Map[Q, Term[X]] = states
+      .map(q =>
+        q ->
+          Add[X](
+            edgesFrom(q)
+              .map[Term[X]](e => Var(ENum(e)))
+              .appended(
+                if (q == enft.finalState) Const(1) else Const(0)
+              )
+          )
       )
-    ).toMap
+      .toMap
     val euler: Formula[X] = {
       val clauses = states.map(q => Eq(Sub(input(q), output(q)), Const(0)))
       // `caluses` cannot be empty bacause MNFT has at least one state.
@@ -210,36 +226,37 @@ object Parikh {
     val connectivity: Formula[X] = {
       val clauses =
         states.map(q => {
-                     val unreachable = Conj[X](Seq(Eq(Var(Dist(q)), Const(-1)), Eq(output(q), Const(0))))
-                     val reachable = {
-                       val isInit:  Formula[X] =
-                         if (q == enft.initial) Eq(Var(Dist(q)), Const(0))
-                         else Bot()
-                       val reachedFromSomewhere = edgesTo(q).map(
-                         e => {
-                           val (p, v, _) = e
-                           Conj(List[Formula[X]](
-                                  Eq(Var(Dist(q)), Add(Seq(Var(Dist(p)), Const(1)))),
-                                  Gt(Var(ENum(e)), Const(0)),
-                                  Ge(Var(Dist(p)), Const(0))))
-                         }
-                       )
-                       Disj(reachedFromSomewhere.appended(isInit))
-                     }
-                     Disj(Seq(unreachable, reachable))
-                   })
+          val unreachable = Conj[X](Seq(Eq(Var(Dist(q)), Const(-1)), Eq(output(q), Const(0))))
+          val reachable = {
+            val isInit: Formula[X] =
+              if (q == enft.initial) Eq(Var(Dist(q)), Const(0))
+              else Bot()
+            val reachedFromSomewhere = edgesTo(q).map(e => {
+              val (p, v, _) = e
+              Conj(
+                List[Formula[X]](
+                  Eq(Var(Dist(q)), Add(Seq(Var(Dist(p)), Const(1)))),
+                  Gt(Var(ENum(e)), Const(0)),
+                  Ge(Var(Dist(p)), Const(0))
+                )
+              )
+            })
+            Disj(reachedFromSomewhere.appended(isInit))
+          }
+          Disj(Seq(unreachable, reachable))
+        })
       Conj(clauses)
     }
-    val bs = edges.foldLeft[Set[B]](Set.empty){ case (acc, (_, v, _)) => acc union v.keySet }
+    val bs = edges.foldLeft[Set[B]](Set.empty) { case (acc, (_, v, _)) => acc union v.keySet }
     val parikh: Formula[X] = {
-      val clauses = bs.toSeq.map[Formula[X]](b =>
-        {
-          val sum: Term[X] = Add(
-            edges.map[Term[X]]{ case (q, v, r) => Mult(Const(v.getOrElse(b, 0)), Var(ENum((q, v, r)))) }
-          )
-          Eq(Var(BNum(b)), sum)
-        }
-      )
+      val clauses = bs.toSeq.map[Formula[X]](b => {
+        val sum: Term[X] = Add(
+          edges.map[Term[X]] {
+            case (q, v, r) => Mult(Const(v.getOrElse(b, 0)), Var(ENum((q, v, r))))
+          }
+        )
+        Eq(Var(BNum(b)), sum)
+      })
       Conj(clauses)
     }
     val boundedVars: Seq[X] = states.map[X](q => Dist(q)) ++ edges.map(e => ENum(e))
@@ -255,7 +272,7 @@ object Parikh {
     Exists(boundedVars.map(Var.apply), conj)
   }
   def countingMnftToPresburgerFormula[Q, A, B](
-    mnft: MNFT[Q, A, Image[B]]
+      mnft: MNFT[Q, A, Image[B]]
   ): Formula[EnftVar[Int, B, (Int, Image[B], Int)]] = {
     countingEnftToPresburgerFormula(mnft.unifyInitAndFinal)
   }

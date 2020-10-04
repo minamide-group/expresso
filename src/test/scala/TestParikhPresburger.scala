@@ -21,8 +21,7 @@ class TestParikhPresburger extends AnyFlatSpec {
     val doubles = NSST(
       Set(0),
       Set('X', 'Y'),
-      List((0, 'a', List((0, List("X:Xa", "Y:Ya")))),
-           (0, 'b', List((0, List("X:Xb", "Y:Yb"))))),
+      List((0, 'a', List((0, List("X:Xa", "Y:Ya")))), (0, 'b', List((0, List("X:Xb", "Y:Yb"))))),
       0,
       List((0, "XY"))
     )
