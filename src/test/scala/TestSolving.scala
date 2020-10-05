@@ -525,6 +525,10 @@ class TestSolving extends AnyFlatSpec {
     test(2)
     test(3)
     test(4)
+    test(5)
+    test(6)
+    test(7)
+    test(8)
   }
 
   // "Variant of Zhu's benchmark int3" should "be sat" in {

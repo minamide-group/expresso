@@ -191,7 +191,6 @@ class NSST[Q, A, B, X](
     )
   }
 
-
   lazy val usedVarsAt: Map[Q, Set[X]] = {
     import scala.collection.mutable.{Map => MMap, Set => MSet}
     val res: MMap[Q, MSet[X]] = MMap
@@ -212,7 +211,7 @@ class NSST[Q, A, B, X](
       }
     } while (updated)
 
-    Map.from{ res.map{ case (q, s) => q -> Set.from(s) } }.withDefaultValue(Set.empty)
+    Map.from { res.map { case (q, s) => q -> Set.from(s) } }.withDefaultValue(Set.empty)
   }
   lazy val nonEmptyVarsAt: Map[Q, Set[X]] = {
     import scala.collection.mutable.{Map => MMap, Set => MSet}
@@ -237,8 +236,9 @@ class NSST[Q, A, B, X](
       }
     } while (updated)
 
-    Map.from{ res.map{ case (q, s) => q -> Set.from(s) } }.withDefaultValue(Set.empty)
+    Map.from { res.map { case (q, s) => q -> Set.from(s) } }.withDefaultValue(Set.empty)
   }
+
   /** Returns NSST redundant variables removed.
     */
   def removeRedundantVars: NSST[Q, A, B, X] = {
@@ -249,7 +249,7 @@ class NSST[Q, A, B, X](
     def newUpdate(m: Update[X, B]): Update[X, B] =
       newVars.map(x => x -> deleteNotUsed(m(x))).toMap
     val newEdges =
-      edges.map{ case (q, a, m, r) => (q, a, newUpdate(m), r) }
+      edges.map { case (q, a, m, r) => (q, a, newUpdate(m), r) }
     val newOutF = outF.view
       .mapValues(_.map(deleteNotUsed))
       .toMap
@@ -272,8 +272,7 @@ class NSST[Q, A, B, X](
   def takeInput: List[A] = {
     transitionSystemBFS[Q, A](
       states,
-      in,
-      {
+      in, {
         val m = graphToMap[
           (Q, A, Update[X, B], Q),
           (Q, A),
@@ -294,7 +293,7 @@ class NSST[Q, A, B, X](
       states.map[Option[Q]](Some.apply) + None,
       in,
       newVars,
-      edges.map{ case (q, a, m, r) => (Some(q), a, embedUpdate(m) + (None -> Nil), Some(r))  }.toList,
+      edges.map { case (q, a, m, r) => (Some(q), a, embedUpdate(m) + (None -> Nil), Some(r)) }.toList,
       outF
         .flatMap[(Option[Q], Update[Option[X], B], Option[Q])] {
           case (q, s) =>
@@ -424,7 +423,7 @@ object NSST {
           acc.flatMap {
             case (m, (q, xbs)) =>
               Set.from {
-                for ((r, bs) <- Monoid.transition(Set(q), as, nft.transOne))
+                for ((r, bs) <- nft.transition(Set(q), as))
                   yield (m, (r, Cop2(bs) :: xbs))
               }
           }
@@ -464,7 +463,10 @@ object NSST {
               .map(x =>
                 x -> {
                   val (k, t) = kt(x)
-                  possiblePreviousOf(nft)(k, t, m(x))
+                  // Variables always empty at state q can be ignored
+                  val usedAtQ = n1.nonEmptyVarsAt(q)
+                  val filtered = m(x).filter { case Cop1(x) => usedAtQ contains x; case _ => true }
+                  possiblePreviousOf(nft)(k, t, filtered)
                 }
               )
               .toMap
@@ -506,7 +508,11 @@ object NSST {
         for ((q1, s1) <- outF1;
              xbs <- s1;
              (q2, s2) <- outF2;
-             (kt, xms) <- possiblePreviousOf(nft)(n2.q0, q2, xbs);
+             (kt, xms) <- {
+               val usedAtQ = n1.nonEmptyVarsAt(q1)
+               val filtered = xbs.filter { case Cop1(x) => usedAtQ contains x; case _ => true }
+               possiblePreviousOf(nft)(n2.q0, q2, filtered)
+             };
              ycs <- s2)
           yield (q1, kt) -> (xms, ycs)
       graphToMap[
@@ -706,7 +712,7 @@ object NSST {
       ss.map(s => s.head -> stringToCupstar(s.substring(2))).toMap
     val newEdges =
       edges
-        .flatMap{ case (q, a, s) => s.map{ case (r, m) => (q, a, stringsToUpdate(m), r) } }
+        .flatMap { case (q, a, s) => s.map { case (r, m) => (q, a, stringsToUpdate(m), r) } }
     val newF = outF.map { case (q, s) => q -> Set(stringToCupstar(s)) }.toMap
     new NSST(
       states.toSet,
@@ -728,8 +734,10 @@ class NFT[Q, A, B](
     val finals: Set[Q]
 ) {
   def transOne(q: Q, a: A): Set[(Q, List[B])] = edges.withDefaultValue(Set.empty)((q, a))
+  def outputAt(q: Q, bs: List[B]): Set[List[B]] = Set(bs)
+  def transition(qs: Set[Q], w: List[A]): Set[(Q, List[B])] = Monoid.transition(qs, w, transOne)
   def transduce(w: List[A]): Set[List[B]] =
-    Monoid.transition(Set(q0), w, transOne).filter { case (q, _) => finals contains q }.map(_._2)
+    transition(Set(q0), w).flatMap { case (q, m) => outputAt(q, m) }
 }
 
 object NFT {
@@ -1055,7 +1063,7 @@ object MSST {
       stack = stack.tail
       for (a <- msst.in) {
         val nexts = nextStates(q, a)
-        newEdges ++:= nexts.map{ case (r, m) => (q, a, m, r) }
+        newEdges ++:= nexts.map { case (r, m) => (q, a, m, r) }
         val newOnes = nexts.map(_._1) -- newStates
         newStates ++= newOnes
         stack = newOnes.toList ++ stack
