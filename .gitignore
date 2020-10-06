@@ -2,3 +2,7 @@
 /.bloop
 /.metals
 target/
+.dir-locals.el
+.sbt-hydra-history
+/lib/
+project/metals.sbt
