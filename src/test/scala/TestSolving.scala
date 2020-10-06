@@ -197,7 +197,9 @@ class TestSolving extends AnyFlatSpec {
     type Edges = Set[(Q, A, Update, Q)]
     val edges: Edges = {
       val notFromJ: Edges = {
-        val baseEdges = base.edges.filter { case (q, a, _, _) => q != Cop2(j) && !(q == Cop2(j-1) && a == None) }
+        val baseEdges = base.edges.filter {
+          case (q, a, _, _) => q != Cop2(j) && !(q == Cop2(j - 1) && a == None)
+        }
         // On state j-1, machine should transition to Cop1(q0) by reading None.
         baseEdges + (
           (
@@ -526,48 +528,67 @@ class TestSolving extends AnyFlatSpec {
     test(3)
     test(4)
     test(5)
-    test(6)
-    test(7)
-    test(8)
   }
 
-  // "Variant of Zhu's benchmark int3" should "be sat" in {
-  //   val alpha = "abc".toSet
-  //   val s1 = replaceAllNSST("ab", "c", 1, 0, alpha)
-  //   val s2 = replaceAllNSST("ac", "aaaa", 2, 1, alpha)
-  //   val parikh = parikhNSST(3, alpha)
-  //   val start = System.nanoTime()
-  //   def elapsedMillis(): Long = (System.nanoTime() - start) / 1000000
-  //   def printTime(s: String) = {
-  //     info(s)
-  //     info(s"elapsed:\t${elapsedMillis()} ms")
-  //   }
-  //   val composed = NSST.composeNsstOfNssts(s1, s2)
-  //   printTime("composed")
-  //   info(s"states: ${composed.states.size}")
-  //   info(s"edges: ${composed.edges.size}")
-  //   val parikhComposed =
-  //     NSST.composeNsstOfNssts(
-  //       s1,
-  //       NSST.composeNsstOfNssts(s2, parikh)
-  //     ).optimized
-  //   info(s"""${parikhComposed.transduce(toOptionList("aab#"))}""")
-  //   printTime("prikhComposed")
-  //   info(s"states:\t${parikhComposed.states.size}")
-  //   info(s"edges:\t${parikhComposed.edges.size}")
-  //   info(s"variables:\t${parikhComposed.variables.size}")
-  //   assert(!composed.isEmpty)
-  //   printTime("composed is not empty")
-  //   val formula = parikhComposed.presburgerFormula
-  //   printTime("formula")
-  //   val smtlib = formula.smtlib
-  //   printTime("smtlib")
-  //   info(smtlib)
-  //   val enft = NSST.convertNsstToCountingNft(parikhComposed).toENFT
-  //   val v: Map[Int, Int] = Map(0 -> 3, 1 -> 2, 2 -> 4)
-  //   printTime("Start to search for witness")
-  //   val witness = enft.takeInputFor(v)
-  //   printTime("Got witness")
-  //   info(s"witness: ${fromOptionList(witness)}") // => "aab#"
-  // }
+  "Variant of Zhu's benchmark int3" should "be sat" in {
+    val alpha = "abc".toSet
+    val s1 = replaceAllNSST("ab", "c", 1, 0, alpha)
+    val s2 = replaceAllNSST("ac", "aaaa", 2, 1, alpha)
+    val parikh = parikhNSST(3, alpha)
+    val start = System.nanoTime()
+    def elapsedMillis(): Long = (System.nanoTime() - start) / 1000000
+    def printTime(s: String) = {
+      info(s)
+      info(s"elapsed:\t${elapsedMillis()} ms")
+    }
+    val composed = NSST.composeNsstsToNsst(s1, s2)
+    printTime("composed")
+    info(s"states: ${composed.states.size}")
+    info(s"edges: ${composed.edges.size}")
+
+    val parikhComposed =
+      NSST
+        .composeNsstsToNsst(
+          s1,
+          NSST.composeNsstsToNsst(s2, parikh)
+        )
+        .removeRedundantVars
+    printTime("prikhComposed")
+    info(s"states:\t${parikhComposed.states.size}")
+    info(s"edges:\t${parikhComposed.edges.size}")
+    info(s"variables:\t${parikhComposed.variables.size}")
+
+    assert(!composed.isEmpty)
+    printTime("composed is not empty")
+
+    val formula = parikhComposed.presburgerFormula
+    printTime("Formula computed")
+
+    import com.microsoft.z3
+    val cfg = new java.util.HashMap[String, String]()
+    cfg.put("model", "true")
+    val ctx = new z3.Context(cfg)
+    val freeVars = (0 until 3).map(i => s"y$i").map(y => y -> ctx.mkIntConst(y))
+    val zero = ctx.mkInt(0)
+    val positives = freeVars.map { case (_, v) => ctx.mkGe(v, zero) }
+    val expr = Parikh.Formula.formulaToExpr(ctx, freeVars.toMap, formula)
+    val growsOne = ctx.mkEq(ctx.mkSub(freeVars(2)._2, freeVars(0)._2), ctx.mkInt(1))
+    val leThree = ctx.mkLe(freeVars(0)._2, ctx.mkInt(3))
+    val solver = ctx.mkSolver()
+    solver.add(expr +: leThree +: growsOne +: positives: _*)
+    assert(solver.check() == z3.Status.SATISFIABLE)
+    val m = solver.getModel()
+    val witnessImage = ((0 until 3) zip freeVars).map {
+      case (x, (_, i)) => x -> m.eval(i, false).toString.toInt
+    }.toMap
+    printTime("Z3 done")
+    info(s"Image of witness:\t$witnessImage")
+
+    // val enft = NSST.convertNsstToCountingNft(parikhComposed).toENFT
+    // printTime("Start to search for witness")
+    // val witness =
+    //   enft.takeInputFor(witnessImage, m => m.exists { case (a, i) => i > witnessImage(a) })
+    // printTime("Got witness")
+    // info(s"witness: ${fromOptionList(witness)}") // => "aab#"
+  }
 }

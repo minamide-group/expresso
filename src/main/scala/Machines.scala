@@ -166,21 +166,14 @@ class NSST[Q, A, B, X](
   def renamed: NSST[Int, A, B, Int] = {
     val stateMap = (states zip LazyList.from(0)).toMap
     val varMap = (variables zip LazyList.from(0)).toMap
+    def renameXbs(xbs: Cupstar[X, B]): Cupstar[Int, B] = xbs.map(_.map1(varMap))
     val newEdges =
       edges
         .map {
           case (q, a, m, r) =>
-            (stateMap(q), a, m.map { case (x, xbs) => varMap(x) -> xbs.map(_.map1(varMap)) }, stateMap(r))
+            (stateMap(q), a, m.map { case (x, xbs) => varMap(x) -> renameXbs(xbs) }, stateMap(r))
         }
-    val newF =
-      partialF
-        .map {
-          case (q, s) =>
-            (
-              stateMap(q),
-              s.map { xb => xb.map(_.map1(varMap)) }
-            )
-        }
+    val newF = partialF.map { case (q, s) => (stateMap(q), s.map(renameXbs)) }
     new NSST(
       stateMap.map(_._2).toSet,
       in,
@@ -335,22 +328,6 @@ object NSST {
         case ((b, s), Cop2(a)) => (b, s)
       }
       ._1
-  }
-
-  /** Returns a set of pairs of state r and string alpha over X cup B where
-    * nft can transition to r from q by w with kt.
-    */
-  def transitionWith[Q, A, B, X](nft: NFT[Q, A, B], kt: Map[X, (Q, Q)])(q: Q, w: Cupstar[X, A]) = {
-    def transWithKT(q: Q, sigma: Cop[X, A]): Set[(Q, Cupstar[X, B])] = sigma match {
-      case Cop1(x) =>
-        kt.get(x)
-          .flatMap {
-            case (k, t) => if (q == k) Some((t, List(Cop1(x)))) else None
-          }
-          .toSet
-      case Cop2(a) => nft.transOne(q, a).map { case (q, w) => (q, w.map(Cop2(_))) }
-    }
-    Monoid.transition(Set(q), w, transWithKT)
   }
 
   def graphToMap[E, K, V](graph: Iterable[E], f: E => (K, V)): Map[K, Set[V]] =
@@ -576,7 +553,10 @@ object NSST {
   }
   // End of composeNsstsToMsst
 
-  def composeNsstsToNsst[Q1, Q2, A, B, C, X, Y](n1: NSST[Q1, A, B, X], n2: NSST[Q2, B, C, Y]) = {
+  def composeNsstsToNsst[Q1, Q2, A, B, C, X, Y](
+      n1: NSST[Q1, A, B, X],
+      n2: NSST[Q2, B, C, Y]
+  ): NSST[Int, A, C, Int] = {
     if (!n1.isCopyless) {
       throw new Exception(s"Tried to compose NSST, but first NSST was copyfull: ${n1.edges}")
     }
@@ -734,7 +714,7 @@ class NFT[Q, A, B](
     val finals: Set[Q]
 ) {
   def transOne(q: Q, a: A): Set[(Q, List[B])] = edges.withDefaultValue(Set.empty)((q, a))
-  def outputAt(q: Q, bs: List[B]): Set[List[B]] = Set(bs)
+  def outputAt(q: Q, bs: List[B]): Set[List[B]] = if (finals contains q) Set(bs) else Set.empty
   def transition(qs: Set[Q], w: List[A]): Set[(Q, List[B])] = Monoid.transition(qs, w, transOne)
   def transduce(w: List[A]): Set[List[B]] =
     transition(Set(q0), w).flatMap { case (q, m) => outputAt(q, m) }
@@ -871,8 +851,10 @@ class ENFT[Q, A, M: Monoid](
     )
   }
 
-  /** Returns an input by which the machine cat output `wanted`. */
-  def takeInputFor(wanted: M): List[A] = {
+  /** Returns an input by which the machine cat output `wanted`.
+    * If configuration has `m` of `M` and `prune(m)` is `true`,
+    * then that search branch is teminated. */
+  def takeInputFor(wanted: M, prune: M => Boolean): List[A] = {
     // TODO too slow; make faster
     val inO = in.map[Option[A]](Some.apply) + None
     val monoid = implicitly[Monoid[M]]
@@ -889,9 +871,10 @@ class ENFT[Q, A, M: Monoid](
               case Some(a) => a :: as1
             }
             val m = monoid.combine(m1, m2)
-            (q, as, m)
+            if (prune(m)) Set.empty
+            else Set((q, as, m))
           }
-      }
+      }.flatten
     }
     ???
   }

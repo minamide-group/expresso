@@ -160,4 +160,32 @@ class TestRandom extends AnyFlatSpec {
     }
     info(s"Maximum state size: ${maxStates}")
   }
+
+  "Presburger formula of randomly generated NSSTs" should
+  "be sat iff the domain is nonempty" in {
+    import com.microsoft.z3
+    val cfg = new java.util.HashMap[String, String]()
+    cfg.put("model", "true")
+    val out = Seq('a', 'b')
+    for (i <- 0 until 10) {
+      val n = randomNsstCustomized()
+      val f = n.presburgerFormula
+      val ctx = new z3.Context(cfg)
+      val freeVars = out.map(a => s"y$a").map(y => y -> ctx.mkIntConst(y))
+      val zero = ctx.mkInt(0)
+      val positives = freeVars.map { case (_, v) => ctx.mkGe(v, zero) }
+      val expr = Parikh.Formula.formulaToExpr(ctx, freeVars.toMap, f)
+      val solver = ctx.mkSolver()
+      solver.add(expr +: positives: _*)
+      if (solver.check() == z3.Status.SATISFIABLE) {
+        assert(!n.isEmpty)
+        // val m = solver.getModel()
+        // info(s"$i")
+        // info(s"a:\t${m.eval(freeVars(0)._2, false).toString.toInt}")
+        // info(s"b:\t${m.eval(freeVars(1)._2, false).toString.toInt}")
+      } else {
+        assert(n.isEmpty)
+      }
+    }
+  }
 }

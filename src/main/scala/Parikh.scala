@@ -1,5 +1,7 @@
 package com.github.kmn4.sst
 
+import com.microsoft.z3
+
 sealed trait RegExp[+A] {
   def size = RegExp.size(this)
   def optimizedOne = RegExp.optimizeOne(this)
@@ -95,15 +97,15 @@ object Semilinear {
 object Parikh {
 
   /** Types and constructers for Presburger formula */
-  sealed trait Formula[X] {
-    def smtlib: String = Formula.formulaToSMTLIB(this)
-  }
   sealed trait Term[X]
   case class Const[X](i: Int) extends Term[X]
   case class Var[X](x: X) extends Term[X]
   case class Add[X](ts: Seq[Term[X]]) extends Term[X]
   case class Sub[X](t1: Term[X], t2: Term[X]) extends Term[X]
   case class Mult[X](c: Const[X], t: Term[X]) extends Term[X]
+  sealed trait Formula[X] {
+    def smtlib: String = Formula.formulaToSMTLIB(this)
+  }
   case class Top[X]() extends Formula[X]
   case class Bot[X]() extends Formula[X]
   case class Eq[X](t1: Term[X], t2: Term[X]) extends Formula[X]
@@ -113,6 +115,7 @@ object Parikh {
   case class Ge[X](t1: Term[X], t2: Term[X]) extends Formula[X]
   case class Conj[X](fs: Seq[Formula[X]]) extends Formula[X]
   case class Disj[X](fs: Seq[Formula[X]]) extends Formula[X]
+  case class Not[X](f: Formula[X]) extends Formula[X]
   case class Exists[X](vs: Seq[Var[X]], f: Formula[X]) extends Formula[X]
 
   object Term {
@@ -148,6 +151,7 @@ object Parikh {
         case Ge(t1, t2)    => Ge(tm(t1), tm(t2))
         case Conj(fs)      => Conj(fs.map(aux))
         case Disj(fs)      => Disj(fs.map(aux))
+        case Not(f)        => Not(aux(f))
         case Exists(xs, f) => Exists(xs.map { case Var(x) => Var(renamer(x)) }, aux(f))
       }
       aux(f)
@@ -168,10 +172,52 @@ object Parikh {
         val fsString = fs.map(formulaToSMTLIB).mkString(" ")
         s"(or false $fsString)"
       }
+      case Not(f) => s"(not ${formulaToSMTLIB(f)})"
       case Exists(xs, f) => {
         val xsString = xs.map { case Var(x) => s"(${x.toString()} Int)" }.mkString(" ")
         s"(exists (${xsString}) ${formulaToSMTLIB(f)})"
       }
+    }
+
+    /** Convert a given formula to z3.BoolExpr. */
+    def formulaToExpr[X](
+        ctx: z3.Context,
+        freeVars: Map[X, z3.IntExpr],
+        f: Formula[X]
+    ): z3.BoolExpr = {
+      var varMap = freeVars
+      val trueExpr = ctx.mkBool(true)
+      val falseExpr = ctx.mkBool(false)
+      def newVar(x: X): z3.IntExpr = {
+        val e = ctx.mkIntConst(x.toString())
+        varMap += (x -> e)
+        e
+      }
+      def fromTerm(t: Term[X]): z3.ArithExpr = t match {
+        case Const(i)    => ctx.mkInt(i)
+        case Var(x)      => varMap.getOrElse(x, newVar(x))
+        case Add(ts)     => ctx.mkAdd(ts.map(fromTerm): _*)
+        case Sub(t1, t2) => ctx.mkSub(fromTerm(t1), fromTerm(t2))
+        case Mult(c, t)  => ctx.mkMul(fromTerm(c), fromTerm(t))
+      }
+      def fromFormula(f: Formula[X]): z3.BoolExpr = f match {
+        case Top()      => trueExpr
+        case Bot()      => falseExpr
+        case Eq(t1, t2) => ctx.mkEq(fromTerm(t1), fromTerm(t2))
+        case Lt(t1, t2) => ctx.mkLt(fromTerm(t1), fromTerm(t2))
+        case Le(t1, t2) => ctx.mkLe(fromTerm(t1), fromTerm(t2))
+        case Gt(t1, t2) => ctx.mkGt(fromTerm(t1), fromTerm(t2))
+        case Ge(t1, t2) => ctx.mkGe(fromTerm(t1), fromTerm(t2))
+        case Conj(fs)   => ctx.mkAnd(fs.map(fromFormula): _*)
+        case Disj(fs)   => ctx.mkOr(fs.map(fromFormula): _*)
+        case Not(f)     => ctx.mkNot(fromFormula(f))
+        case Exists(vs, f) => {
+          val xs = vs.map { case Var(x) => newVar(x) }
+          val body = formulaToExpr(ctx, varMap, f)
+          ctx.mkExists(xs.toArray, body, 0, null, null, null, null)
+        }
+      }
+      fromFormula(f)
     }
   }
 
