@@ -234,10 +234,12 @@ object Parikh {
     type Edge = (Q, Image[B], Q)
     type X = EnftVar[Q, B, Edge]
     val states = enft.states.toSeq
-    val edges: Seq[Edge] = List.from {
+    val edges: Seq[Edge] =  {
       for (((q, a), s) <- enft.edges; (r, v) <- s)
         yield (q, v, r)
-    }
+    } // Need to exclude duplicate.
+      .toSet
+      .toList
     val edgesFrom: Map[Q, Seq[Edge]] = edges.groupBy(_._1).withDefaultValue(Seq.empty)
     val edgesTo: Map[Q, Seq[Edge]] = edges.groupBy(_._3).withDefaultValue(Seq.empty)
     val input: Map[Q, Term[X]] = states

@@ -167,8 +167,26 @@ class TestRandom extends AnyFlatSpec {
     val cfg = new java.util.HashMap[String, String]()
     cfg.put("model", "true")
     val out = Seq('a', 'b')
-    for (i <- 0 until 10) {
-      val n = randomNsstCustomized()
+    for (i <- 0 until 100) {
+      val n = {
+        val in = Set('a', 'b')
+        val out = in
+        val vars = Set('X', 'Y')
+        val maxStates = 3
+        val maxFNum = 2
+        val maxRepeatB = 2
+        val maxTransition = 2
+        randomNSST(
+          new NextState().nextState _,
+          in,
+          out,
+          vars,
+          maxStates,
+          maxFNum,
+          maxRepeatB,
+          maxTransition
+        )
+      }
       val f = n.presburgerFormula
       val ctx = new z3.Context(cfg)
       val freeVars = out.map(a => s"y$a").map(y => y -> ctx.mkIntConst(y))
