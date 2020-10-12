@@ -1,0 +1,10 @@
+(declare-const x0 String)
+(declare-const x1 String)
+(declare-const y0 String)
+(declare-const y1 String)
+(declare-const xy String)
+
+(assert (= x1 (str.replaceall x0 "<sc>" "a"))) ; Hello! I'm a comment :)
+(assert (= y1 (str.replaceall y0 "<sc>" "a")))
+(assert (= xy (str.++ x1 y1)))
+(assert (str.in.re xy (str.to.re "a<sc>a")))
