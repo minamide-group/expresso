@@ -6,8 +6,22 @@ object Main extends App {
   def parseAndSolve(input: String): Option[Map[String, String]] = {
     val forms = smtlib.Parser.parse(input).map(smtlib.Form.fromSExpr)
     val cstr = Constraint.SLConstraint.fromForms(forms)
+
+    // Input / output alphabet is all characters that appears in given constraint + one additional char.
+    val alphabet = {
+      import Solver._
+      val Constraint.SLConstraint(atoms, is, rs) = cstr
+      val contained =
+        (atoms.map(usedAlphabetAtomic) ++ rs.map(c => usedAlhpabetRegExp(c.re))).fold(Set.empty)(_ union _)
+      val printable = ' ' to '~'
+      printable.find(c => !contained.contains(c)) match {
+        case None => contained
+        case Some(c) => contained + c
+      }
+    }
+
     Solver
-      .getModelIfSat(cstr)
+      .getModelIfSat(cstr, alphabet)
       .map(model => model.map { case (Constraint.StringVar(name), value) => name -> value.mkString })
   }
   val fname = args(0)

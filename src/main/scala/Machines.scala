@@ -123,11 +123,7 @@ class NSST[Q, A, B, X](
   }
 
   val delta: Map[(Q, A), Set[(Q, Update[X, B])]] =
-    graphToMap[
-      (Q, A, Update[X, B], Q),
-      (Q, A),
-      (Q, Update[X, B])
-    ](edges, { case (q, a, m, r) => (q, a) -> ((r, m)) })
+    graphToMap(edges) { case (q, a, m, r) => (q, a) -> ((r, m)) }
 
   def transOne(q: Q, a: A): Set[(Q, Update[X, B])] = delta.withDefaultValue(Set.empty)((q, a))
   def transition(qs: Set[Q], w: List[A]): Set[(Q, Update[X, B])] =
@@ -154,11 +150,7 @@ class NSST[Q, A, B, X](
   def isEmpty: Boolean = {
     val reachables = closure(
       Set(q0),
-      graphToMap[
-        (Q, A, Update[X, B], Q),
-        Q,
-        Q
-      ](edges, { case (q, _, _, r) => q -> r })
+      graphToMap(edges) { case (q, _, _, r) => q -> r }
     )
     (reachables intersect partialF.filter { case (_, s) => s.nonEmpty }.map(_._1).toSet).isEmpty
   }
@@ -267,11 +259,7 @@ class NSST[Q, A, B, X](
     transitionSystemBFS[Q, A](
       states,
       in, {
-        val m = graphToMap[
-          (Q, A, Update[X, B], Q),
-          (Q, A),
-          Q
-        ](edges, { case (q, a, m, r) => (q, a) -> r })
+        val m = graphToMap(edges) { case (q, a, m, r) => (q, a) -> r }
         (q, a) => m((q, a))
       },
       q0,
@@ -307,8 +295,9 @@ object NSST {
       ._1
   }
 
-  def graphToMap[E, K, V](graph: Iterable[E], f: E => (K, V)): Map[K, Set[V]] =
+  def graphToMap[E, K, V](graph: Iterable[E])(f: E => (K, V)): Map[K, Set[V]] =
     graph
+      .view
       .map(f)
       .groupBy(_._1)
       .view
@@ -401,11 +390,7 @@ object NSST {
     type NQ = (Q1, Map[X, (Q2, Q2)])
 
     val invTrans: Map[Q1, Set[(Q1, A, Update[X, B])]] =
-      graphToMap[
-        (Q1, A, Update[X, B], Q1),
-        Q1,
-        (Q1, A, Update[X, B])
-      ](n1.edges, { case (q, a, m, r) => r -> (q, a, m) })
+      graphToMap(n1.edges) { case (q, a, m, r) => r -> (q, a, m) }
 
     val nft = n2.asMonoidNFT
     def previousStates(nq: NQ): Set[(NQ, A, Update[X, Update[Y, C]])] = {
@@ -464,11 +449,7 @@ object NSST {
              };
              ycs <- s2)
           yield (q1, kt) -> (xms, ycs)
-      graphToMap[
-        (NQ, (Cupstar[X, Update[Y, C]], Cupstar[Y, C])),
-        NQ,
-        (Cupstar[X, Update[Y, C]], Cupstar[Y, C])
-      ](graph, { case (k, v) => k -> v })
+      graphToMap(graph) { case (k, v) => k -> v }
     }
 
     var states = outF.keySet
@@ -509,16 +490,12 @@ object NSST {
       wrapped + atNone
     }
 
-    new MSST(
+    new MSST[NWQ, A, C, X, Y](
       newStates,
       n1.in,
       n1.variables,
       n2.variables,
-      graphToMap[
-        (NWQ, A, Update[X, Update[Y, C]], NWQ),
-        (NWQ, A),
-        (NWQ, Update[X, Update[Y, C]])
-      ](newEdges, { case (q, a, m, r) => (q, a) -> (r, m) }),
+      graphToMap(newEdges) { case (q, a, m, r) => (q, a) -> (r, m) },
       None,
       newOutF
     ).unreachablesRemoved
@@ -545,6 +522,7 @@ object NSST {
       .withDefaultValue(0)
   def countCharOfX[X, A](m: Update[X, A]): Map[X, Map[A, Int]] =
     m.map { case (x, alpha) => x -> countOf2(alpha) }
+
   /** Convert given NSST to NFT that transduces each input to its Parikh image. */
   def convertNsstParikhNft[Q, A, B, X](
       nsst: NSST[Q, A, B, X]

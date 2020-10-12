@@ -209,11 +209,6 @@ class TestComposition extends AnyFlatSpec {
       // val composed = SST.composeNSSTsBackward(doubles.toSingleOutput, sameOrTwiceLen.toSingleOutput)
       val composed = NSST.composeNsstsToMsst(doubles, doubles)
       info(s"Number of states: ${composed.states.size}")
-      info(s"states:\t${composed.states}")
-      info(s"edges:\t${composed.edges}")
-      info(s"outF:\t${composed.outF}")
-      // info(s"Max number of transition destinations: ${maxTransition(composed)}")
-      // assert(composed.isCopyless)
       assert(composed.transduce("".toList) == Set("".toList))
       assert(composed.transduce("a".toList) == Set("aaaa".toList))
     }

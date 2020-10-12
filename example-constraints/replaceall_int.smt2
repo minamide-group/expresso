@@ -1,0 +1,8 @@
+(declare-const x String)
+(declare-const y String)
+(declare-const z String)
+(assert (= y (str.replaceall x "ab" "c")))
+(assert (= z (str.replaceall y "ac" "aaaa")))
+(assert (< (str.len x) 5))
+; (assert (< (+ (str.len x) 1) (str.len z)))
+(assert (= (+ (str.len x) 1) (str.len z)))

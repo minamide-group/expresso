@@ -172,7 +172,7 @@ class TestRandom extends AnyFlatSpec {
         val in = Set('a', 'b')
         val out = in
         val vars = Set('X', 'Y')
-        val maxStates = 3
+        val maxStates = 10
         val maxFNum = 2
         val maxRepeatB = 2
         val maxTransition = 2

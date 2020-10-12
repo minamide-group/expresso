@@ -17,7 +17,7 @@ class TestParikhPresburger extends AnyFlatSpec {
       0,
       List((1, "XaY"))
     )
-    info(s"nsst: ${nsst.presburgerFormula.smtlib}")
+    // info(s"nsst: ${nsst.presburgerFormula.smtlib}")
     val doubles = NSST(
       Set(0),
       Set('X', 'Y'),
@@ -25,7 +25,7 @@ class TestParikhPresburger extends AnyFlatSpec {
       0,
       List((0, "XY"))
     )
-    info(s"doubles: ${doubles.presburgerFormula.smtlib}")
+    // info(s"doubles: ${doubles.presburgerFormula.smtlib}")
     val doublesSingle = NSST(
       Set(0),
       Set('X'),
@@ -33,7 +33,7 @@ class TestParikhPresburger extends AnyFlatSpec {
       0,
       List((0, "X"))
     )
-    info(s"doublesSingle: ${doublesSingle.presburgerFormula.smtlib}")
+    // info(s"doublesSingle: ${doublesSingle.presburgerFormula.smtlib}")
     val append6or10 = NSST(
       Set(0),
       Set('X'),
@@ -41,60 +41,7 @@ class TestParikhPresburger extends AnyFlatSpec {
       0,
       List((0, "X"))
     )
-    info(s"append6or10: ${append6or10.presburgerFormula.smtlib}")
-  }
-
-  "Calculating Parikh image of randomly generated NSST" should "be done in reasonable time" in {
-    def randomNsstCustomized() = {
-      val in = Set('a', 'b')
-      val out = in
-      val vars = Set('X', 'Y')
-      val maxStates = 10
-      val maxFNum = 2
-      val maxRepeatB = 3
-      val maxTransition = 3
-      TestRandom.randomNSST(
-        new TestRandom.NextState().nextState _,
-        in,
-        out,
-        vars,
-        maxStates,
-        maxFNum,
-        maxRepeatB,
-        maxTransition
-      )
-    }
-
-    var maxLen = 0
-    var maxLenNSST = randomNsstCustomized()
-    var maxLenElapsed: Long = 0
-    for (_ <- 0 until 100) {
-      val nsst = randomNsstCustomized()
-      val start = System.nanoTime()
-      def elapsed(): Long = System.nanoTime() - start
-      val formula = nsst.presburgerFormula
-      val len = formula.smtlib.length
-      val e = elapsed()
-      if (maxLen < len) {
-        maxLen = len
-        maxLenElapsed = e
-        maxLenNSST = nsst
-      }
-    }
-    info(s"NSST states: ${maxLenNSST.states.size}\tedges: ${maxLenNSST.edges.size}")
-    info(s"elapsed ${maxLenElapsed / 1000000} ms")
-    info(s"length: ${maxLen}")
-    // val path = ""
-    // val f = new java.io.File(path)
-    // val w = new java.io.PrintWriter(f)
-    // w.write("(declare-const a Int)\n")
-    // w.write("(declare-const b Int)\n")
-    // w.write("(assert ")
-    // w.write(maxLenNSST.presburgerFormula.smtlib)
-    // w.write(")\n")
-    // w.write("(check-sat)\n")
-    // w.write("(get-model)\n")
-    // w.close()
+    // info(s"append6or10: ${append6or10.presburgerFormula.smtlib}")
   }
 
   "Found bug" should "be fixed" in {

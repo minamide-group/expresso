@@ -18,8 +18,7 @@ class TestZ3 extends AnyFlatSpec {
     // x + y = 3
     assert(s.check() == Status.SATISFIABLE)
     var m = s.getModel()
-    info(s"x:\t${m.eval(x, false)}")
-    info(s"y:\t${m.eval(y, false)}")
+    assert(m.eval(x, false).toString.toInt + m.eval(y, false).toString.toInt == 3)
 
     val xNeg = ctx.mkLt(x, ctx.mkInt(0))
     val yNeg = ctx.mkLt(y, ctx.mkInt(0))
@@ -32,8 +31,8 @@ class TestZ3 extends AnyFlatSpec {
     // x + y = 3 && x < 0
     assert(s.check() == Status.SATISFIABLE)
     m = s.getModel()
-    info(s"x:\t${m.eval(x, false)}")
-    info(s"y:\t${m.eval(y, false)}")
+    assert(m.eval(x, false).toString.toInt + m.eval(y, false).toString.toInt == 3)
+    assert(m.eval(x, false).toString.toInt < 0)
     ctx.close()
   }
 
@@ -51,7 +50,7 @@ class TestZ3 extends AnyFlatSpec {
     s.add(exists, yPos)
     assert(s.check() == Status.SATISFIABLE)
     val m = s.getModel()
-    info(s"y:\t${m.eval(y, false)}")
+    assert(m.eval(y, false).toString.toInt > 0)
     ctx.close()
   }
 }

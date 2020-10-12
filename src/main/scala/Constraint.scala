@@ -167,9 +167,60 @@ object Solver {
     )
   }
 
+  /** Returns `alphabet` to `alphabet` NSST whose state set is {(0, 0), ... (n, 0)}
+    * and variable set is `inputVariable +: otherVariables`.
+    * On each state (i, 0) the NSST appends input character to `inputVariable`, and identity on `otherVariables`.
+    * It transitions to next state when it reads `None`, appending `None` to `inputVariable`.
+    * Its output function value will be `Set(output)` on state (n, 0), and empty on other ones.
+    * So the NSST reads string of the form "w0 None w1 None ... w(n-1) None" and
+    * outputs `output` where `inputVariable` is replaced with "w0 None ... w(n-1) None". */
+  def solverNsstTemplate[C, X](
+      n: Int,
+      alphabet: Set[C],
+      inputVariable: X,
+      otherVariables: Set[X],
+      output: List[Cop[X, Option[C]]]
+  ): NSST[(Int, Int), Option[C], Option[C], X] = {
+    type Q = (Int, Int)
+    type A = Option[C]
+    type B = Option[C]
+    val states = Set.from(for (i <- 0 to n) yield (i, 0))
+    val xs = otherVariables + inputVariable
+    val outF: Map[Q, Set[Concepts.Cupstar[X, B]]] = Map((n, 0) -> Set(output))
+    val updates = Concepts.updateMonoid(xs)
+    type Edges = Set[(Q, A, Concepts.Update[X, B], Q)]
+    val edges: Edges = {
+      val appendingEdges: Edges =
+        for ((i, _) <- states; a <- alphabet if i != n)
+          yield (
+            (i, 0),
+            Some(a),
+            updates.unit + (inputVariable -> List(Cop1(inputVariable), Cop2(Some(a)))),
+            (i, 0)
+          )
+      val toNextEdges: Edges =
+        for ((i, _) <- states; if i != n)
+          yield (
+            (i, 0),
+            None,
+            updates.unit + (inputVariable -> List(Cop1(inputVariable), Cop2(None))),
+            (i + 1, 0)
+          )
+      appendingEdges ++ toNextEdges
+    }
+    new NSST(
+      states,
+      (alphabet.map[Option[C]](Some(_))) + None,
+      xs,
+      edges,
+      (0, 0),
+      outF
+    )
+  }
+
   /** Construct DFA which accepts strings whose postfix is target.
     *  Each state i represents target.substring(0, i). */
-  private def postfixDFA[A](target: Seq[A], in: Set[A]) = {
+  private def postfixDFA[A](target: Seq[A], in: Set[A]): DFA[Int, A] = {
     // KMP backtracking table
     val table: Vector[Int] = {
       var t = Vector(-1)
@@ -213,68 +264,28 @@ object Solver {
     if (i <= j) {
       throw new Exception()
     }
-    // States of the form Cop1(q) are the states of j-th component.
-    type Q = Cop[Int, Int]
-    type X = Int
+    type Q = (Int, Int)
+    sealed trait X
+    case object XIn extends X
+    case object XJ extends X
     type A = Option[C]
     type B = Option[C]
     type Update = Concepts.Update[X, B]
-    /* Returns `in` to `in` NSST whose state set is {0, ... n} and variable set is {0, 1}.
-     * On each state i the NSST appends an input character to variable 0.
-     * It transitions to next state when it reads `None`, appending `None` to variable 0.
-     * Its output function value is `0 None 1 None` on state n, and empty on other ones.
-     * So the NSST reads string of the form "w0 None w1 None ... w(n-1) None" and
-     * outputs "w0 None w1 None ... w(n-1) None None" (because it doesn't append any char to var 1). */
-    val base: NSST[Q, A, B, X] = {
-      type Q = Int
-      type X = Int
-      type A = Option[C]
-      type B = Option[C]
-      val n = i
-      val states = Set.from(0 to n)
-      val xs = Set(0, 1)
-      val q0 = 0
-      val outF: Map[Q, Set[Concepts.Cupstar[X, B]]] = Map(
-        n -> Set(List(Cop1(0), Cop1(1), Cop2(None)))
-      )
-      val updates = Concepts.updateMonoid(xs)
-      type Edges = Set[(Q, A, Concepts.Update[X, B], Q)]
-      val edges: Edges = {
-        val appendingEdges: Edges =
-          for (i <- states; a <- in if i != n)
-            yield (i, Some(a), updates.unit + (0 -> List(Cop1(0), Cop2(Some(a)))), i)
-        val toNextEdges: Edges =
-          for (i <- states; if i != n)
-            yield (i, None, updates.unit + (0 -> List(Cop1(0), Cop2(None))), i + 1)
-        appendingEdges ++ toNextEdges
-      }
-      embedStates2(
-        new NSST(
-          states,
-          (in.map[Option[C]](Some(_))) + None,
-          xs,
-          edges,
-          q0,
-          outF
-        )
-      )
-    }
+    val base = solverNsstTemplate[C, X](i, in, XIn, Set(XJ), List(Cop1(XIn), Cop1(XJ), Cop2(None)))
     val xs = base.variables
     val updates: Monoid[Update] = Concepts.updateMonoid(xs)
     val dfa = postfixDFA(target, in)
     type Edges = Set[(Q, A, Update, Q)]
     val edges: Edges = {
       val notFromJ: Edges = {
-        val baseEdges = base.edges.filter {
-          case (q, a, _, _) => q != Cop2(j) && !(q == Cop2(j - 1) && a == None)
-        }
-        // On state j-1, machine should transition to Cop1(q0) by reading None.
+        val baseEdges = base.edges.filter { case ((q, _), a, _, _) => q != j && !(q == j - 1 && a == None) }
+        // On state (j-1, 0), machine should transition to (j, q0) by reading None.
         baseEdges + (
           (
-            Cop2(j - 1),
+            (j - 1, 0),
             None,
-            updates.unit + (0 -> List(Cop1(0), Cop2(None))),
-            Cop1(dfa.q0)
+            updates.unit + (XIn -> List(Cop1(XIn), Cop2(None))),
+            (j, dfa.q0)
           )
         )
       }
@@ -285,13 +296,13 @@ object Solver {
         val toNext: Edges =
           states.map(q => {
             val stored = target.take(q)
-            val appendStored = {
+            val appendStored: Update = {
               Map(
-                0 -> List(Cop1(0), Cop2(None)),
-                1 -> (List(Cop1(1)) ++ stored.toList.map(a => Cop2(Some(a))))
+                XIn -> List(Cop1(XIn), Cop2(None)),
+                XJ -> (List(Cop1(XJ)) ++ stored.toList.map(a => Cop2(Some(a))))
               )
             }
-            (Cop1(q), None, appendStored, Cop2(j + 1))
+            ((j, q), None, appendStored, (j + 1, 0))
           })
         // In each transition, DFA discards some prefix string (possibly empty one).
         // SST should store it in variable 1 (it should also store input char in 0, of course).
@@ -300,35 +311,24 @@ object Solver {
             yield {
               val t = dfa.transition((q, a))
               val (r, append) =
-                if (dfa.finalStates contains t) {
-                  (
-                    dfa.q0,
-                    word.map(Some(_))
-                  )
-                } else {
+                if (dfa.finalStates contains t) (dfa.q0, word.map(Some(_)))
+                else {
                   val qStored = target.take(q) ++ List(a)
-                  (
-                    t,
-                    qStored.take(qStored.length - t).toList.map(Some(_))
-                  )
+                  (t, qStored.take(qStored.length - t).toList.map(Some(_)))
                 }
               val m = updates.combine(
-                appendWordTo(0, xs, List(Some(a))),
-                appendWordTo(
-                  1,
-                  xs,
-                  append.toList
-                )
+                appendWordTo(XIn, xs, List(Some(a))),
+                appendWordTo(XJ, xs, append.toList)
               )
-              (Cop1(q), Some(a), m, Cop1(r))
+              ((j, q), Some(a), m, (j, r))
             }
         }
         edgesFromDfa ++ toNext
       }
       (notFromJ ++ jthComponent)
     }
-    val states = edges.map { case (q, _, _, _) => q } + Cop2(i)
-    val q0 = if (j == 0) Cop1(dfa.q0) else Cop2(0)
+    val states = edges.map { case (q, _, _, _) => q } + ((i, 0))
+    val q0 = if (j == 0) (j, dfa.q0) else (0, 0)
     new NSST[Q, A, B, X](
       states,
       in.map(Some(_): Option[C]) + None,
@@ -340,58 +340,36 @@ object Solver {
   }
 
   /** Construct NSST which output concatenation of `j`-th and `k`-th input in this order. */
-  def concatNSST[C](
-      i: Int,
-      j: Int,
-      k: Int,
-      alphabet: Set[C]
-  ): NSST[Int, Option[C], Option[C], Int] = {
-    type Q = Int
+  def concatNSST[C](i: Int, j: Int, k: Int, alphabet: Set[C]): NSST[Int, Option[C], Option[C], Int] = {
+    type Q = (Int, Int)
     type A = Option[C]
     type B = Option[C]
     trait X
-    trait Y extends X
-    case object Input extends X
-    case object J extends Y
-    case object K extends Y
-    // Almost same code as solverNsstTemplate, but here variable set has two addtional ones.
-    val states = Set.from(0 to i)
-    val xs: Set[X] = Set(Input, J, K)
-    val q0 = 0
-    val outF: Map[Q, Set[Concepts.Cupstar[X, B]]] =
-      Map(i -> Set(List(Cop1(Input), Cop1(J), Cop1(K), Cop2(None))))
-    val updates = Concepts.updateMonoid(xs)
-    type Edges = Set[(Q, A, Concepts.Update[X, B], Q)]
-    val edges: Edges = {
-      // On states j (resp. k), append an char also to J (resp. K)
-      val appendingEdges: Edges =
-        for (q <- states; a <- alphabet if q != i)
-          yield {
-            val m = updates.unit + (Input -> List(Cop1(Input), Cop2(Some(a)))) ++
-              (if (q == j) { Some((J -> List(Cop1(J), Cop2(Some(a))))) }
-               else { None }) ++
-              (if (q == k) { Some((K -> List(Cop1(K), Cop2(Some(a))))) }
-               else { None })
-            (q, Some(a), m, q)
-          }
-      // On state i-1, assign concat of j' and k' into i, and clear them.
-      val toNextEdges: Edges =
-        for (q <- states; if q != i)
-          yield {
-            val m = updates.unit + (Input -> List(Cop1(Input), Cop2(None)))
-            (q, None, m, q + 1)
-          }
-      appendingEdges ++ toNextEdges
+    case object XIn extends X
+    case object XJ extends X
+    case object XK extends X
+    val base: NSST[Q, A, B, X] =
+      solverNsstTemplate(i, alphabet, XIn, Set(XJ, XK), List(Cop1(XIn), Cop1(XJ), Cop1(XK), Cop2(None)))
+    val updates = Concepts.updateMonoid(base.variables)
+    val edges = {
+      base.edges.map {
+        case (q, a, m, r) if j == k && q._1 == j && a != None =>
+          (q, a, m + (XJ -> List(Cop1(XJ), Cop2(a))) + (XK -> List(Cop1(XK), Cop2(a))), r)
+        case (q, a, m, r) if q._1 == j && a != None => (q, a, m + (XJ -> List(Cop1(XJ), Cop2(a))), r)
+        case (q, a, m, r) if q._1 == k && a != None => (q, a, m + (XK -> List(Cop1(XK), Cop2(a))), r)
+        case other                                  => other
+      }
     }
     new NSST[Q, A, B, X](
-      states,
+      base.states,
       alphabet.map[Option[C]](Some.apply) + None,
-      xs,
-      edges,
-      q0,
-      outF
+      base.variables,
+      edges.toSet,
+      (0, 0),
+      base.outF
     ).renamed
   }
+
   // Construct NSST which outputs exactly the same string as input,
   // if it is consist of `n` strings and its `i`-th (starting from 0) one
   // is in language represented by `re`.
@@ -605,15 +583,12 @@ object Solver {
   /** Construct SST of constraint `c` assuming it is straight-line.
     * If `c` has integer constraints, this also construct an ε-NFA that outputs
     * vectors from variable number to length of its content. */
-  def compileConstraint[A](c: SLConstraint[A]): (SolverSST[A], Option[ParikhNFT[A]]) = {
+  def compileConstraint[A](c: SLConstraint[A], alphabet: Set[A]): (SolverSST[A], Option[ParikhNFT[A]]) = {
     val SLConstraint(atoms, is, rs) = c
     // If an input constriant is one like (z := x y; w := replaceall z "a" "b"; v in (a)*) then
     // its string variables are ordered like v, x, y, z, w (unused in atoms first).
     val stringVars = stringVarsSL(c)
     val ordering = stringVars.zipWithIndex.toMap
-    // Input / output alphabet is all characters that appears in given constraint.
-    val alphabet =
-      (atoms.map(usedAlphabetAtomic) ++ rs.map(c => usedAlhpabetRegExp(c.re))).fold(Set.empty)(_ union _)
     // Construct SST from each atomic constraint.
     def compileAtomic(a: AtomicConstraint[A]): SolverSST[A] = a match {
       case Constant(l, w)     => ???
@@ -662,7 +637,7 @@ object Solver {
     (solverSST, parikhNFT)
   }
 
-  def getModelIfSat[A](c: SLConstraint[A]): Option[Map[StringVar, Seq[A]]] = {
+  def getModelIfSat[A](c: SLConstraint[A], alphabet: Set[A]): Option[Map[StringVar, Seq[A]]] = {
     def witnessToModel(w: Seq[Option[A]]): Map[StringVar, List[A]] = {
       val valuation = w.foldRight[List[List[A]]](Nil) {
         case (None, acc)         => Nil :: acc
@@ -671,7 +646,7 @@ object Solver {
       }
       (stringVarsSL(c) zip valuation).toMap
     }
-    compileConstraint(c) match {
+    compileConstraint(c, alphabet) match {
       // No integer constraint present
       case (sst, None) => {
         if (sst.isEmpty) None
