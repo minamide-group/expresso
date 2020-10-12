@@ -119,16 +119,6 @@ object Parikh {
   case class Exists[X](vs: Seq[Var[X]], f: Formula[X]) extends Formula[X]
 
   object Term {
-    def renameVars[X, Y](t: Term[X], renamer: X => Y): Term[Y] = {
-      def aux(t: Term[X]): Term[Y] = t match {
-        case Const(i)          => Const(i)
-        case Var(x)            => Var(renamer(x))
-        case Add(ts)           => Add(ts.map(aux))
-        case Sub(t1, t2)       => Sub(aux(t1), aux(t2))
-        case Mult(Const(i), t) => Mult(Const(i), aux(t))
-      }
-      aux(t)
-    }
     def termToSMTLIB[X](t: Term[X]): String = t match {
       case Const(i)     => i.toString()
       case Var(x)       => x.toString()
@@ -140,7 +130,16 @@ object Parikh {
 
   object Formula {
     def renameVars[X, Y](f: Formula[X], renamer: X => Y): Formula[Y] = {
-      val tm: Term[X] => Term[Y] = Term.renameVars(_, renamer)
+      def tm(t: Term[X]): Term[Y] = {
+        def aux(t: Term[X]): Term[Y] = t match {
+          case Const(i)          => Const(i)
+          case Var(x)            => Var(renamer(x))
+          case Add(ts)           => Add(ts.map(aux))
+          case Sub(t1, t2)       => Sub(aux(t1), aux(t2))
+          case Mult(Const(i), t) => Mult(Const(i), aux(t))
+        }
+        aux(t)
+      }
       def aux(f: Formula[X]): Formula[Y] = f match {
         case Top()         => Top()
         case Bot()         => Bot()
@@ -228,7 +227,7 @@ object Parikh {
   case class Dist[Q, B, E](q: Q) extends EnftVar[Q, B, E]
   // case class IsInit[Q, B, E](q: Q) extends EnftVar[Q, B,E]
   // case class IsFin[Q, B, E](q: Q) extends EnftVar[Q, B,E]
-  def countingEnftToPresburgerFormula[Q, A, B](
+  def parikhEnftToPresburgerFormula[Q, A, B](
       enft: ENFT[Q, A, Image[B]]
   ): Formula[EnftVar[Q, B, (Q, Image[B], Q)]] = {
     type Edge = (Q, Image[B], Q)
@@ -319,9 +318,9 @@ object Parikh {
     val conj: Formula[X] = Conj(List(euler, connectivity, parikh, positive))
     Exists(boundedVars.map(Var.apply), conj)
   }
-  def countingMnftToPresburgerFormula[Q, A, B](
+  def parikhMnftToPresburgerFormula[Q, A, B](
       mnft: MNFT[Q, A, Image[B]]
   ): Formula[EnftVar[Int, B, (Int, Image[B], Int)]] = {
-    countingEnftToPresburgerFormula(mnft.unifyInitAndFinal)
+    parikhEnftToPresburgerFormula(mnft.unifyInitAndFinal)
   }
 }

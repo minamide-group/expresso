@@ -329,7 +329,7 @@ class TestComposition extends AnyFlatSpec {
   }
 
   "Composition of two NSSTs" should "be done correctly" in {
-    val composed = NSST.composeNsstsToNsst(sameOrTwiceLen, sameOrTwiceLen)
+    val composed = sameOrTwiceLen compose sameOrTwiceLen
     info(s"Number of states: ${composed.states.size}")
     info(s"Max number of transition destinations: ${maxTransition(composed)}")
     assert(composed.isCopyless)

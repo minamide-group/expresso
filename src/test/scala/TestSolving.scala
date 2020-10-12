@@ -449,7 +449,7 @@ class TestSolving extends AnyFlatSpec {
     assert(sc.transduce(toOptionList("#<sc>#")) == Set(toOptionList("#<sc>#")))
     assert(sc.transduce(toOptionList("#<sc#")) == Set())
     val start = System.nanoTime()
-    val composed = NSST.composeNsstsToNsst(sc10, sc)
+    val composed = sc10 compose sc
     info(s"elapsed:\t${(System.nanoTime() - start) / 1000000} ms")
     info(s"states:\t${composed.states.size}")
     info(s"variables:\t${composed.variables.size}")
@@ -541,18 +541,12 @@ class TestSolving extends AnyFlatSpec {
       info(s)
       info(s"elapsed:\t${elapsedMillis()} ms")
     }
-    val composed = NSST.composeNsstsToNsst(s1, s2)
+    val composed = s1 compose s2
     printTime("composed")
     info(s"states: ${composed.states.size}")
     info(s"edges: ${composed.edges.size}")
 
-    val parikhComposed =
-      NSST
-        .composeNsstsToNsst(
-          s1,
-          NSST.composeNsstsToNsst(s2, parikh)
-        )
-        .removeRedundantVars
+    val parikhComposed = s1 compose (s2 compose parikh)
     printTime("prikhComposed")
     info(s"states:\t${parikhComposed.states.size}")
     info(s"edges:\t${parikhComposed.edges.size}")
@@ -584,11 +578,11 @@ class TestSolving extends AnyFlatSpec {
     printTime("Z3 done")
     info(s"Image of witness:\t$witnessImage")
 
-    // val enft = NSST.convertNsstToCountingNft(parikhComposed).toENFT
-    // printTime("Start to search for witness")
-    // val witness =
-    //   enft.takeInputFor(witnessImage, m => m.exists { case (a, i) => i > witnessImage(a) })
-    // printTime("Got witness")
-    // info(s"witness: ${fromOptionList(witness)}") // => "aab#"
+    val enft = NSST.convertNsstParikhNft(parikhComposed).toENFT
+    printTime("Start to search for witness")
+    val witness =
+      enft.takeInputFor(witnessImage, m => m.exists { case (a, i) => i > witnessImage(a) })
+    printTime("Got witness")
+    info(s"witness: ${fromOptionList(witness)}") // => "aab#"
   }
 }

@@ -34,6 +34,7 @@ class TestZ3 extends AnyFlatSpec {
     m = s.getModel()
     info(s"x:\t${m.eval(x, false)}")
     info(s"y:\t${m.eval(y, false)}")
+    ctx.close()
   }
 
   "Existantial Presburger formula" should "be checked" in {
@@ -51,5 +52,6 @@ class TestZ3 extends AnyFlatSpec {
     assert(s.check() == Status.SATISFIABLE)
     val m = s.getModel()
     info(s"y:\t${m.eval(y, false)}")
+    ctx.close()
   }
 }

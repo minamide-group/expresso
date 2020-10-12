@@ -145,7 +145,7 @@ class TestRandom extends AnyFlatSpec {
     for (_ <- 0 until 100) {
       val n1 = randomNsstCustomized()
       val n2 = randomNsstCustomized()
-      val composed = NSST.composeNsstsToNsst(n1, n2).removeRedundantVars
+      val composed = n1 compose n2
       assert(composed.isCopyless)
       maxStates = max(maxStates, composed.states.size)
       val composedTransduction = composed.transduce _
@@ -197,13 +197,10 @@ class TestRandom extends AnyFlatSpec {
       solver.add(expr +: positives: _*)
       if (solver.check() == z3.Status.SATISFIABLE) {
         assert(!n.isEmpty)
-        // val m = solver.getModel()
-        // info(s"$i")
-        // info(s"a:\t${m.eval(freeVars(0)._2, false).toString.toInt}")
-        // info(s"b:\t${m.eval(freeVars(1)._2, false).toString.toInt}")
       } else {
         assert(n.isEmpty)
       }
+      ctx.close()
     }
   }
 }

@@ -120,5 +120,6 @@ class TestParikhPresburger extends AnyFlatSpec {
     val solver = ctx.mkSolver()
     solver.add(expr +: positives: _*)
     assert(solver.check() == z3.Status.SATISFIABLE)
+    ctx.close()
   }
 }

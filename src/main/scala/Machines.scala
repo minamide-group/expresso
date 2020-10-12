@@ -257,6 +257,7 @@ class NSST[Q, A, B, X](
     )
   }
 
+  def parikhEnft: ENFT[Int, A, Map[B, Int]] = NSST.convertNsstParikhNft(this).unifyInitAndFinal
   def presburgerFormula: Parikh.Formula[String] = NSST.parikhImagePresburger(this)
 
   /** Returns an input string that give some output.
@@ -278,33 +279,9 @@ class NSST[Q, A, B, X](
     )
   }
 
-  def toSingleOutput = {
-    val newVars: Set[Option[X]] = variables.map[Option[X]](Some.apply) + None
-    def embedUpdate(m: Update[X, B]): Update[Option[X], B] =
-      m.map { case (x, alpha) => Some(x) -> alpha.map(_.map1(Some.apply)) }
-    new SST[Option[Q], A, B, Option[X]](
-      states.map[Option[Q]](Some.apply) + None,
-      in,
-      newVars,
-      edges.map { case (q, a, m, r) => (Some(q), a, embedUpdate(m) + (None -> Nil), Some(r)) }.toList,
-      outF
-        .flatMap[(Option[Q], Update[Option[X], B], Option[Q])] {
-          case (q, s) =>
-            s.map(w =>
-              (
-                Some(q),
-                (newVars.map(_ -> List.empty[Cop[Option[X], B]]) + (None -> w
-                  .map(_.map1(Some.apply)))).toMap,
-                None
-              )
-            )
-        }
-        .toList,
-      Some(q0),
-      Set(None),
-      None
-    )
-  }
+  /** Construct NSST that transduce w to that.transduce(this.transduce(w)). */
+  def compose[R, C, Y](that: NSST[R, B, C, Y]): NSST[Int, A, C, Int] =
+    NSST.composeNsstsToNsst(this, that).renamed.removeRedundantVars
 }
 
 object NSST {
@@ -455,16 +432,11 @@ object NSST {
             candidates match {
               case Nil => Set((Map.empty, n1.variables.map(x => x -> Nil).toMap))
               case (x, s) :: tl =>
-                aux(tl).flatMap {
-                  case (kt1, mu) =>
-                    s.map {
-                      case (kt2, alpha) =>
-                        (
-                          (kt1 ++ kt2),
-                          mu + (x -> alpha)
-                        )
-                    }
-                }
+                for ((kt1, mu) <- aux(tl); (kt2, alpha) <- s)
+                  yield (
+                    (kt1 ++ kt2),
+                    mu + (x -> alpha)
+                  )
             }
           aux(candidates.toList).map {
             case (kt, m) =>
@@ -556,14 +528,14 @@ object NSST {
   def composeNsstsToNsst[Q1, Q2, A, B, C, X, Y](
       n1: NSST[Q1, A, B, X],
       n2: NSST[Q2, B, C, Y]
-  ): NSST[Int, A, C, Int] = {
+  ): NSST[(Option[(Q1, Map[X, (Q2, Q2)])], Map[X, Concepts.M1[Y]]), A, C, (X, Y, Boolean)] = {
     if (!n1.isCopyless) {
       throw new Exception(s"Tried to compose NSST, but first NSST was copyfull: ${n1.edges}")
     }
     if (!n2.isCopyless) {
       throw new Exception(s"Tried to compose NSST, but second NSST was copyfull: ${n2.edges}")
     }
-    MSST.convertMsstToNsst(NSST.composeNsstsToMsst(n1, n2)).renamed
+    MSST.convertMsstToNsst(NSST.composeNsstsToMsst(n1, n2))
   }
 
   def countOf2[A, B](alpha: Cupstar[A, B]): Map[B, Int] =
@@ -573,7 +545,8 @@ object NSST {
       .withDefaultValue(0)
   def countCharOfX[X, A](m: Update[X, A]): Map[X, Map[A, Int]] =
     m.map { case (x, alpha) => x -> countOf2(alpha) }
-  def convertNsstToCountingNft[Q, A, B, X](
+  /** Convert given NSST to NFT that transduces each input to its Parikh image. */
+  def convertNsstParikhNft[Q, A, B, X](
       nsst: NSST[Q, A, B, X]
   ): MNFT[(Q, Set[X]), A, Map[B, Int]] = {
     type NQ = (Q, Set[X])
@@ -649,7 +622,7 @@ object NSST {
   }
 
   def parikhImage[Q, A, B, X](nsst: NSST[Q, A, B, X]): Semilinear[Map[B, Int]] = {
-    val mnft = convertNsstToCountingNft(nsst)
+    val mnft = convertNsstParikhNft(nsst)
     val regex = MNFT.outputRegex(mnft)
     val s = Semilinear.fromRegex(regex)(Monoid.vectorMonoid(nsst.out)(Monoid.intAdditiveMonoid))
     // Remove duplicate linear set
@@ -658,8 +631,8 @@ object NSST {
 
   def parikhImagePresburger[Q, A, B, X](n: NSST[Q, A, B, X]) = {
     import Parikh._
-    val coutingNft = NSST.convertNsstToCountingNft(n)
-    val formula = Parikh.countingMnftToPresburgerFormula(coutingNft)
+    val coutingNft = NSST.convertNsstParikhNft(n)
+    val formula = Parikh.parikhMnftToPresburgerFormula(coutingNft)
     type E = (Int, Image[B], Int)
     type X = EnftVar[Int, B, E]
     class Renamer() {
@@ -855,7 +828,6 @@ class ENFT[Q, A, M: Monoid](
     * If configuration has `m` of `M` and `prune(m)` is `true`,
     * then that search branch is teminated. */
   def takeInputFor(wanted: M, prune: M => Boolean): List[A] = {
-    // TODO too slow; make faster
     val inO = in.map[Option[A]](Some.apply) + None
     val monoid = implicitly[Monoid[M]]
     var queue: Queue[(Q, List[A], M)] = Queue((initial, Nil, monoid.unit))
@@ -1161,6 +1133,17 @@ class DFA[Q, A](
     finalStates
   )
 
+  def renamed: DFA[Int, A] = {
+    var stateMap = (states zip LazyList.from(0)).toMap
+    new DFA(
+      stateMap.values.toSet,
+      alpha,
+      transition.map { case ((p, a), q) => (stateMap(p), a) -> stateMap(q) }.toMap,
+      stateMap(q0),
+      finalStates.map(stateMap)
+    )
+  }
+
   def intersect[R](other: DFA[R, A]): DFA[(Q, R), A] = {
     val newStates = for (p <- this.states; q <- other.states) yield (p, q)
 
@@ -1267,7 +1250,7 @@ class NFA[Q, A](
   }
 }
 
-private class RegExp2NFA(re: RegExp[Char]) {
+private class RegExp2NFA[A](re: RegExp[A]) {
   private var state = -1
 
   private def freshState(): Int = {
@@ -1275,7 +1258,7 @@ private class RegExp2NFA(re: RegExp[Char]) {
     state
   }
 
-  private def aux(re: RegExp[Char]): NFA[Int, Char] = re match {
+  private def aux(re: RegExp[A]): NFA[Int, A] = re match {
     case EpsExp =>
       val q = freshState()
       new NFA(Set(q), Set(), Map(), q, Set(q))
@@ -1322,5 +1305,5 @@ private class RegExp2NFA(re: RegExp[Char]) {
       )
   }
 
-  def construct(): NFA[Int, Char] = aux(re)
+  def construct(): NFA[Int, A] = aux(re)
 }
