@@ -25,12 +25,12 @@ object Main extends App {
       .map(model => model.map { case (Constraint.StringVar(name), value) => name -> value.mkString })
   }
   val fname = args(0)
-  val path = FileSystems.getDefault().getPath(".", fname)
+  val path = FileSystems.getDefault().getPath(fname)
   val input = Files.readAllBytes(path).map(_.toChar).mkString
   val output = parseAndSolve(input) match {
     case None => "unsat"
     case Some(model) =>
-      val s = model.map { case (name, value) => s"""(define-const $name Int "${value}")""" }.mkString("\n  ")
+      val s = model.map { case (name, value) => s"""(define-const $name String "${value}")""" }.mkString("\n  ")
       s"sat\n(model\n  $s\n)"
   }
   println(output)

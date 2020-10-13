@@ -161,9 +161,10 @@ class NSST[Q, A, B, X](
     def renameXbs(xbs: Cupstar[X, B]): Cupstar[Int, B] = xbs.map(_.map1(varMap))
     val newEdges =
       edges
-        .map {
-          case (q, a, m, r) =>
-            (stateMap(q), a, m.map { case (x, xbs) => varMap(x) -> renameXbs(xbs) }, stateMap(r))
+        .flatMap {
+          case (q, a, m, r) if states.contains(q) && states.contains(r) =>
+            Some((stateMap(q), a, m.map { case (x, xbs) => varMap(x) -> renameXbs(xbs) }, stateMap(r)))
+          case _ => None
         }
     val newF = partialF.map { case (q, s) => (stateMap(q), s.map(renameXbs)) }
     new NSST(
@@ -296,8 +297,7 @@ object NSST {
   }
 
   def graphToMap[E, K, V](graph: Iterable[E])(f: E => (K, V)): Map[K, Set[V]] =
-    graph
-      .view
+    graph.view
       .map(f)
       .groupBy(_._1)
       .view

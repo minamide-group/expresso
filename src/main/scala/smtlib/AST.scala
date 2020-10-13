@@ -25,9 +25,15 @@ object Form {
   def fromSExpr(s: SExpr): Form = s match {
     case Call(Symbol("declare-const"), Symbol(name), Symbol("Int")) =>
       DeclConst(name, IntSort)
+    case Call(Symbol("declare-fun"), Symbol(name), Call(), Symbol("Int")) =>
+      DeclConst(name, IntSort)
     case Call(Symbol("declare-const"), Symbol(name), Symbol("String")) =>
       DeclConst(name, StringSort)
+    case Call(Symbol("declare-fun"), Symbol(name), Call(), Symbol("String")) =>
+      DeclConst(name, StringSort)
     case Call(Symbol("assert"), expr) => Assert(expr)
+    case Call(Symbol("check-sat"))    => CheckSAT
+    case Call(Symbol("get-model"))    => GetModel
     case _                            => throw new Exception("Cannot interpret given S expression as a form.")
   }
 }
