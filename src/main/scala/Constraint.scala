@@ -10,6 +10,8 @@ object Constraint {
   case class At[A](pos: Int) extends Transduction[A]
   case class Reverse[A]() extends Transduction[A]
   case class Substr[A](from: Int, len: Int) extends Transduction[A]
+  case class TakePrefix[A]() extends Transduction[A]
+  case class TakeSuffix[A]() extends Transduction[A]
 
   case class StringVar(name: String)
   case class IntVar(name: String)
@@ -60,7 +62,9 @@ object Constraint {
       case Call(Symbol("str.reverse"), Symbol(name)) if env(name) == StringSort => (name, Reverse())
       case Call(Symbol("str.substr"), Symbol(name), NumConst(from), NumConst(len)) =>
         (name, Substr(from, len))
-      case _ => throw new Exception("Cannot interpret given S-expression as transduction")
+      case Call(Symbol("str.take_prefix"), Symbol(name)) if env(name) == StringSort => (name, TakePrefix())
+      case Call(Symbol("str.take_suffix"), Symbol(name)) if env(name) == StringSort => (name, TakeSuffix())
+      case _                                                                        => throw new Exception("Cannot interpret given S-expression as transduction")
     }
     private def expectInt(e: SExpr, env: Env): IntExp = e match {
       case NumConst(i)                                                      => ConstExp(i)
@@ -245,6 +249,17 @@ object Solver {
       (0, 0),
       outF
     )
+  }
+
+  /** x(i) := word */
+  def constantNSST[C](i: Int, word: Seq[C], alphabet: Set[C]): SolverSST[C] = {
+    solverNsstTemplate(
+      i,
+      alphabet,
+      (),
+      Set.empty,
+      List(Cop1(())) ++ word.map(a => Cop2(Some(a))) ++ List(Cop2(None))
+    ).renamed
   }
 
   /** Construct DFA which accepts strings whose postfix is target.
@@ -625,6 +640,76 @@ object Solver {
     ).renamed
   } // End of regexNSST
 
+  /** x(i) := take_prefix(x(j)) ∈ {w | ∃ u s.t. wu = x(j)} */
+  def takePrefixNSST[C](i: Int, j: Int, alphabet: Set[C]): SolverSST[C] = {
+    sealed trait X
+    case object XIn extends X
+    case object XJ extends X
+    val base = solverNsstTemplate[C, X](i, alphabet, XIn, Set(XJ), List(Cop1(XIn), Cop1(XJ), Cop2(None)))
+    val states = base.states + ((j, 1))
+    val variables = Set[X](XIn, XJ)
+    val idUpdate = Concepts.updateMonoid[X, Option[C]](variables).unit
+    val update: Map[Option[C], Concepts.Update[X, Option[C]]] =
+      base.in.map(a => a -> (idUpdate + (XIn -> List(Cop1(XIn), Cop2(a))))).toMap
+    val edges = {
+      val baseEdges = base.edges.view.filterNot { case ((q, _), _, _, _) => q == j }
+      val someEdges =
+        alphabet.view.flatMap(a =>
+          Iterable(
+            ((j, 0), Some(a), update(Some(a)) + (XJ -> List(Cop1(XJ), Cop2(Some(a)))), (j, 0)),
+            ((j, 0), Some(a), update(Some(a)), (j, 1)),
+            ((j, 1), Some(a), update(Some(a)), (j, 1))
+          )
+        )
+      val noneEdges =
+        Iterable(((j, 0), None, update(None), (j + 1, 0)), ((j, 1), None, update(None), (j + 1, 0)))
+      baseEdges ++ someEdges ++ noneEdges
+    }
+    new NSST[(Int, Int), Option[C], Option[C], X](
+      states,
+      base.in,
+      variables,
+      edges.toSet,
+      (0, 0),
+      base.outF
+    ).renamed
+  }
+
+  /** x(i) := take_suffix(x(j)) ∈ {w | ∃ u s.t. uw = x(j)} */
+  def takeSuffixNSST[C](i: Int, j: Int, alphabet: Set[C]): SolverSST[C] = {
+    sealed trait X
+    case object XIn extends X
+    case object XJ extends X
+    val base = solverNsstTemplate[C, X](i, alphabet, XIn, Set(XJ), List(Cop1(XIn), Cop1(XJ), Cop2(None)))
+    val states = base.states + ((j, 1))
+    val variables = Set[X](XIn, XJ)
+    val idUpdate = Concepts.updateMonoid[X, Option[C]](variables).unit
+    val update: Map[Option[C], Concepts.Update[X, Option[C]]] =
+      base.in.map(a => a -> (idUpdate + (XIn -> List(Cop1(XIn), Cop2(a))))).toMap
+    val edges = {
+      val baseEdges = base.edges.view.filterNot { case ((q, _), _, _, _) => q == j }
+      val someEdges =
+        alphabet.view.flatMap(a =>
+          Iterable(
+            ((j, 0), Some(a), update(Some(a)), (j, 0)),
+            ((j, 0), Some(a), update(Some(a)) + (XJ -> List(Cop1(XJ), Cop2(Some(a)))), (j, 1)),
+            ((j, 1), Some(a), update(Some(a)) + (XJ -> List(Cop1(XJ), Cop2(Some(a)))), (j, 1))
+          )
+        )
+      val noneEdges =
+        Iterable(((j, 0), None, update(None), (j + 1, 0)), ((j, 1), None, update(None), (j + 1, 0)))
+      baseEdges ++ someEdges ++ noneEdges
+    }
+    new NSST[(Int, Int), Option[C], Option[C], X](
+      states,
+      base.in,
+      variables,
+      edges.toSet,
+      (0, 0),
+      base.outF
+    ).renamed
+  }
+
   /** Returns NSST that outputs the same string as input iff it meets constriant given by `dfas`.
     * That is, it reads input of the form w0#w1#...w(n-1)# (where n = dfas.length and # = None) and
     * outputs it if dfa(i) accepts w(i) for all i. */
@@ -744,12 +829,10 @@ object Solver {
     case CatCstr(_, _, _)  => Set.empty
     case TransCstr(_, trans, _) =>
       trans match {
-        case PrependAppend(pre, post) => (pre ++ post).toSet
-        case ReplaceAll(target, word) => (target ++ word).toSet
-        case Insert(_, word)          => word.toSet
-        case At(_)                    => Set.empty
-        case Reverse()                => Set.empty
-        case Substr(_, _)             => Set.empty
+        case PrependAppend(pre, post)                                       => (pre ++ post).toSet
+        case ReplaceAll(target, word)                                       => (target ++ word).toSet
+        case Insert(_, word)                                                => word.toSet
+        case At(_) | Reverse() | Substr(_, _) | TakePrefix() | TakeSuffix() => Set.empty
       }
   }
   def usedAlhpabetRegExp[A](re: RegExp[A]): Set[A] = re match {
@@ -767,7 +850,7 @@ object Solver {
   def compileAtomic[A](alphabet: Set[A], ordering: Map[StringVar, Int])(
       a: AtomicConstraint[A]
   ): SolverSST[A] = a match {
-    case Constant(l, w)     => ???
+    case Constant(l, word)  => constantNSST(ordering(l), word, alphabet)
     case CatCstr(l, r1, r2) => concatNSST(ordering(l), ordering(r1), ordering(r2), alphabet)
     case TransCstr(l, t, r) =>
       val i = ordering(l)
@@ -779,6 +862,8 @@ object Solver {
         case At(pos)                  => atNSST(i, j, pos, alphabet)
         case Reverse()                => reverseNSST(i, j, alphabet)
         case Substr(from, len)        => substrNSST(i, j, from, len, alphabet)
+        case TakePrefix()             => takePrefixNSST(i, j, alphabet)
+        case TakeSuffix()             => takeSuffixNSST(i, j, alphabet)
       }
   }
 
