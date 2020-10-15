@@ -599,14 +599,6 @@ object NSST {
     ).optimized
   }
 
-  def parikhImage[Q, A, B, X](nsst: NSST[Q, A, B, X]): Semilinear[Map[B, Int]] = {
-    val mnft = convertNsstParikhNft(nsst)
-    val regex = MNFT.outputRegex(mnft)
-    val s = Semilinear.fromRegex(regex)(Monoid.vectorMonoid(nsst.out)(Monoid.intAdditiveMonoid))
-    // Remove duplicate linear set
-    Semilinear(s.ls.toSet.toList)
-  }
-
   def parikhImagePresburger[Q, A, B, X](n: NSST[Q, A, B, X]) = {
     import Parikh._
     val coutingNft = NSST.convertNsstParikhNft(n)
