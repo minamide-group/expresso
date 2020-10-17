@@ -832,27 +832,34 @@ class ENFT[Q, A, M: Monoid](
     * If configuration has `m` of `M` and `prune(m)` is `true`,
     * then that search branch is teminated. */
   def takeInputFor(wanted: M, prune: M => Boolean): List[A] = {
-    val inO = in.map[Option[A]](Some.apply) + None
+    val inO = List.from(in.map[Option[A]](Some.apply) + None)
     val monoid = implicitly[Monoid[M]]
     var queue: Queue[(Q, List[A], M)] = Queue((initial, Nil, monoid.unit))
+    var visited: Set[(Q, M)] = queue.view.map { case (q, _, m) => (q, m) }.toSet
+    def terminate(q: Q, m: M): Boolean = prune(m) || visited((q, m))
     while (queue.nonEmpty) {
       val (q, as1, m1) = queue.head
       queue = queue.tail
-      if (m1 == wanted && finalState == q) return as1.reverse
-      queue ++= {
-        for (o <- inO; (q, m2) <- edges((q, o)))
-          yield {
-            val as = o match {
-              case None    => as1
-              case Some(a) => a :: as1
+      if (q == finalState && m1 == wanted) return as1.reverse
+      val added = {
+        inO.flatMap(o =>
+          edges((q, o)).flatMap {
+            case (q, m2) => {
+              val as = o match {
+                case None    => as1
+                case Some(a) => a :: as1
+              }
+              val m = monoid.combine(m1, m2)
+              if (terminate(q, m)) Set.empty
+              else Set((q, as, m))
             }
-            val m = monoid.combine(m1, m2)
-            if (prune(m)) Set.empty
-            else Set((q, as, m))
           }
-      }.flatten
+        )
+      }
+      for ((q, _, m) <- added) visited += ((q, m))
+      queue ++= added
     }
-    ???
+    throw new Exception("No input string gives wanted thing.")
   }
 }
 
