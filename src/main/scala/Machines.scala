@@ -313,7 +313,7 @@ object NSST {
       q: Q,
       r: Q,
       invTransA: Map[(Q, A), Set[(Q, B)]],
-      invTransX: Map[(Q, X), Set[(Q, Cupstar[X, B])]], // At q2 reading x can lead to transX(q2, x)
+      invTransX: Map[(Q, X), Set[Q]], // At q2 reading x can lead to transX(q2, x)
       xas: Cupstar[X, A]
   ): Set[(Map[X, (Q, Q)], Cupstar[X, B])] = {
     // `acc` accumulates a set of pairs of a mapping and configuration (outputs are reversed).
@@ -324,7 +324,7 @@ object NSST {
         case (Cop1(x), acc) =>
           acc.flatMap {
             case (m, (r, xbs)) =>
-              invTransX(r, x).map { case (q, _) => (m + (x -> (q, r)), (q, Cop1(x) :: xbs)) }
+              invTransX(r, x).map(q => (m + (x -> (q, r)), (q, Cop1(x) :: xbs)))
           }
         case (Cop2(a), acc) =>
           acc.flatMap {
@@ -353,17 +353,17 @@ object NSST {
     val invTransB: Map[(Q2, B), Set[(Q2, Update[Y, C])]] =
       graphToMap(n2.edges) { case (q, b, m, r) => (r, b) -> (q, m) }
 
-    val invTransX: Map[Q1, Map[(Q2, X), Set[(Q2, Cupstar[X, Update[Y, C]])]]] = {
+    val invTransX: Map[Q1, Map[(Q2, X), Set[Q2]]] = {
       import scala.collection.mutable.{Map => MMap, Set => MSet}
       // At n1.q0, all x can contain empty string, thus q2 can transition to q2.
       // At other q1s, nothing is known about content of each x, and destination is empty.
-      val res: MMap[(Q1, X, Q2), MSet[(Q2, Cupstar[X, Update[Y, C]])]] =
+      val res: MMap[(Q1, X, Q2), MSet[Q2]] =
         MMap.empty.withDefault {
-          case (q1, x, q2) => (if (q1 == n1.q0) MSet((q2, List(Cop1(x)))) else MSet.empty)
+          case (q1, x, q2) => (if (q1 == n1.q0) MSet(q2) else MSet.empty)
         }
-      def trans(transX: (Q2, X) => MSet[Q2])(q: Q2, xb: Cop[X, B]): Set[(Q2, Cupstar[X, Update[Y, C]])] =
+      def trans(transX: (Q2, X) => MSet[Q2])(q: Q2, xb: Cop[X, B]): Set[(Q2, Unit)] =
         xb match {
-          case Cop1(x) => Set.from(transX(q, x).map((_, List(Cop1(x)))))
+          case Cop1(x) => Set.from(transX(q, x).map((_, ())))
           case Cop2(b) => n2.transOne(q, b).map { case (r, m) => (r, List(Cop2(m))) }
         }
       var updated = false
@@ -372,7 +372,7 @@ object NSST {
         // q1 =[???/m]=> r1, q2 =[(m(x)@q1)/???]=> r2 then q2 =[(x@r1)/???]=> r2
         for ((q1, _, m, r1) <- n1.edges; x <- n1.variables; q2 <- n2.states) {
           val cur = res((r1, x, q2))
-          val added = Monoid.transition(Set(q2), m(x), trans { case (q, y) => res((q1, y, q)).map(_._1) })
+          val added = Monoid.transition(Set(q2), m(x), trans { case (q, y) => res((q1, y, q)) }).map(_._1)
           if (!(added subsetOf cur)) {
             updated = true
             cur ++= added
@@ -381,10 +381,10 @@ object NSST {
         }
       } while (updated)
 
-      (for (((q1, x, q2), s) <- res; (r2, xms) <- s) yield (q1, x, q2, r2, xms))
-        .groupMap(_._1) { case (_, x, q2, r2, xms) => (x, q2, r2, xms) }
+      (for (((q1, x, q2), s) <- res; r2 <- s) yield (q1, x, q2, r2))
+        .groupMap(_._1) { case (_, x, q2, r2) => (x, q2, r2) }
         .view
-        .mapValues(graphToMap(_) { case (x, q2, r2, xms) => (r2, x) -> (q2, xms) })
+        .mapValues(graphToMap(_) { case (x, q2, r2) => (r2, x) -> q2 })
         .toMap
         .withDefaultValue(Map.empty.withDefaultValue(Set.empty))
     }
