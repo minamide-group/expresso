@@ -350,6 +350,7 @@ object NSST {
   )(
       q: Q,
       r: Q,
+      transX: Map[(Q, X), Set[Q]], // At q2 reading x can lead to transX(q2, x)
       xas: Cupstar[X, A]
   ): Set[(Map[X, (Q, Q)], Cupstar[X, B])] = {
     // `acc` accumulates a set of pairs of a mapping and configuration (outputs are reversed).
@@ -360,7 +361,7 @@ object NSST {
         case (acc, Left(x)) =>
           acc.flatMap {
             case (m, (q, xbs)) =>
-              nft.states.map(r => (m + (x -> (q, r)), (r, Cop1(x) :: xbs)))
+              transX(q, x).map(r => (m + (x -> (q, r)), (r, Cop1(x) :: xbs)))
           }
         case (acc, Right(as)) =>
           acc.flatMap {
@@ -392,6 +393,39 @@ object NSST {
     val invTrans: Map[Q1, Set[(Q1, A, Update[X, B])]] =
       graphToMap(n1.edges) { case (q, a, m, r) => r -> (q, a, m) }
 
+    val n2CanTransitionBy: Map[Q1, Map[(Q2, X), Set[Q2]]] = {
+      import scala.collection.mutable.{Map => MMap, Set => MSet}
+      // At n1.q0, all x can contain empty string, thus q2 can transition to q2.
+      // At other q1s, nothing is known about content of each x, and destination is empty.
+      val res: MMap[(Q1, X, Q2), MSet[Q2]] =
+        MMap.empty.withDefault { case (q1, _, q2) => (if (q1 == n1.q0) MSet(q2) else MSet.empty) }
+      def trans(transX: (Q2, X) => MSet[Q2])(q: Q2, xb: Cop[X, B]): Set[(Q2, Unit)] = xb match {
+        case Cop1(x) => Set.from(transX(q, x).map((_, ())))
+        case Cop2(b) => n2.transOne(q, b).map { case (r, _) => (r, ()) }
+      }
+      var updated = false
+      do {
+        updated = false
+        // q1 =[???/m]=> r1, q2 =[(m(x)@q1)/???]=> r2 then q2 =[(x@r1)/???]=> r2
+        for ((q1, _, m, r1) <- n1.edges; x <- n1.variables; q2 <- n2.states) {
+          val cur = res((r1, x, q2))
+          val added = Monoid.transition(Set(q2), m(x), trans { case (q, y) => res((q1, y, q)) }).map(_._1)
+          if (!(added subsetOf cur)) {
+            updated = true
+            cur ++= added
+          }
+          res((r1, x, q2)) = cur
+        }
+      } while (updated)
+
+      res
+        .groupMap(_._1._1) { case ((_, x, q2), r2s) => Map((q2, x) -> Set.from(r2s)) }
+        .view
+        .mapValues(maps => maps.reduce(_ ++ _))
+        .toMap
+        .withDefaultValue(Map.empty.withDefaultValue(Set.empty))
+    }
+
     val nft = n2.asMonoidNFT
     def previousStates(nq: NQ): Set[(NQ, A, Update[X, Update[Y, C]])] = {
       val (r, kt) = nq
@@ -405,7 +439,7 @@ object NSST {
                   // Variables always empty at state q can be ignored
                   val usedAtQ = n1.nonEmptyVarsAt(q)
                   val filtered = m(x).filter { case Cop1(x) => usedAtQ contains x; case _ => true }
-                  possiblePreviousOf(nft)(k, t, filtered)
+                  possiblePreviousOf(nft)(k, t, n2CanTransitionBy(q), filtered)
                 }
               )
               .toMap
@@ -445,7 +479,7 @@ object NSST {
              (kt, xms) <- {
                val usedAtQ = n1.nonEmptyVarsAt(q1)
                val filtered = xbs.filter { case Cop1(x) => usedAtQ contains x; case _ => true }
-               possiblePreviousOf(nft)(n2.q0, q2, filtered)
+               possiblePreviousOf(nft)(n2.q0, q2, n2CanTransitionBy(q1), filtered)
              };
              ycs <- s2)
           yield (q1, kt) -> (xms, ycs)
