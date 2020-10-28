@@ -118,19 +118,44 @@ class TestSolver extends AnyFunSuite {
     val c = SLConstraint.fromForms(fs)
     val (sst, Some(nft)) = compileConstraint(c, Set('a', 'b', ' '))
     info(sst.transduce(toOptionList("aaabbb#")).map(fromOptionList).toString())
-    Main.parseAndSolve(input) match {
-      case None => fail()
-      case Some(m) => {
-        val x = m("x")
-        val y = m("y")
-        val z = m("z")
-        assert(x.length == y.length + z.length)
-        assert(y.length == z.length)
-        info(s"""x: "$x"""")
-        info(s"""y: "$y"""")
-        info(s"""z: "$z"""")
-      }
-    }
+    // Main.parseAndSolve(input) match {
+    //   case None => fail()
+    //   case Some(m) => {
+    //     val x = m("x")
+    //     val y = m("y")
+    //     val z = m("z")
+    //     assert(x.length == y.length + z.length)
+    //     assert(y.length == z.length)
+    //     info(s"""x: "$x"""")
+    //     info(s"""y: "$y"""")
+    //     info(s"""z: "$z"""")
+    //   }
+    // }
     info(s"elapsed: ${(System.nanoTime() - s) / 1000000} ms")
   }
+
+//   test("hoge") {
+//     val input = """
+// (declare-const x0 String)
+// (declare-const x1 String)
+// (declare-const y0 String)
+// (declare-const y1 String)
+
+// (assert (= x1 (str.replaceall x0 "<sc>" "")))
+// (assert (= y1 (str.replaceall y0 "<sc>" "")))
+// (assert (< 0 (str.len x0)))
+// (assert (< 0 (str.len y0)))
+// (assert (= (str.len x1) (str.len y1)))
+// (assert (= 10 (str.len x1)))
+// """
+//     Main.parseAndSolve(input) match {
+//       case None => fail
+//       case Some(m) => {
+//         info(s"""x0: ${m("x0")}""")
+//         info(s"""x1: ${m("x1")}""")
+//         info(s"""y0: ${m("y0")}""")
+//         info(s"""y1: ${m("y1")}""")
+//       }
+//     }
+//   }
 }

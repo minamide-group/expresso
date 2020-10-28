@@ -329,10 +329,7 @@ object NSST {
         case (Cop2(a), acc) =>
           acc.flatMap {
             case (m, (r, xbs)) =>
-              Set.from {
-                for ((q, b) <- invTransA((r, a)))
-                  yield (m, (q, Cop2(b) :: xbs))
-              }
+              invTransA(r, a).map { case (q, b) => (m, (q, Cop2(b) :: xbs)) }
           }
       }
       .withFilter { case (_, (s, _)) => s == q }
@@ -353,10 +350,13 @@ object NSST {
     val invTransB: Map[(Q2, B), Set[(Q2, Update[Y, C])]] =
       graphToMap(n2.edges) { case (q, b, m, r) => (r, b) -> (q, m) }
 
+    // Consider product construction of two NSSTs.
+    // invTransX(p)(q, x) is a set of state `r`s where q may transition to r by reading
+    // a content of x at state p.
     val invTransX: Map[Q1, Map[(Q2, X), Set[Q2]]] = {
       import scala.collection.mutable.{Map => MMap, Set => MSet}
       // At n1.q0, all x can contain empty string, thus q2 can transition to q2.
-      // At other q1s, nothing is known about content of each x, and destination is empty.
+      // At other q1s, nothing is known about content of each x, hence empty destination set.
       val res: MMap[(Q1, X, Q2), MSet[Q2]] =
         MMap.empty.withDefault {
           case (q1, x, q2) => (if (q1 == n1.q0) MSet(q2) else MSet.empty)
@@ -386,14 +386,14 @@ object NSST {
         .view
         .mapValues(graphToMap(_) { case (x, q2, r2) => (r2, x) -> q2 })
         .toMap
-        .withDefaultValue(Map.empty.withDefaultValue(Set.empty))
+        .withDefaultValue(Map.empty.withDefault { case (q2, _) => Set(q2) })
     }
 
     def previousStates(nq: NQ): Set[(NQ, A, Update[X, Update[Y, C]])] = {
       val (r, kt) = nq
       invTrans(r).flatMap {
         case (q, a, m) => {
-          val candidates: Map[X, Set[(Map[X, (Q2, Q2)], Cupstar[X, Update[Y, C]])]] =
+          val candidates: List[(X, Set[(Map[X, (Q2, Q2)], Cupstar[X, Update[Y, C]])])] =
             kt.keySet
               .map(x =>
                 x -> {
@@ -404,11 +404,9 @@ object NSST {
                   possiblePreviousOf(k, t, invTransB, invTransX(q), filtered)
                 }
               )
-              .toMap
+              .toList
           def aux(
-              candidates: List[
-                (X, Set[(Map[X, (Q2, Q2)], Cupstar[X, Update[Y, C]])])
-              ]
+              candidates: List[(X, Set[(Map[X, (Q2, Q2)], Cupstar[X, Update[Y, C]])])]
           ): Set[(Map[X, (Q2, Q2)], Update[X, Update[Y, C]])] =
             candidates match {
               case Nil => Set((Map.empty, n1.variables.map(x => x -> Nil).toMap))
@@ -419,13 +417,8 @@ object NSST {
                     mu + (x -> alpha)
                   )
             }
-          aux(candidates.toList).map {
-            case (kt, m) =>
-              (
-                (q, kt),
-                a,
-                m ++ Map.from((n1.variables -- m.keySet).map(x => x -> Nil))
-              )
+          aux(candidates).map {
+            case (kt, m) => ((q, kt), a, m ++ Map.from((n1.variables -- m.keySet).map(x => x -> Nil)))
           }
         }
       }
@@ -439,8 +432,8 @@ object NSST {
              xbs <- s1;
              (q2, s2) <- outF2;
              (kt, xms) <- {
-               val usedAtQ = n1.nonEmptyVarsAt(q1)
-               val filtered = xbs.filter { case Cop1(x) => usedAtQ contains x; case _ => true }
+               val usedAtQ1 = n1.nonEmptyVarsAt(q1)
+               val filtered = xbs.filter { case Cop1(x) => usedAtQ1 contains x; case _ => true }
                possiblePreviousOf(n2.q0, q2, invTransB, invTransX(q1), filtered)
              };
              ycs <- s2)
@@ -825,40 +818,6 @@ class ENFT[Q, A, M: Monoid](
   }
 }
 
-object MNFT {
-  def outputRegex[Q, A, M](mnft: MNFT[Q, A, M]): RegExp[M] = {
-    type NQ = Int
-    val unified = mnft.unifyInitAndFinal
-    type E = Map[(NQ, NQ), RegExp[M]]
-    var edges: E = {
-      val graph = for (((q1, a), s) <- unified.edges; (q2, m) <- s) yield ((q1, q2), m)
-      def regexOf(l: Iterable[M]): RegExp[M] =
-        l.map(CharExp(_)).foldLeft[RegExp[M]](EmptyExp) { case (acc, e) => OrExp(acc, e) }
-      graph.toList
-        .groupBy(_._1)
-        .view
-        .mapValues(l => regexOf(l.map { case (_, m) => m }))
-        .toMap
-    }
-    var nqs = unified.states
-    // States elimination
-    for (q <- nqs -- Set(unified.initial, unified.finalState)) {
-      for (p <- nqs; r <- nqs if p != q && r != q) {
-        val o1 = edges.get((p, r))
-        val o2 =
-          for (pq <- edges.get((p, q));
-               qq <- edges.get((q, q));
-               qr <- edges.get((q, r)))
-            yield CatExp(pq, CatExp(StarExp(qq), qr))
-        edges += (p, r) -> OrExp(o1.getOrElse(EmptyExp), o2.getOrElse(EmptyExp)).optimized
-      }
-      nqs -= q
-    }
-    assert(nqs == Set(true, false).map(Cop2(_)))
-    edges((unified.initial, unified.finalState)).optimized
-  }
-}
-
 /** Nondeterministic monoid SST */
 class MSST[Q, A, B, X, Y](
     val states: Set[Q],
@@ -1020,8 +979,6 @@ object MSST {
   }
 }
 
-// The rest of this file is copy-paste from past works.
-// These are just for emitting DOT graph of SSTs.
 class DFA[Q, A](
     val states: Set[Q],
     val alpha: Set[A],
@@ -1223,7 +1180,7 @@ class NFA[Q, A](
   }
 }
 
-private class RegExp2NFA[A](re: RegExp[A]) {
+private class RegExp2NFA[A](re: RegExp[A], alphabet: Set[A]) {
   private var state = -1
 
   private def freshState(): Int = {
@@ -1231,24 +1188,31 @@ private class RegExp2NFA[A](re: RegExp[A]) {
     state
   }
 
+  private def setState(i: Int) = state = i
+
   private def aux(re: RegExp[A]): NFA[Int, A] = re match {
     case EpsExp =>
       val q = freshState()
-      new NFA(Set(q), Set(), Map(), q, Set(q))
+      new NFA(Set(q), alphabet, Map(), q, Set(q))
     case EmptyExp =>
       val q = freshState()
-      new NFA(Set(q), Set(), Map(), q, Set())
+      new NFA(Set(q), alphabet, Map(), q, Set())
+    case DotExp =>
+      val q = freshState()
+      val r = freshState()
+      val trans = alphabet.map[((Int, Option[A]), Set[Int])](a => (q, Some(a)) -> Set(r)).toMap
+      new NFA(Set(q, r), alphabet, trans, q, Set(r))
     case CharExp(c) =>
       val s = freshState()
       val t = freshState()
-      new NFA(Set(s, t), Set(c), Map((s, Some(c)) -> Set(t)), s, Set(t))
+      new NFA(Set(s, t), alphabet, Map((s, Some(c)) -> Set(t)), s, Set(t))
     case OrExp(e1, e2) =>
       val n1 = aux(e1)
       val n2 = aux(e2)
       val s = freshState()
       new NFA(
         n1.states union n2.states union Set(s),
-        n1.alpha union n2.alpha,
+        alphabet,
         n1.transition ++ n2.transition
           ++ Map((s, None) -> Set(n1.q0, n2.q0)),
         s,
@@ -1259,7 +1223,7 @@ private class RegExp2NFA[A](re: RegExp[A]) {
       val n2 = aux(e2)
       new NFA(
         n1.states union n2.states,
-        n1.alpha union n2.alpha,
+        alphabet,
         n1.transition ++ n2.transition
           ++ n1.finalStates.map(q => ((q, None), n1.transition((q, None)) + n2.q0)).toMap,
         n1.q0,
@@ -1270,12 +1234,17 @@ private class RegExp2NFA[A](re: RegExp[A]) {
       val s = freshState()
       new NFA(
         n.states + s,
-        n.alpha,
+        alphabet,
         n.transition + ((s, None) -> Set(n.q0))
           ++ n.finalStates.map(q => ((q, None), n.transition((q, None)) + s)).toMap,
         s,
         Set(n.q0)
       )
+    case CompExp(e) =>
+      val d = aux(e).toDFA.complement.renamed
+      val maxState = d.states.max
+      setState(maxState + 1)
+      d.asNFA
   }
 
   def construct(): NFA[Int, A] = aux(re)

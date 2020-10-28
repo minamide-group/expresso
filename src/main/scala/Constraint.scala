@@ -88,7 +88,10 @@ object Constraint {
         case Call(Symbol("re.union"), e1, e2) => OrExp(expectRegExp(e1), expectRegExp(e2))
         case Call(Symbol("re.range"), StringConst(c1), StringConst(c2)) if c1.length == 1 && c2.length == 1 =>
           throw new NotImplementedError("re.range is not implemented")
-        case _ => throw new Exception("Cannot interpret given S-expression as regular expression")
+        case Call(Symbol("re.comp"), e) => CompExp(expectRegExp(e))
+        case Symbol("re.allchar")       => DotExp
+        case Symbol("re.all")           => StarExp(DotExp)
+        case _                          => throw new Exception(s"Cannot interpret given S-expression as regular expression: $e")
       }
     private def expectConstraint(e: SExpr, env: Env): BoolExp = e match {
       case Call(Symbol("="), Symbol(name), StringConst(s)) if env(name) == StringSort =>
@@ -151,7 +154,6 @@ object Constraint {
 
 object ConstraintExamples {
   import Constraint._
-  import RegExp._
   def replaceAll(s: String, t: String): Transduction[Char] = ReplaceAll(s.toSeq, t.toSeq)
   // Zhu's case 1
   val c1 = {
