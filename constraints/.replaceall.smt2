@@ -8,3 +8,6 @@
 (assert (= y1 (str.replaceall y0 "<sc>" "a")))
 (assert (= xy (str.++ x1 y1)))
 (assert (str.in.re xy (str.to.re "a<sc>a")))
+
+(check-sat)
+(get-model)
