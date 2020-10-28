@@ -9,7 +9,7 @@ libraryDependencies ++= Seq(
 )
 
 fork in run := true
-fork in test := true
+fork in Test := true
 cancelable in Global := true
 
 scalacOptions ++= Seq(

@@ -1,8 +1,10 @@
 /.idea
 /.bloop
 /.metals
+/.bsp/
 target/
 .dir-locals.el
 .sbt-hydra-history
 /lib/
 project/metals.sbt
+/bin/
