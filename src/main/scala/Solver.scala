@@ -155,9 +155,6 @@ object Solver {
     }
   }
   private def expectTransduction(e: Term, env: FunctionEnv): (String, Transduction[Char]) = e match {
-    case SimpleApp("str.++", Seq(SString(pre), SimpleQualID(name), SString(post)))
-        if env(name) == StringConst =>
-      (name, PrependAppend(pre, post))
     case SimpleApp("str.replaceall", Seq(SimpleQualID(name), SString(target), SString(word)))
         if env(name) == StringConst =>
       (name, ReplaceAll(target, word))
@@ -207,11 +204,15 @@ object Solver {
   private def expectConstraint(e: Term, env: FunctionEnv): BoolExp = e match {
     case SimpleApp("=", Seq(SimpleQualID(name), SString(s))) if env(name) == StringConst =>
       Atom(Constant(StringVar(name), s))
-    case SimpleApp(
-        "=",
-        Seq(SimpleQualID(name), SimpleApp("str.++", Seq(SimpleQualID(rhs1), SimpleQualID(rhs2))))
-        ) if env(name) == StringConst && env(rhs1) == StringConst && env(rhs2) == StringConst =>
-      Atom(CatCstr(StringVar(name), StringVar(rhs1), StringVar(rhs2)))
+    case SimpleApp("=", Seq(SimpleQualID(name), SimpleApp("str.++", rhs))) if rhs.forall {
+          case SimpleQualID(name) => env(name) == StringConst
+          case SString(s)         => true
+          case _                  => false
+        } =>
+      Atom(CatCstr(StringVar(name), rhs.map {
+        case SimpleQualID(name) => Right(StringVar(name))
+        case SString(s)         => Left(s.toSeq)
+      }))
     case SimpleApp("=", Seq(SimpleQualID(name), e)) if env(name) == StringConst =>
       val (rhs, trans) = expectTransduction(e, env)
       Atom(TransCstr(StringVar(name), trans, StringVar(rhs)))
@@ -451,7 +452,7 @@ object Solver {
 
   /** Construct NSST which output concatenation of `rhs`.
     * Right(j) in `rhs` is `j`-th input delemited by #. */
-  def concatNSST2[C](i: Int, rhs: Seq[Either[Seq[C], Int]], alphabet: Set[C]): SolverSST[C] = {
+  def concatNSST[C](i: Int, rhs: Seq[Either[Seq[C], Int]], alphabet: Set[C]): SolverSST[C] = {
     type Q = (Int, Int)
     trait X
     case object XIn extends X
@@ -465,59 +466,16 @@ object Solver {
     val vars = concated.flatMap { case Cop1(x) => Some(x); case _ => None }
     val base =
       solverNsstTemplate(i, alphabet, XIn, vars.toSet, List(Cop1(XIn)) ++ concated ++ List(Cop2(None)))
-    ???
-  }
-
-  /** Construct NSST which output concatenation of `j`-th and `k`-th input in this order. */
-  def concatNSST[C](i: Int, j: Int, k: Int, alphabet: Set[C]): SolverSST[C] = {
-    type Q = (Int, Int)
-    type A = Option[C]
-    type B = Option[C]
-    trait X
-    case object XIn extends X
-    case object XJ extends X
-    case object XK extends X
-    val base: NSST[Q, A, B, X] =
-      solverNsstTemplate(i, alphabet, XIn, Set(XJ, XK), List(Cop1(XIn), Cop1(XJ), Cop1(XK), Cop2(None)))
-    val updates = Concepts.updateMonoid(base.variables)
-    val edges = {
-      base.edges.map {
-        case (q, a, m, r) if j == k && q._1 == j && a != None =>
-          (q, a, m + (XJ -> List(Cop1(XJ), Cop2(a))) + (XK -> List(Cop1(XK), Cop2(a))), r)
-        case (q, a, m, r) if q._1 == j && a != None => (q, a, m + (XJ -> List(Cop1(XJ), Cop2(a))), r)
-        case (q, a, m, r) if q._1 == k && a != None => (q, a, m + (XK -> List(Cop1(XK), Cop2(a))), r)
-        case other                                  => other
-      }
-    }
-    base
-      .copy(
-        in = alphabet.map[Option[C]](Some.apply) + None,
-        edges = edges.toSet,
-        q0 = (0, 0)
-      )
-      .renamed
-  }
-
-  /** x(i) := pre ++ x(j) ++ post */
-  def preppendAppendNSST[C](i: Int, j: Int, pre: Seq[C], post: Seq[C], alphabet: Set[C]): SolverSST[C] = {
-    sealed trait X
-    case object XIn extends X
-    case object XJ extends X
-    val base = solverNsstTemplate[C, X](
-      i,
-      alphabet,
-      XIn,
-      Set(XJ),
-      List(Cop1(XIn)) ++ pre.map(a => Cop2(Some(a))) ++ List(Cop1(XJ)) ++ post
-        .map(a => Cop2(Some(a))) ++ List(Cop2(None))
-    )
     val edges = base.edges.map {
-      case (q, a, m, r) if q._1 == j && a != None => (q, a, m + (XJ -> List(Cop1(XJ), Cop2(a))), r)
-      case edge                                   => edge
+      case t @ ((q, 0), Some(a), m, (_, 0)) =>
+        t.copy(_3 =
+          m ++ vars
+            .withFilter { case XJ(j, _) => j == q; case _ => false }
+            .map(x => x -> List(Cop1(x), Cop2(Some(a))))
+        )
+      case other => other
     }
-    base.copy(
-      edges = edges
-    ).renamed
+    base.copy(edges = edges).renamed
   }
 
   /** x(i) := insert(x(j), pos, word) */
@@ -702,11 +660,13 @@ object Solver {
         }
     }
     val q0 = if (i == 0) Cop1(dfa.q0) else Cop2(0)
-    base.copy(
-      states = states,
-      edges = edges,
-      q0 = q0,
-    ).renamed
+    base
+      .copy(
+        states = states,
+        edges = edges,
+        q0 = q0
+      )
+      .renamed
   } // End of regexNSST
 
   /** x(i) := take_prefix(x(j)) ∈ {w | ∃ u s.t. wu = x(j)} */
@@ -875,12 +835,12 @@ object Solver {
   def stringVarsAtoms[A](as: Seq[AtomicConstraint[A]]): Seq[StringVar] = {
     def rhsVars(c: AtomicConstraint[A]): Seq[StringVar] = c match {
       case Constant(_, _)     => Nil
-      case CatCstr(_, r1, r2) => List(r1, r2)
+      case CatCstr(_, rhs)    => rhs.flatMap { case Right(v) => Some(v); case _ => None }
       case TransCstr(_, _, r) => List(r)
     }
     def lhsVar(c: AtomicConstraint[A]): StringVar = c match {
       case Constant(l, _)     => l
-      case CatCstr(l, _, _)   => l
+      case CatCstr(l, _)      => l
       case TransCstr(l, _, _) => l
     }
     val lhsVars = as.map(lhsVar)
@@ -895,10 +855,9 @@ object Solver {
   }
   def usedAlphabetAtomic[A](c: AtomicConstraint[A]): Set[A] = c match {
     case Constant(_, word) => word.toSet
-    case CatCstr(_, _, _)  => Set.empty
+    case CatCstr(_, rhs)   => rhs.flatMap { case Left(s) => s; case _ => Seq.empty }.toSet
     case TransCstr(_, trans, _) =>
       trans match {
-        case PrependAppend(pre, post)                                       => (pre ++ post).toSet
         case ReplaceAll(target, word)                                       => (target ++ word).toSet
         case Insert(_, word)                                                => word.toSet
         case At(_) | Reverse() | Substr(_, _) | TakePrefix() | TakeSuffix() => Set.empty
@@ -920,13 +879,12 @@ object Solver {
   def compileAtomic[A](alphabet: Set[A], ordering: Map[StringVar, Int])(
       a: AtomicConstraint[A]
   ): SolverSST[A] = a match {
-    case Constant(l, word)  => constantNSST(ordering(l), word, alphabet)
-    case CatCstr(l, r1, r2) => concatNSST(ordering(l), ordering(r1), ordering(r2), alphabet)
+    case Constant(l, word) => constantNSST(ordering(l), word, alphabet)
+    case CatCstr(l, rhs)   => concatNSST(ordering(l), rhs.map(_.map(ordering)), alphabet)
     case TransCstr(l, t, r) =>
       val i = ordering(l)
       val j = ordering(r)
       t match {
-        case PrependAppend(pre, post) => preppendAppendNSST(i, j, pre, post, alphabet)
         case ReplaceAll(target, word) => replaceAllNSST(target, word, i, j, alphabet)
         case Insert(pos, word)        => insertNSST(i, j, pos, word, alphabet)
         case At(pos)                  => atNSST(i, j, pos, alphabet)

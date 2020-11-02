@@ -130,7 +130,7 @@ class TestSolving extends AnyFlatSpec {
     testTransduce(sc20, "a<s#c>a#", "a<s#c>a#a<s#")
     val sc31 = replaceAllNSST("<sc>", "a", 3, 1, in)
     testTransduce(sc31, "a<s#c>a#a<s#", "a<s#c>a#a<s#c>a#")
-    val concat23 = concatNSST(4, 2, 3, in)
+    val concat23 = concatNSST(4, List(Right(2), Right(3)), in)
     testTransduce(concat23, "a<s#c>a#a<s#c>a#", "a<s#c>a#a<s#c>a#a<sc>a#")
     val re: RegExp[Char] = "a<sc>a".foldLeft[RegExp[Char]](EpsExp) {
       case (acc, c) => CatExp(acc, CharExp(c))
@@ -155,7 +155,7 @@ class TestSolving extends AnyFlatSpec {
 
   "Zhu's experiment case 5" should "be unsat" in {
     val in = Set('a', 'b')
-    def cat(n: Int) = concatNSST(n + 1, n, n, in)
+    def cat(n: Int) = concatNSST(n + 1, List(Right(n), Right(n)), in)
     val re1 = {
       val ab = CatExp(CharExp('a'), CharExp('b'))
       regexNSST(2, 1, CatExp(ab, StarExp(ab)), in)

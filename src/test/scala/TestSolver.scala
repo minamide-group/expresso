@@ -26,16 +26,33 @@ class TestSolver extends AnyFunSuite {
       testTransduce(n, "aaab#", "aaab#ab#")
     }
   }
-  test("preppendAppendNSST") {
+
+  test("concatNSST") {
     {
-      val n = preppendAppendNSST(2, 0, "a".toList, "bb".toList, alphabet)
+      // 2 := a0bb
+      val n = concatNSST(2, List(Left("a".toList), Right(0), Left("bb".toList)), alphabet)
+      assert(n.variables.size == 2)
       testTransduce(n, "ba#b#", "ba#b#ababb#")
       assert(n.transduce(toOptionList("ba#")) == Set.empty)
     }
     {
-      val n = preppendAppendNSST(2, 1, "a".toList, "bb".toList, alphabet)
+      // 2 := a1bb
+      val n = concatNSST(2, List(Left("a".toList), Right(1), Left("bb".toList)), alphabet)
+      assert(n.variables.size == 2)
       testTransduce(n, "ba#b#", "ba#b#abbb#")
       assert(n.transduce(toOptionList("ba#")) == Set.empty)
+    }
+    {
+      // 2 := 10
+      val n = concatNSST(2, List(Right(1), Right(0)), alphabet)
+      assert(n.variables.size == 3)
+      testTransduce(n, "ba#b#", "ba#b#bba#")
+    }
+    {
+      // 2 := 00
+      val n = concatNSST(2, List(Right(0), Right(0)), alphabet)
+      assert(n.variables.size == 3)
+      testTransduce(n, "ba#b#", "ba#b#baba#")
     }
   }
   test("insertNSST") {

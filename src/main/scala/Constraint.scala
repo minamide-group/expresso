@@ -4,7 +4,6 @@ package com.github.kmn4.sst
 // and must not declare unused string variables.
 object Constraint {
   sealed trait Transduction[A]
-  case class PrependAppend[A](pre: Seq[A], post: Seq[A]) extends Transduction[A]
   case class ReplaceAll[A](target: Seq[A], word: Seq[A]) extends Transduction[A]
   case class Insert[A](pos: Int, word: Seq[A]) extends Transduction[A]
   case class At[A](pos: Int) extends Transduction[A]
@@ -18,7 +17,7 @@ object Constraint {
 
   sealed trait AtomicConstraint[A]
   case class Constant[A](lhs: StringVar, word: Seq[A]) extends AtomicConstraint[A]
-  case class CatCstr[A](lhs: StringVar, rhs1: StringVar, rhs2: StringVar) extends AtomicConstraint[A]
+  case class CatCstr[A](lhs: StringVar, rhs: Seq[Either[Seq[A], StringVar]]) extends AtomicConstraint[A]
   case class TransCstr[A](lhs: StringVar, trans: Transduction[A], rhs: StringVar) extends AtomicConstraint[A]
 
   sealed trait IntExp
@@ -50,7 +49,7 @@ object ConstraintExamples {
   val c1 = {
     val Seq(x0, x1, x2) = (0 to 2).map(i => StringVar(s"x$i"))
     val s1 = TransCstr(x1, replaceAll("a", "b"), x0)
-    val s2 = TransCstr(x2, PrependAppend("a".toSeq, "b".toSeq), x1)
+    val s2 = CatCstr(x2, List(Left("a".toList), Right(x1), Left("b".toList)))
     val r = RegexConstraint(x2, CatExp(CatExp(CharExp('a'), StarExp(CharExp('b'))), CharExp('a')))
     SLConstraint(Seq(s1, s2), Nil, Seq(r))
   }
@@ -59,7 +58,7 @@ object ConstraintExamples {
     val Seq(x0, x1, x2, x3, x4) = (0 to 4).map(i => StringVar(s"x$i"))
     val s1 = TransCstr(x2, replaceAll("<sc>", "a"), x0)
     val s2 = TransCstr(x3, replaceAll("<sc>", "a"), x1)
-    val s3 = CatCstr[Char](x4, x2, x3)
+    val s3 = CatCstr[Char](x4, List(Right(x2), Right(x3)))
     val r = RegexConstraint(x4, "a<sc>a".toSeq.map(CharExp.apply).reduce[RegExp[Char]] {
       case (e1, e2) => CatExp(e1, e2)
     })
