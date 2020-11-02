@@ -48,7 +48,7 @@ class TestParikhPresburger extends AnyFlatSpec {
     import scala.collection.immutable.{HashMap, HashSet}
     import com.microsoft.z3
     val List(a, b, x, y) = "abxy".toList
-    val n = new NSST[Int,Char,Char,Char](
+    val n = NSST[Int,Char,Char,Char](
       states=Set(1, 2),
       in=Set(a, b),
       variables=Set(x, y),

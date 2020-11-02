@@ -27,7 +27,7 @@ class TestSolving extends AnyFlatSpec {
       edges: List[(Int, Char, Int, Map[Char, String])],
       q0: Int,
       f: Map[Int, Set[String]]
-  ) = new NSST(
+  ) = NSST(
     states,
     in,
     xs,

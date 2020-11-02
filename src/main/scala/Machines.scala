@@ -102,13 +102,13 @@ object Concepts {
 }
 
 /** Nondeterministic streaming string transducer */
-class NSST[Q, A, B, X](
-    val states: Set[Q],
-    val in: Set[A],
-    val variables: Set[X],
-    val edges: Set[(Q, A, Concepts.Update[X, B], Q)],
-    val q0: Q,
-    val partialF: Map[Q, Set[Concepts.Cupstar[X, B]]]
+case class NSST[Q, A, B, X](
+    states: Set[Q],
+    in: Set[A],
+    variables: Set[X],
+    edges: Set[(Q, A, Concepts.Update[X, B], Q)],
+    q0: Q,
+    partialF: Map[Q, Set[Concepts.Cupstar[X, B]]]
 ) {
   import NSST._
   import Concepts._
@@ -167,7 +167,7 @@ class NSST[Q, A, B, X](
           case _ => None
         }
     val newF = partialF.map { case (q, s) => (stateMap(q), s.map(renameXbs)) }
-    new NSST(
+    NSST(
       stateMap.map(_._2).toSet,
       in,
       varMap.map(_._2).toSet,
@@ -240,7 +240,7 @@ class NSST[Q, A, B, X](
       .mapValues(_.map(deleteNotUsed))
       .toMap
       .filter { case (_, s) => s.nonEmpty }
-    new NSST(
+    NSST(
       states,
       in,
       newVars,
@@ -638,7 +638,7 @@ object NSST {
       edges
         .flatMap { case (q, a, s) => s.map { case (r, m) => (q, a, stringsToUpdate(m), r) } }
     val newF = outF.map { case (q, s) => q -> Set(stringToCupstar(s)) }.toMap
-    new NSST(
+    NSST(
       states.toSet,
       edges.map(_._2).toSet,
       vars.toSet,
@@ -955,7 +955,7 @@ object MSST {
       }
     }.toMap
 
-    new NSST[NQ, A, B, Z](
+    NSST[NQ, A, B, Z](
       newStates,
       msst.in,
       zs,

@@ -258,13 +258,11 @@ object Solver {
 
   // Returns NSST whose states `q`s are embedded to Cop2(q).
   def embedStates2[P, Q, A, B, X](n: NSST[Q, A, B, X]): NSST[Cop[P, Q], A, B, X] = {
-    new NSST(
-      n.states.map(Cop2(_)),
-      n.in,
-      n.variables,
-      n.edges.map { case (q, a, m, r) => (Cop2(q), a, m, Cop2(r)) },
-      Cop2(n.q0),
-      n.partialF.map { case (q, s) => Cop2(q) -> s }
+    n.copy(
+      states = n.states.map(Cop2(_)),
+      edges = n.edges.map { case (q, a, m, r) => (Cop2(q), a, m, Cop2(r)) },
+      q0 = Cop2(n.q0),
+      partialF = n.partialF.map { case (q, s) => Cop2(q) -> s }
     )
   }
 
@@ -309,7 +307,7 @@ object Solver {
           )
       appendingEdges ++ toNextEdges
     }
-    new NSST(
+    NSST(
       states,
       (alphabet.map[Option[C]](Some(_))) + None,
       xs,
@@ -441,7 +439,7 @@ object Solver {
     }
     val states = edges.map { case (q, _, _, _) => q } + ((i, 0))
     val q0 = if (j == 0) (j, dfa.q0) else (0, 0)
-    new NSST[Q, A, B, X](
+    NSST[Q, A, B, X](
       states,
       in.map(Some(_): Option[C]) + None,
       xs,
@@ -491,14 +489,13 @@ object Solver {
         case other                                  => other
       }
     }
-    new NSST[Q, A, B, X](
-      base.states,
-      alphabet.map[Option[C]](Some.apply) + None,
-      base.variables,
-      edges.toSet,
-      (0, 0),
-      base.outF
-    ).renamed
+    base
+      .copy(
+        in = alphabet.map[Option[C]](Some.apply) + None,
+        edges = edges.toSet,
+        q0 = (0, 0)
+      )
+      .renamed
   }
 
   /** x(i) := pre ++ x(j) ++ post */
@@ -518,13 +515,8 @@ object Solver {
       case (q, a, m, r) if q._1 == j && a != None => (q, a, m + (XJ -> List(Cop1(XJ), Cop2(a))), r)
       case edge                                   => edge
     }
-    new NSST(
-      base.states,
-      base.in,
-      base.variables,
-      edges,
-      base.q0,
-      base.outF
+    base.copy(
+      edges = edges
     ).renamed
   }
 
@@ -583,14 +575,12 @@ object Solver {
           )
         ) + (((j, l), None, Map(XIn -> List(Cop1(XIn), Cop2(None)), XJ -> List(Cop1(XJ))), (j + 1, 0)))
     }
-    new NSST(
-      base.states ++ newStates,
-      base.in,
-      base.variables,
-      (baseEdges ++ newEdges).toSet,
-      base.q0,
-      base.outF
-    ).renamed
+    base
+      .copy(
+        states = base.states ++ newStates,
+        edges = (baseEdges ++ newEdges).toSet
+      )
+      .renamed
   }
 
   /** x(i) := reverse(x(j)) */
@@ -603,14 +593,11 @@ object Solver {
       case (q, a, m, r) if q._1 == j && a != None => (q, a, m + (XJ -> List(Cop2(a), Cop1(XJ))), r)
       case edge                                   => edge
     }
-    new NSST(
-      base.states,
-      base.in,
-      base.variables,
-      edges,
-      base.q0,
-      base.outF
-    ).renamed
+    base
+      .copy(
+        edges = edges
+      )
+      .renamed
   }
 
   /** x(i) := at(x(j), pos) */
@@ -643,14 +630,12 @@ object Solver {
           ((j, l), Some(a), Map(XIn -> List(Cop1(XIn), Cop2(Some(a))), XJ -> List(Cop1(XJ))), (j, l))
         ) + (((j, l), None, Map(XIn -> List(Cop1(XIn), Cop2(None)), XJ -> List(Cop1(XJ))), (j + 1, 0)))
     }
-    new NSST(
-      base.states ++ newStates,
-      base.in,
-      base.variables,
-      (baseEdges ++ newEdges).toSet,
-      base.q0,
-      base.outF
-    ).renamed
+    base
+      .copy(
+        states = base.states ++ newStates,
+        edges = (baseEdges ++ newEdges).toSet
+      )
+      .renamed
   }
 
   // Construct NSST which outputs exactly the same string as input,
@@ -686,7 +671,7 @@ object Solver {
         appendingEdges ++ toNextEdges
       }
       embedStates2(
-        new NSST(
+        NSST(
           states,
           (alphabet.map[Option[Char]](Some(_))) + None,
           xs,
@@ -717,13 +702,10 @@ object Solver {
         }
     }
     val q0 = if (i == 0) Cop1(dfa.q0) else Cop2(0)
-    new NSST[Q, A, B, X](
-      states,
-      base.in,
-      base.variables,
-      edges,
-      q0,
-      base.partialF
+    base.copy(
+      states = states,
+      edges = edges,
+      q0 = q0,
     ).renamed
   } // End of regexNSST
 
@@ -752,7 +734,7 @@ object Solver {
         Iterable(((j, 0), None, update(None), (j + 1, 0)), ((j, 1), None, update(None), (j + 1, 0)))
       baseEdges ++ someEdges ++ noneEdges
     }
-    new NSST[(Int, Int), Option[C], Option[C], X](
+    NSST[(Int, Int), Option[C], Option[C], X](
       states,
       base.in,
       variables,
@@ -787,7 +769,7 @@ object Solver {
         Iterable(((j, 0), None, update(None), (j + 1, 0)), ((j, 1), None, update(None), (j + 1, 0)))
       baseEdges ++ someEdges ++ noneEdges
     }
-    new NSST[(Int, Int), Option[C], Option[C], X](
+    NSST[(Int, Int), Option[C], Option[C], X](
       states,
       base.in,
       variables,
@@ -834,7 +816,7 @@ object Solver {
     states += qf
     edges ++= finalStates.map(q => (q, None, update(None), qf))
     val outF: Map[NQ, Set[VarString]] = Map(qf -> Set(List[Cop[Unit, NA]](Cop1(()))))
-    new NSST[NQ, NA, NA, X](
+    NSST[NQ, NA, NA, X](
       states,
       newAlphabet,
       Set(()),
@@ -863,7 +845,7 @@ object Solver {
         for (q <- 0 until n) yield ((q, None, Map(0 -> List(Cop1(0))), q + 1))
       loop ++ next
     }
-    new NSST(
+    NSST(
       states,
       alpha.map[Option[C]](Some.apply) + None,
       Set(0),

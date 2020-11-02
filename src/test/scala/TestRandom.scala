@@ -68,7 +68,7 @@ object TestRandom {
         }
       }
     }
-    new NSST(
+    NSST(
       states,
       in,
       vars,
