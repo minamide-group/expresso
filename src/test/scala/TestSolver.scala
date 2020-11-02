@@ -98,41 +98,22 @@ class TestSolver extends AnyFunSuite {
     }
   }
 
-  test("Nondeterministic case 1") {
-    val input = """
-(declare-const x String)
-(declare-const y String)
-(declare-const z String)
+//   test("Nondeterministic case 1") {
+//     val input = """
+// (declare-const x String)
+// (declare-const y String)
+// (declare-const z String)
 
-(assert (str.in.re x (re.++ (re.+ (str.to.re "a")) (re.+ (str.to.re "b")))))
-(assert (= y (str.take_prefix x)))
-(assert (= z (str.take_suffix x)))
-(assert (= (str.len x) (+ (str.len y) (str.len z))))
-(assert (= (str.len y) (str.len z)))
-(assert (str.in.re y (re.+ (str.to.re "a"))))
-(assert (str.in.re z (re.+ (str.to.re "b"))))
-(assert (> (str.len x) 7))
-"""
-    val s = System.nanoTime()
-    val fs = smtlib2.Parser.parse(input).map(smtlib2.Form.fromSExpr)
-    val c = SLConstraint.fromForms(fs)
-    val (sst, Some(nft)) = compileConstraint(c, Set('a', 'b', ' '))
-    info(sst.transduce(toOptionList("aaabbb#")).map(fromOptionList).toString())
-    // Main.parseAndSolve(input) match {
-    //   case None => fail()
-    //   case Some(m) => {
-    //     val x = m("x")
-    //     val y = m("y")
-    //     val z = m("z")
-    //     assert(x.length == y.length + z.length)
-    //     assert(y.length == z.length)
-    //     info(s"""x: "$x"""")
-    //     info(s"""y: "$y"""")
-    //     info(s"""z: "$z"""")
-    //   }
-    // }
-    info(s"elapsed: ${(System.nanoTime() - s) / 1000000} ms")
-  }
+// (assert (str.in.re x (re.++ (re.+ (str.to.re "a")) (re.+ (str.to.re "b")))))
+// (assert (= y (str.take_prefix x)))
+// (assert (= z (str.take_suffix x)))
+// (assert (= (str.len x) (+ (str.len y) (str.len z))))
+// (assert (= (str.len y) (str.len z)))
+// (assert (str.in.re y (re.+ (str.to.re "a"))))
+// (assert (str.in.re z (re.+ (str.to.re "b"))))
+// (assert (> (str.len x) 7))
+// """
+//   }
 
 //   test("hoge") {
 //     val input = """
@@ -148,14 +129,4 @@ class TestSolver extends AnyFunSuite {
 // (assert (= (str.len x1) (str.len y1)))
 // (assert (= 10 (str.len x1)))
 // """
-//     Main.parseAndSolve(input) match {
-//       case None => fail
-//       case Some(m) => {
-//         info(s"""x0: ${m("x0")}""")
-//         info(s"""x1: ${m("x1")}""")
-//         info(s"""y0: ${m("y0")}""")
-//         info(s"""y1: ${m("y1")}""")
-//       }
-//     }
-//   }
 }
