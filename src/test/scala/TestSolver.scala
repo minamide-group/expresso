@@ -114,7 +114,7 @@ class TestSolver extends AnyFunSuite {
 (assert (> (str.len x) 7))
 """
     val s = System.nanoTime()
-    val fs = smtlib.Parser.parse(input).map(smtlib.Form.fromSExpr)
+    val fs = smtlib2.Parser.parse(input).map(smtlib2.Form.fromSExpr)
     val c = SLConstraint.fromForms(fs)
     val (sst, Some(nft)) = compileConstraint(c, Set('a', 'b', ' '))
     info(sst.transduce(toOptionList("aaabbb#")).map(fromOptionList).toString())

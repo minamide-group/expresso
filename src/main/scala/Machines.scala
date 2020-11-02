@@ -460,17 +460,29 @@ object NSST {
 
     val initialStates =
       states.filter { case (q, kt) => q == n1.q0 && kt.forall { case (_, (k, t)) => k == t } }
+
+    // Remove all unreachable states.
+    val reachables = closure[NQ](initialStates, graphToMap(edges) { case (q, _, _, r) => q -> r })
+
+    val before = states.size
+    val after = reachables.size
+    val ratio = after.toDouble / before.toDouble
+    println(f"After / Before: ${ratio}%.03f\tBefore: ${before}\tAfter: ${after}")
+
+    // Wrap states with Option so initial state be unique.
     type NWQ = Option[NQ]
-    val newStates = states.map[NWQ](Some.apply) + None
+    val newStates = reachables.map[NWQ](Some.apply) + None
     val newEdges = {
-      val wrapped = edges.map { case (q, a, m, r) => (Some(q), a, m, Some(r)) }
+      val wrapped =
+        for ((q, a, m, r) <- edges if reachables(q) && reachables(r))
+          yield (Some(q), a, m, Some(r))
       val fromNone =
         for ((q, a, m, r) <- edges if initialStates contains q)
           yield (None, a, m, Some(r))
       wrapped ++ fromNone
     }
     val newOutF: Map[NWQ, Set[(Cupstar[X, Update[Y, C]], Cupstar[Y, C])]] = {
-      val wrapped = outF.map { case (q, s) => (Some(q): NWQ, s) }
+      val wrapped = outF.withFilter { case (q, _) => reachables(q) }.map { case (q, s) => (Some(q): NWQ, s) }
       val atNone = None -> Set.from {
         outF.toList
           .withFilter { case (q, _) => initialStates contains q }
@@ -487,7 +499,7 @@ object NSST {
       graphToMap(newEdges) { case (q, a, m, r) => (q, a) -> (r, m) },
       None,
       newOutF
-    ).unreachablesRemoved
+    )
   }
   // End of composeNsstsToMsst
 
@@ -844,31 +856,6 @@ class MSST[Q, A, B, X, Y](
     }
   def transduce(w: List[A]): Set[List[B]] =
     transition(Set(q0), w).flatMap { case (q, m) => outputAt(q, m) }
-  def unreachablesRemoved: MSST[Q, A, B, X, Y] = {
-    val reachableStates = closure(
-      Set(q0),
-      edges.toList
-        .flatMap { case ((q, a), s) => s.map { case (r, m) => q -> r } }
-        .groupBy(_._1)
-        .map { case (q, l) => q -> l.map { case (_, r) => r }.toSet }
-        .toMap
-        .withDefaultValue(Set.empty)
-    )
-    val newEdges = {
-      for (((q, a), s) <- edges if reachableStates contains q)
-        yield (q, a) -> s.filter { case (r, _) => reachableStates contains r }
-    }
-    val newOutF = outF.filter { case (q, _) => reachableStates contains q }
-    new MSST(
-      reachableStates + q0,
-      in,
-      xs,
-      ys,
-      newEdges,
-      q0,
-      newOutF
-    )
-  }
 }
 
 object MSST {

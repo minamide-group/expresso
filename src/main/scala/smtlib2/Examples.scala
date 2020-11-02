@@ -1,4 +1,4 @@
-package com.github.kmn4.sst.smtlib
+package com.github.kmn4.sst.smtlib2
 
 object Example1 {
   val input = """
