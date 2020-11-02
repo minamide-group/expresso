@@ -1,3 +1,5 @@
+(set-logic QF_S)
+
 (declare-const x String)
 (declare-const prefix String)
 (declare-const suffix String)
@@ -10,7 +12,6 @@
 (assert (str.in.re x (re.comp (re.++ (re.++ re.all (str.to.re "<script>")) re.all))))
 (assert (str.in.re y (re.++ (re.++ re.all (str.to.re "<script>")) re.all)))
 
-; sat
-;(assert (>= (str.len y) (str.len x)))
-(assert (<= (str.len y) (str.len x)))
-(assert (<= (str.len x) 9))
+(assert (= (str.len y) (str.len x)))
+
+(check-sat)
