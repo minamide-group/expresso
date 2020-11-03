@@ -4,6 +4,7 @@ import org.scalatest.flatspec._
 import scala.math.max
 
 class TestComposition extends AnyFlatSpec {
+  implicit val logger = NopLogger
   val nsst = NSST(
     Set(0, 1),
     Set('X', 'Y'),

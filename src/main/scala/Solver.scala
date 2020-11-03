@@ -854,22 +854,22 @@ object Solver {
     import duration._
     import ExecutionContext.Implicits.global
     val ssts = atomSSTs :+ regexSST
-    val solverSST: Future[((String, List[CompositionLog]), SolverSST[A])] = {
-      val right = Future {
-        atomSSTs
-          .foldRight(Writer[List[CompositionLog], SolverSST[A]](Nil, regexSST)) {
-            case (sst, acc) => acc.flatMap(sst compose _)
+    val solverSST = {
+      val right = {
+        implicit val logger = new BufferedLogger
+        Future { (atomSSTs :+ regexSST).reduceRight(_ compose _) }
+          .map { sst =>
+            println(s"## SOLVER RIGHT FOLDING FINISHED\n${logger.flushString}")
+            sst
           }
-          .run
-          .map { case (log, sst) => (("right", log), sst) }
       }
-      val left = Future {
-        ssts.tail
-          .foldLeft(Writer[List[CompositionLog], SolverSST[A]](Nil, ssts.head)) {
-            case (acc, sst) => acc.flatMap(_ compose sst)
+      val left = {
+        implicit val logger = new BufferedLogger
+        Future { (atomSSTs :+ regexSST).reduceLeft(_ compose _) }
+          .map { sst =>
+            println(s"## SOLVER LEFT FOLDING FINISHED\n${logger.flushString}")
+            sst
           }
-          .run
-          .map { case (log, sst) => (("left", log), sst) }
       }
       Future.firstCompletedOf(
         Iterable(
@@ -882,41 +882,30 @@ object Solver {
       if (c.is.isEmpty) Future { None }
       else {
         val pSST = parikhNSST(stringVars.length, alphabet)
+        val right = {
+          implicit val logger = new BufferedLogger
+          Future { Some((ssts.foldRight(pSST)(_ compose _).parikhEnft)) }
+            .map { sst =>
+              println(s"## PARIKH RIGHT FOLDING FINISHED\n${logger.flushString}")
+              sst
+            }
+        }
+        val left = {
+          implicit val logger = new BufferedLogger
+          Future { Some((ssts.reduceLeft[SolverSST[A]](_ compose _) compose pSST).parikhEnft) }
+            .map { sst =>
+              println(s"## PARIKH LEFT FOLDING FINISHED\n${logger.flushString}")
+              sst
+            }
+        }
         Future.firstCompletedOf(
           Iterable(
-            Future {
-              Some(
-                (atomSSTs :+ regexSST)
-                  .foldRight(Writer[List[CompositionLog], NSST[Int, Option[A], Int, Int]](Nil, pSST)) {
-                    case (sst, acc) => acc.flatMap(sst compose _)
-                  }
-                  .run
-                  .map { case (log, sst) => (("right", log), sst.parikhEnft) }
-              )
-            },
-            Future {
-              Some(
-                (ssts.tail
-                  .foldLeft(Writer[List[CompositionLog], SolverSST[A]](Nil, ssts.head)) {
-                    case (acc, sst) => acc.flatMap(_ compose sst)
-                  } flatMap (_ compose pSST)).run.map { case (log, sst) => (("left", log), sst.parikhEnft) }
-              )
-            }
+            right,
+            left
           )
         )
       }
-    val mixed =
-      for (((s1, log1), sst) <- solverSST; o <- parikhNFT) yield {
-        println(s"Construction of solver SST: ${s1}")
-        println(log1.mkString("\n"))
-        o match {
-          case None => (sst, None)
-          case Some(((s2, log2), nft)) =>
-            println(s"Construction of parikh NFT: ${s2}")
-            println(log2.mkString("\n"))
-            (sst, Some(nft))
-        }
-      }
+    val mixed = for (sst <- solverSST; nft <- parikhNFT) yield (sst, nft)
     Await.result(
       mixed,
       Duration.Inf
@@ -931,7 +920,7 @@ object Solver {
       val valuation = w.foldRight[List[List[A]]](Nil) {
         case (None, acc)         => Nil :: acc
         case (Some(a), hd :: tl) => (a :: hd) :: tl
-        case _                   => throw new Exception("This cannot happend.")
+        case _                   => throw new Exception("This cannot happen.")
       }
       (stringVarsSL(c) zip valuation).toMap
     }

@@ -114,6 +114,7 @@ object TestRandom {
 
 class TestRandom extends AnyFlatSpec {
   import TestRandom._
+  implicit val logger = NopLogger
   "Construction of MSST" should "be done correctly" in {
     for (_ <- 0 until 100) {
       val n1 = randomNsstCustomized()

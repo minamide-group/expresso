@@ -272,14 +272,11 @@ case class NSST[Q, A, B, X](
   /** Construct NSST that transduce w to that.transduce(this.transduce(w)). */
   def compose[R, C, Y](
       that: NSST[R, B, C, Y]
-  ): Writer[List[CompositionLog], NSST[Int, A, C, Int]] = {
-    val (nsst, logger) = NSST.composeNsstsToNsst(this, that)
+  )(implicit logger: CompositionLogger = NopLogger): NSST[Int, A, C, Int] = {
+    val nsst = NSST.composeNsstsToNsst(this, that)
     val res = nsst.renamed.removeRedundantVars
     logger.redundantVarsRemoved(res)
-    Writer[List[CompositionLog], NSST[Int, A, C, Int]](
-      List(logger.log),
-      res
-    )
+    res
   }
 }
 
@@ -349,10 +346,9 @@ object NSST {
   def composeNsstsToMsst[Q1, Q2, A, B, C, X, Y](
       n1: NSST[Q1, A, B, X],
       n2: NSST[Q2, B, C, Y]
-  ): (MSST[Option[(Q1, Map[X, (Q2, Q2)])], A, C, X, Y], CompositionLogger) = {
+  )(implicit logger: CompositionLogger): MSST[Option[(Q1, Map[X, (Q2, Q2)])], A, C, X, Y] = {
     import Concepts._
-    val logger = new CompositionLogger
-    logger.start()
+    logger.start(n1, n2)
 
     type NQ = (Q1, Map[X, (Q2, Q2)])
 
@@ -510,27 +506,26 @@ object NSST {
       newOutF
     )
     logger.msstConstructed(res)
-    (res, logger)
+    res
   }
   // End of composeNsstsToMsst
 
   def composeNsstsToNsst[Q1, Q2, A, B, C, X, Y](
       n1: NSST[Q1, A, B, X],
       n2: NSST[Q2, B, C, Y]
-  ): (
-      NSST[(Option[(Q1, Map[X, (Q2, Q2)])], Map[X, Concepts.M1[Y]]), A, C, (X, Y, Boolean)],
-      CompositionLogger
-  ) = {
+  )(
+      implicit logger: CompositionLogger
+  ): (NSST[(Option[(Q1, Map[X, (Q2, Q2)])], Map[X, Concepts.M1[Y]]), A, C, (X, Y, Boolean)]) = {
     if (!n1.isCopyless) {
       throw new Exception(s"Tried to compose NSST, but first NSST was copyfull: ${n1.edges}")
     }
     if (!n2.isCopyless) {
       throw new Exception(s"Tried to compose NSST, but second NSST was copyfull: ${n2.edges}")
     }
-    val (msst, logger) = NSST.composeNsstsToMsst(n1, n2)
+    val msst = NSST.composeNsstsToMsst(n1, n2)
     val nsst = MSST.convertMsstToNsst(msst)
     logger.nsstConstructed(nsst)
-    (nsst, logger)
+    nsst
   }
 
   def countOf2[A, B](alpha: Cupstar[A, B]): Map[B, Int] =
@@ -882,7 +877,7 @@ object MSST {
 
   def convertMsstToNsst[Q, A, B, X, Y](
       msst: MSST[Q, A, B, X, Y]
-  ): NSST[(Q, Map[X, M1[Y]]), A, B, (X, Y, Boolean)] = {
+  )(implicit logger: CompositionLogger): NSST[(Q, Map[X, M1[Y]]), A, B, (X, Y, Boolean)] = {
     type S = Map[X, M1[Y]]
     type NQ = (Q, S)
     type Z = (X, Y, Boolean)
