@@ -122,8 +122,8 @@ class TestSolver extends AnyFunSuite {
 // (declare-const z String)
 
 // (assert (str.in.re x (re.++ (re.+ (str.to.re "a")) (re.+ (str.to.re "b")))))
-// (assert (= y (str.take_prefix x)))
-// (assert (= z (str.take_suffix x)))
+// (assert (str.prefixof y x))
+// (assert (str.prefixof z x))
 // (assert (= (str.len x) (+ (str.len y) (str.len z))))
 // (assert (= (str.len y) (str.len z)))
 // (assert (str.in.re y (re.+ (str.to.re "a"))))

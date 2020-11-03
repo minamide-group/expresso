@@ -8,5 +8,5 @@ object Main extends App {
   val lexer = new smtlib.lexer.Lexer(new java.io.FileReader(path.toFile()))
   val parser = new smtlib.parser.Parser(lexer)
   val script = parser.parseScript
-  new Solver(()).execute(script)
+  new Solver(()).executeTransPrint(script)
 }

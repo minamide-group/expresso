@@ -1,13 +1,13 @@
 package com.github.kmn4.sst
 
-import com.github.kmn4.sst.Constraint.SLConstraint
+import smtlib.trees._
+import Commands._
+import Terms._
+
+import Constraint._
+import Solver._
 
 class Solver(options: Solver.SolverOption) {
-  import smtlib.trees._
-  import Commands._
-  import Terms._
-
-  import Solver._
 
   sealed trait Mode
   case object StartMode extends Mode
@@ -20,18 +20,12 @@ class Solver(options: Solver.SolverOption) {
   var currentLogic: Option[Logic] = None
   var currentMode: Mode = StartMode
 
-  /** assertionStack will never be empty */
+  /** This should never be empty */
   var assertionStack: List[AssertionLevel] = List(AssertionLevel(Map.empty, Nil))
 
   var sst: Option[Solver.SolverSST[Char]] = None
   var nft: Option[Solver.ParikhNFT[Char]] = None
   var currentModel: Map[String, String] = Map.empty
-
-  def currentFuncEnv: FunctionEnv = assertionStack.head.env
-  def addFunction(name: String, rank: Rank) = {
-    val hd :: tl = assertionStack
-    assertionStack = hd.copy(env = hd.env + (name -> rank)) :: tl
-  }
 
   def currentSL(): Either[String, SLConstraint[Char]] = {
     val AssertionLevel(env, assertions) :: tl = assertionStack
@@ -49,40 +43,57 @@ class Solver(options: Solver.SolverOption) {
     }
   }
 
-  def success() = println("success")
+  type Output = String
+  val success = "success"
 
-  // TODO Mode transition
-  // TODO Error message
-  def execute(cmd: Command): Unit = cmd match {
+  type ExecutionResult = (Output, Mode)
+
+  def currentFuncEnv: FunctionEnv = assertionStack.head.env
+  def updateFunction(name: String, rank: Rank): Unit = {
+    val hd :: tl = assertionStack
+    assertionStack = hd.copy(env = hd.env + (name -> rank)) :: tl
+  }
+  def addFunction(name: String, rank: Rank): ExecutionResult = {
+    if (currentFuncEnv.isDefinedAt(name)) ("(error \"name $name is already defined\")", AssertMode)
+    else {
+      updateFunction(name, rank)
+      (success, AssertMode)
+    }
+  }
+
+  /**
+    * Execute `cmd` without printing output nor mode transition.
+    * Other effects (e.g. pushing function to environment) take place within this function.
+    *
+    * @param cmd Command to be executed.
+    * @return Solver response and next mode.
+    */
+  def execute(cmd: Command): ExecutionResult = cmd match {
     case SetLogic(logic) =>
       if (currentLogic.nonEmpty) ???
       else
         logic match {
           case NonStandardLogic(SSymbol("QF_S")) =>
             currentLogic = Some(logic)
-            success()
+            (success, AssertMode)
           case _ => ???
         }
-    case DeclareConst(SSymbol(name), Sort(SimpleIdentifier(SSymbol(sortName)), Nil))
-        if !currentFuncEnv.isDefinedAt(name) =>
+    case DeclareConst(SSymbol(name), Sort(SimpleIdentifier(SSymbol(sortName)), Nil)) =>
       sortName match {
-        case "Int"    => addFunction(name, IntConst); success()
-        case "String" => addFunction(name, StringConst); success()
+        case "Int"    => addFunction(name, IntConst)
+        case "String" => addFunction(name, StringConst)
         case _        => ???
       }
-    case DeclareConst(SSymbol(name), _) if currentFuncEnv.isDefinedAt(name) => ???
-    case DeclareFun(SSymbol(name), Nil, Sort(SimpleIdentifier(SSymbol(sortName)), Nil))
-        if !currentFuncEnv.isDefinedAt(name) =>
+    case DeclareFun(SSymbol(name), Nil, Sort(SimpleIdentifier(SSymbol(sortName)), Nil)) =>
       sortName match {
-        case "Int"    => addFunction(name, IntConst); success()
-        case "String" => addFunction(name, StringConst); success()
+        case "Int"    => addFunction(name, IntConst)
+        case "String" => addFunction(name, StringConst)
         case _        => ???
       }
-    case DeclareFun(SSymbol(name), _, _) if currentFuncEnv.isDefinedAt(name) => ???
     case Assert(term) =>
       val hd :: tl = assertionStack
       assertionStack = hd.copy(assertions = term :: hd.assertions) :: tl
-      success()
+      (success, AssertMode)
     case CheckSat() =>
       // TODO Seperate checking sat and getting model
       currentSL() match {
@@ -104,14 +115,12 @@ class Solver(options: Solver.SolverOption) {
             .map(model => model.map { case (Constraint.StringVar(name), value) => name -> value.mkString })
           o match {
             case None =>
-              println("unsat")
-              currentMode = UnsatMode
+              ("unsat", UnsatMode)
             case Some(model) =>
-              println("sat")
-              currentMode = SatMode
               currentModel = model
+              ("sat", SatMode)
           }
-        case Left(msg) => println(msg)
+        case Left(msg) => println(msg); ???
       }
     case GetModel() =>
       currentMode match {
@@ -119,20 +128,22 @@ class Solver(options: Solver.SolverOption) {
           val s = currentModel
             .map { case (name, value) => s"""(define-fun $name () String "${value}")""" }
             .mkString("\n  ")
-          println(s"(model\n  $s\n)")
+          (s"(model\n  $s\n)", SatMode)
         case _ => ???
       }
     case _ => ???
   }
 
-  def execute(script: Script): Unit = script.commands.foreach(execute)
+  def executeTransPrint(cmd: Command): Unit = {
+    val (output, mode) = execute(cmd)
+    println(output)
+    currentMode = mode
+  }
+
+  def executeTransPrint(script: Script): Unit = script.commands.foreach(executeTransPrint)
 }
 
 object Solver {
-  import smtlib.trees._
-  import Commands._
-  import Terms._
-  import Constraint._
   case class Rank(args: List[Sort], res: Sort)
   val StringConst = Rank(Nil, Sort(SimpleIdentifier(SSymbol("String"))))
   val IntConst = Rank(Nil, Sort(SimpleIdentifier(SSymbol("Int"))))
@@ -166,10 +177,6 @@ object Solver {
     case SimpleApp("str.reverse", Seq(SimpleQualID(name))) if env(name) == StringConst => (name, Reverse())
     case SimpleApp("str.substr", Seq(SimpleQualID(name), SNumeral(from), SNumeral(len))) =>
       (name, Substr(from.toInt, len.toInt))
-    case SimpleApp("str.take_prefix", Seq(SimpleQualID(name))) if env(name) == StringConst =>
-      (name, TakePrefix())
-    case SimpleApp("str.take_suffix", Seq(SimpleQualID(name))) if env(name) == StringConst =>
-      (name, TakeSuffix())
     case _ => throw new Exception("Cannot interpret given S-expression as transduction")
   }
   private def expectInt(e: Term, env: FunctionEnv): IntExp = e match {
@@ -192,8 +199,10 @@ object Solver {
       case SimpleApp("re.+", Seq(e)) =>
         val re = expectRegExp(e)
         CatExp(re, StarExp(re))
-      case SimpleApp("re.++", Seq(e1, e2))    => CatExp(expectRegExp(e1), expectRegExp(e2))
-      case SimpleApp("re.union", Seq(e1, e2)) => OrExp(expectRegExp(e1), expectRegExp(e2))
+      case SimpleApp("re.++", es) =>
+        es.tail.foldLeft(expectRegExp(es.head)) { case (acc, e) => CatExp(acc, expectRegExp(e)) }
+      case SimpleApp("re.union", es) =>
+        es.tail.foldLeft(expectRegExp(es.head)) { case (acc, e) => OrExp(acc, expectRegExp(e)) }
       case SimpleApp("re.range", Seq(SString(c1), SString(c2))) if c1.length == 1 && c2.length == 1 =>
         throw new NotImplementedError("re.range is not implemented")
       case SimpleApp("re.comp", Seq(e)) => CompExp(expectRegExp(e))
@@ -285,37 +294,20 @@ object Solver {
     type A = Option[C]
     type B = Option[C]
     val states = Set.from(for (i <- 0 to n) yield (i, 0))
+    val inSet = (alphabet.map[Option[C]](Some(_))) + None
     val xs = otherVariables + inputVariable
     val outF: Map[Q, Set[Concepts.Cupstar[X, B]]] = Map((n, 0) -> Set(output))
     val updates = Concepts.updateMonoid(xs)
     type Edges = Set[(Q, A, Concepts.Update[X, B], Q)]
-    val edges: Edges = {
-      val appendingEdges: Edges =
-        for ((i, _) <- states; a <- alphabet if i != n)
-          yield (
-            (i, 0),
-            Some(a),
-            updates.unit + (inputVariable -> List(Cop1(inputVariable), Cop2(Some(a)))),
-            (i, 0)
-          )
-      val toNextEdges: Edges =
-        for ((i, _) <- states; if i != n)
-          yield (
-            (i, 0),
-            None,
-            updates.unit + (inputVariable -> List(Cop1(inputVariable), Cop2(None))),
-            (i + 1, 0)
-          )
-      appendingEdges ++ toNextEdges
-    }
-    NSST(
-      states,
-      (alphabet.map[Option[C]](Some(_))) + None,
-      xs,
-      edges,
-      (0, 0),
-      outF
-    )
+    val edges: Edges =
+      for ((i, _) <- states; a <- inSet if i != n)
+        yield (
+          (i, 0),
+          a,
+          updates.unit + (inputVariable -> List(Cop1(inputVariable), Cop2(a))),
+          (if (a == None) i + 1 else i, 0)
+        )
+    NSST(states, inSet, xs, edges, (0, 0), outF)
   }
 
   /** x(i) := word */
@@ -551,11 +543,7 @@ object Solver {
       case (q, a, m, r) if q._1 == j && a != None => (q, a, m + (XJ -> List(Cop2(a), Cop1(XJ))), r)
       case edge                                   => edge
     }
-    base
-      .copy(
-        edges = edges
-      )
-      .renamed
+    base.copy(edges = edges).renamed
   }
 
   /** x(i) := at(x(j), pos) */
@@ -595,79 +583,6 @@ object Solver {
       )
       .renamed
   }
-
-  // Construct NSST which outputs exactly the same string as input,
-  // if it is consist of `n` strings and its `i`-th (starting from 0) one
-  // is in language represented by `re`.
-  def regexNSST(
-      n: Int,
-      i: Int,
-      re: RegExp[Char],
-      alphabet: Set[Char]
-  ): NSST[Int, Option[Char], Option[Char], Int] = {
-    type DQ = Int
-    val dfa: DFA[DQ, Char] = new RegExp2NFA(re, alphabet).construct().toDFA.minimized.renamed
-    type Q = Cop[DQ, Int]
-    type A = Option[Char]
-    type B = Option[Char]
-    type X = Unit
-
-    val base: NSST[Q, A, B, X] = {
-      val states = Set.from(0 to n) - i
-      val xs = Set(())
-      val q0 = 0
-      val outF: Map[Int, Set[Concepts.Cupstar[X, B]]] = Map(n -> Set(List(Cop1(()))))
-      val updates = Concepts.updateMonoid(xs)
-      type Edges = Set[(Int, A, Concepts.Update[X, B], Int)]
-      val edges: Edges = {
-        val appendingEdges: Edges =
-          for (j <- states; a <- alphabet if j != n && j != i)
-            yield (j, Some(a), updates.unit + (() -> List(Cop1(()), Cop2(Some(a)))), j)
-        val toNextEdges: Edges =
-          for (j <- states; if j != n && j + 1 != i)
-            yield (j, None, updates.unit + (() -> List(Cop1(()), Cop2(None))), j + 1)
-        appendingEdges ++ toNextEdges
-      }
-      embedStates2(
-        NSST(
-          states,
-          (alphabet.map[Option[Char]](Some(_))) + None,
-          xs,
-          edges,
-          q0,
-          outF
-        )
-      )
-    }
-
-    type Update = Concepts.Update[X, B]
-    type Edge = (Q, A, Update, Q)
-    type Edges = Set[Edge]
-    // Replace state i with states of DFA.
-    val states = base.states - Cop2(i) ++ dfa.states.map(Cop1.apply)
-    val updates = Concepts.updateMonoid(base.variables)
-    val edges: Edges = {
-      base.edges +
-        ((Cop2(i - 1), None, updates.unit + (() -> List(Cop1(()), Cop2(None))), Cop1(dfa.q0))) ++
-        dfa.finalStates.map[Edge](q =>
-          (Cop1(q), None, updates.unit + (() -> List(Cop1(()), Cop2(None))), Cop2(i + 1))
-        ) ++
-        dfa.transition.map[Edge] {
-          case ((q, a), r) => {
-            val m = updates.unit + (() -> List(Cop1(()), Cop2(Some(a))))
-            (Cop1(q), Some(a), m, Cop1(r))
-          }
-        }
-    }
-    val q0 = if (i == 0) Cop1(dfa.q0) else Cop2(0)
-    base
-      .copy(
-        states = states,
-        edges = edges,
-        q0 = q0
-      )
-      .renamed
-  } // End of regexNSST
 
   /** x(i) := take_prefix(x(j)) ∈ {w | ∃ u s.t. wu = x(j)} */
   def takePrefixNSST[C](i: Int, j: Int, alphabet: Set[C]): SolverSST[C] = {

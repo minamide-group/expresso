@@ -3,7 +3,7 @@ package com.github.kmn4.sst
 import org.scalatest.flatspec._
 
 class TestSolving extends AnyFlatSpec {
-  import Solver.{replaceAllNSST, concatNSST, regexNSST, parikhNSST}
+  import Solver.{replaceAllNSST, concatNSST, regularNSST, parikhNSST}
   def compositionRight[A, X](l: Seq[NSST[Int, A, A, Int]]): NSST[Int, A, A, Int] = l.reduceRight(_ compose _)
   def toOptionList(s: String): List[Option[Char]] = s.toList.map(c => if (c == '#') None else Some(c))
   def fromOptionList(l: List[Option[Char]]): String = l.map(_.getOrElse('#')).mkString
@@ -109,8 +109,11 @@ class TestSolving extends AnyFlatSpec {
     val sc10 = replaceAllNSST("<sc>", "", 1, 0, in)
     assert(sc10.transduce(toOptionList("<sc>#")) == Set(toOptionList("<sc>##")))
     assert(sc10.transduce(toOptionList("<sc#")) == Set(toOptionList("<sc#<sc#")))
-    val exp = CatExp(CatExp(CatExp(CharExp('<'), CharExp('s')), CharExp('c')), CharExp('>'))
-    val sc = regexNSST(2, 1, exp, in)
+    val dfas = List(
+      StarExp(DotExp),
+      CatExp(CatExp(CatExp(CharExp('<'), CharExp('s')), CharExp('c')), CharExp('>'))
+    ).map(new RegExp2NFA(_, in).construct().toDFA.minimized)
+    val sc = regularNSST(dfas, in)
     assert(sc.transduce(toOptionList("#<sc>#")) == Set(toOptionList("#<sc>#")))
     assert(sc.transduce(toOptionList("#<sc#")) == Set())
     val start = System.nanoTime()
@@ -135,7 +138,11 @@ class TestSolving extends AnyFlatSpec {
     val re: RegExp[Char] = "a<sc>a".foldLeft[RegExp[Char]](EpsExp) {
       case (acc, c) => CatExp(acc, CharExp(c))
     }
-    val reSST = regexNSST(5, 4, re, in)
+    val dfas = List
+      .fill(5)(StarExp(DotExp))
+      .updated(4, re)
+      .map(re => new RegExp2NFA(re, in).construct().toDFA.minimized)
+    val reSST = regularNSST(dfas, in)
     assert(reSST.transduce(toOptionList("####a<sc>a#")) == Set(toOptionList("####a<sc>a#")))
     assert(reSST.transduce(toOptionList("####a<sc>#")) == Set())
     testTransduce(reSST, "a<s#c>a#a<s#c>a#a<sc>a#", "a<s#c>a#a<s#c>a#a<sc>a#")
@@ -156,17 +163,21 @@ class TestSolving extends AnyFlatSpec {
   "Zhu's experiment case 5" should "be unsat" in {
     val in = Set('a', 'b')
     def cat(n: Int) = concatNSST(n + 1, List(Right(n), Right(n)), in)
-    val re1 = {
-      val ab = CatExp(CharExp('a'), CharExp('b'))
-      regexNSST(2, 1, CatExp(ab, StarExp(ab)), in)
-    }
     def re(k: Int) = {
+      val ab = CatExp(CharExp('a'), CharExp('b'))
+      val re1 = CatExp(ab, StarExp(ab))
       val aa = CatExp(CharExp('a'), CharExp('a'))
-      regexNSST(k + 1, k, CatExp(aa, StarExp(aa)), in)
+      val rek = CatExp(aa, StarExp(aa))
+      val dfas = List
+        .fill(k + 1)(StarExp(DotExp))
+        .updated(1, re1)
+        .updated(k, rek)
+        .map(re => new RegExp2NFA(re, in).construct().toDFA.minimized)
+      regularNSST(dfas, in)
     }
     def test(k: Int) = {
       val start = System.nanoTime()
-      val composed = compositionRight((Seq(cat(0), re1) ++ (1 until k).map(cat) ++ Seq(re(k))))
+      val composed = compositionRight((Seq(cat(0)) ++ (1 until k).map(cat) ++ Seq(re(k))))
       assert(composed.isEmpty)
       info(s"[k=$k]")
       info(s"elapsed:\t${(System.nanoTime() - start) / 1000000} ms")
@@ -175,12 +186,12 @@ class TestSolving extends AnyFlatSpec {
       info(s"transition:\t${composed.edges.size}")
     }
     testTransduce(cat(1), "a#b#", "a#b#bb#")
-    testTransduce(re1, "a#ab#", "a#ab#")
-    testTransduce(re1, "a##")
     test(2)
     test(3)
     test(4)
     test(5)
+    test(7)
+    test(9)
   }
 
   "Variant of Zhu's benchmark int3" should "be sat" in {

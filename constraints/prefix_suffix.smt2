@@ -5,8 +5,8 @@
 (declare-const suffix String)
 (declare-const y String)
 
-(assert (= prefix (str.take_prefix x)))
-(assert (= suffix (str.take_suffix x)))
+(assert (str.prefixof prefix x))
+(assert (str.suffixof suffix x))
 (assert (= y (str.++ prefix suffix)))
 
 (assert (str.in.re x (re.comp (re.++ (re.++ re.all (str.to.re "<script>")) re.all))))

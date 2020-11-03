@@ -1167,7 +1167,7 @@ class NFA[Q, A](
   }
 }
 
-private class RegExp2NFA[A](re: RegExp[A], alphabet: Set[A]) {
+class RegExp2NFA[A](re: RegExp[A], alphabet: Set[A]) {
   private var state = -1
 
   private def freshState(): Int = {
