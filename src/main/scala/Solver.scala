@@ -6,6 +6,8 @@ import Terms._
 
 import Constraint._
 import Solver._
+import cats.data.Writer
+import cats.implicits._
 
 class Solver(options: Solver.SolverOption) {
 
@@ -813,7 +815,10 @@ object Solver {
   /** Construct SST of constraint `c` assuming it is straight-line.
     * If `c` has integer constraints, this also construct an ε-NFA that outputs
     * vectors from variable number to length of its content. */
-  def compileConstraint[A](c: SLConstraint[A], alphabet: Set[A]): (SolverSST[A], Option[ParikhNFT[A]]) = {
+  def compileConstraint[A](
+      c: SLConstraint[A],
+      alphabet: Set[A]
+  ): (SolverSST[A], Option[ParikhNFT[A]]) = {
     val SLConstraint(atoms, is, rs) = c
     // If an input constriant is one like (z := x y; w := replaceall z "a" "b"; v in (a)*) then
     // its string variables are ordered like v, x, y, z, w (unused in atoms first).
@@ -848,11 +853,24 @@ object Solver {
     import scala.concurrent._
     import duration._
     import ExecutionContext.Implicits.global
-    val solverSST = {
-      val right = Future { (atomSSTs :+ regexSST).reduceRight(_ compose _) }
-        .map { sst => println("right finished"); sst }
-      val left = Future { (atomSSTs :+ regexSST).reduceLeft(_ compose _) }
-        .map { sst => println("left finished"); sst }
+    val ssts = atomSSTs :+ regexSST
+    val solverSST: Future[((String, List[CompositionLog]), SolverSST[A])] = {
+      val right = Future {
+        atomSSTs
+          .foldRight(Writer[List[CompositionLog], SolverSST[A]](Nil, regexSST)) {
+            case (sst, acc) => acc.flatMap(sst compose _)
+          }
+          .run
+          .map { case (log, sst) => (("right", log), sst) }
+      }
+      val left = Future {
+        ssts.tail
+          .foldLeft(Writer[List[CompositionLog], SolverSST[A]](Nil, ssts.head)) {
+            case (acc, sst) => acc.flatMap(_ compose sst)
+          }
+          .run
+          .map { case (log, sst) => (("left", log), sst) }
+      }
       Future.firstCompletedOf(
         Iterable(
           right,
@@ -861,17 +879,44 @@ object Solver {
       )
     }
     val parikhNFT =
-      if (c.is.isEmpty) Future(None)
+      if (c.is.isEmpty) Future { None }
       else {
         val pSST = parikhNSST(stringVars.length, alphabet)
         Future.firstCompletedOf(
           Iterable(
-            Future { Some((atomSSTs :+ regexSST).foldRight(pSST)(_ compose _).parikhEnft) },
-            Future { Some(((atomSSTs :+ regexSST).reduceLeft(_ compose _) compose pSST).parikhEnft) }
+            Future {
+              Some(
+                (atomSSTs :+ regexSST)
+                  .foldRight(Writer[List[CompositionLog], NSST[Int, Option[A], Int, Int]](Nil, pSST)) {
+                    case (sst, acc) => acc.flatMap(sst compose _)
+                  }
+                  .run
+                  .map { case (log, sst) => (("right", log), sst.parikhEnft) }
+              )
+            },
+            Future {
+              Some(
+                (ssts.tail
+                  .foldLeft(Writer[List[CompositionLog], SolverSST[A]](Nil, ssts.head)) {
+                    case (acc, sst) => acc.flatMap(_ compose sst)
+                  } flatMap (_ compose pSST)).run.map { case (log, sst) => (("left", log), sst.parikhEnft) }
+              )
+            }
           )
         )
       }
-    val mixed = for (sst <- solverSST; nft <- parikhNFT) yield (sst, nft)
+    val mixed =
+      for (((s1, log1), sst) <- solverSST; o <- parikhNFT) yield {
+        println(s"Construction of solver SST: ${s1}")
+        println(log1.mkString("\n"))
+        o match {
+          case None => (sst, None)
+          case Some(((s2, log2), nft)) =>
+            println(s"Construction of parikh NFT: ${s2}")
+            println(log2.mkString("\n"))
+            (sst, Some(nft))
+        }
+      }
     Await.result(
       mixed,
       Duration.Inf

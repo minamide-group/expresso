@@ -1,6 +1,7 @@
 package com.github.kmn4.sst
 
 import scala.collection.immutable.Queue
+import cats.data.Writer
 
 /**
   * Types and functions relatively independent of concrete machines.
@@ -269,8 +270,17 @@ case class NSST[Q, A, B, X](
   }
 
   /** Construct NSST that transduce w to that.transduce(this.transduce(w)). */
-  def compose[R, C, Y](that: NSST[R, B, C, Y]): NSST[Int, A, C, Int] =
-    NSST.composeNsstsToNsst(this, that).renamed.removeRedundantVars
+  def compose[R, C, Y](
+      that: NSST[R, B, C, Y]
+  ): Writer[List[CompositionLog], NSST[Int, A, C, Int]] = {
+    val (nsst, logger) = NSST.composeNsstsToNsst(this, that)
+    val res = nsst.renamed.removeRedundantVars
+    logger.redundantVarsRemoved(res)
+    Writer[List[CompositionLog], NSST[Int, A, C, Int]](
+      List(logger.log),
+      res
+    )
+  }
 }
 
 object NSST {
@@ -339,8 +349,10 @@ object NSST {
   def composeNsstsToMsst[Q1, Q2, A, B, C, X, Y](
       n1: NSST[Q1, A, B, X],
       n2: NSST[Q2, B, C, Y]
-  ): MSST[Option[(Q1, Map[X, (Q2, Q2)])], A, C, X, Y] = {
+  ): (MSST[Option[(Q1, Map[X, (Q2, Q2)])], A, C, X, Y], CompositionLogger) = {
     import Concepts._
+    val logger = new CompositionLogger
+    logger.start()
 
     type NQ = (Q1, Map[X, (Q2, Q2)])
 
@@ -460,14 +472,11 @@ object NSST {
 
     val initialStates =
       states.filter { case (q, kt) => q == n1.q0 && kt.forall { case (_, (k, t)) => k == t } }
+    logger.backwardFinished(states, edges, initialStates)
 
     // Remove all unreachable states.
     val reachables = closure[NQ](initialStates, graphToMap(edges) { case (q, _, _, r) => q -> r })
-
-    val before = states.size
-    val after = reachables.size
-    val ratio = after.toDouble / before.toDouble
-    println(f"After / Before: ${ratio}%.03f\tBefore: ${before}\tAfter: ${after}")
+    logger.unreachablesRemoved(reachables)
 
     // Wrap states with Option so initial state be unique.
     type NWQ = Option[NQ]
@@ -491,7 +500,7 @@ object NSST {
       wrapped + atNone
     }
 
-    new MSST[NWQ, A, C, X, Y](
+    val res = new MSST[NWQ, A, C, X, Y](
       newStates,
       n1.in,
       n1.variables,
@@ -500,20 +509,28 @@ object NSST {
       None,
       newOutF
     )
+    logger.msstConstructed(res)
+    (res, logger)
   }
   // End of composeNsstsToMsst
 
   def composeNsstsToNsst[Q1, Q2, A, B, C, X, Y](
       n1: NSST[Q1, A, B, X],
       n2: NSST[Q2, B, C, Y]
-  ): NSST[(Option[(Q1, Map[X, (Q2, Q2)])], Map[X, Concepts.M1[Y]]), A, C, (X, Y, Boolean)] = {
+  ): (
+      NSST[(Option[(Q1, Map[X, (Q2, Q2)])], Map[X, Concepts.M1[Y]]), A, C, (X, Y, Boolean)],
+      CompositionLogger
+  ) = {
     if (!n1.isCopyless) {
       throw new Exception(s"Tried to compose NSST, but first NSST was copyfull: ${n1.edges}")
     }
     if (!n2.isCopyless) {
       throw new Exception(s"Tried to compose NSST, but second NSST was copyfull: ${n2.edges}")
     }
-    MSST.convertMsstToNsst(NSST.composeNsstsToMsst(n1, n2))
+    val (msst, logger) = NSST.composeNsstsToMsst(n1, n2)
+    val nsst = MSST.convertMsstToNsst(msst)
+    logger.nsstConstructed(nsst)
+    (nsst, logger)
   }
 
   def countOf2[A, B](alpha: Cupstar[A, B]): Map[B, Int] =
