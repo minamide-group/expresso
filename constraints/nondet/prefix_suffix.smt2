@@ -5,13 +5,15 @@
 (declare-const suffix String)
 (declare-const y String)
 
+;; x ∉ .*<script>.*
+;; prefix suffix = x
+;; y := preffix suffix (thus y == x)
+;; y ∈ .*<script>.*
+(assert (str.in.re x (re.comp (re.++ (re.++ re.all (str.to.re "<script>")) re.all))))
 (assert (str.prefixof prefix x))
 (assert (str.suffixof suffix x))
 (assert (= y (str.++ prefix suffix)))
-
-(assert (str.in.re x (re.comp (re.++ (re.++ re.all (str.to.re "<script>")) re.all))))
-(assert (str.in.re y (re.++ (re.++ re.all (str.to.re "<script>")) re.all)))
-
 (assert (= (str.len y) (str.len x)))
+(assert (str.in.re y (re.++ (re.++ re.all (str.to.re "<script>")) re.all)))
 
 (check-sat)
