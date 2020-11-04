@@ -11,6 +11,7 @@ object Constraint {
   case class Substr[A](from: Int, len: Int) extends Transduction[A]
   case class TakePrefix[A]() extends Transduction[A]
   case class TakeSuffix[A]() extends Transduction[A]
+  case class UntilFirst[A](target: Seq[A]) extends Transduction[A]
 
   case class StringVar(name: String)
   case class IntVar(name: String)
@@ -26,11 +27,13 @@ object Constraint {
   case class LenExp(v: StringVar) extends IntExp
   case class AddExp(es: Iterable[IntExp]) extends IntExp
   case class SubExp(e1: IntExp, e2: IntExp) extends IntExp
+  case class MinusExp(i: IntExp) extends IntExp
 
   sealed trait IntConstraint
   case class IntEq(e1: IntExp, e2: IntExp) extends IntConstraint
   case class IntLt(e1: IntExp, e2: IntExp) extends IntConstraint
   case class IntConj(cs: Iterable[IntConstraint]) extends IntConstraint
+  case class IntDisj(cs: Iterable[IntConstraint]) extends IntConstraint
   case class IntNeg(c: IntConstraint) extends IntConstraint
 
   case class RegexConstraint[A](v: StringVar, re: RegExp[A])

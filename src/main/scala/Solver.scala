@@ -179,10 +179,13 @@ object Solver {
     case SimpleApp("str.reverse", Seq(SimpleQualID(name))) if env(name) == StringConst => (name, Reverse())
     case SimpleApp("str.substr", Seq(SimpleQualID(name), SNumeral(from), SNumeral(len))) =>
       (name, Substr(from.toInt, len.toInt))
+    case SimpleApp("str.until_first", Seq(SimpleQualID(name), SString(target))) if env(name) == StringConst =>
+      (name, UntilFirst(target))
     case _ => throw new Exception("Cannot interpret given S-expression as transduction")
   }
   private def expectInt(e: Term, env: FunctionEnv): IntExp = e match {
     case SNumeral(i)                                 => ConstExp(i.toInt)
+    case SimpleApp("-", Seq(e))                      => MinusExp(expectInt(e, env))
     case SimpleQualID(name) if env(name) == IntConst => VarExp(IntVar(name))
     case SimpleApp("str.len", Seq(SimpleQualID(name))) if env(name) == StringConst =>
       LenExp(StringVar(name))
@@ -258,9 +261,21 @@ object Solver {
         case IntC(i) => IntC(IntNeg(i))
         case _       => throw new Exception(s"Not supported negation.")
       }
+    case SimpleApp("and", es) =>
+      val is = es.map(expectConstraint(_, env) match {
+        case IntC(i) => i
+        case _       => throw new Exception(s"Not supported conjunction.")
+      })
+      IntC(IntConj(is))
+    case SimpleApp("or", es) =>
+      val is = es.map(expectConstraint(_, env) match {
+        case IntC(i) => i
+        case _       => throw new Exception(s"Not supported disjunction.")
+      })
+      IntC(IntDisj(is))
     case SimpleApp("str.in.re", Seq(SimpleQualID(name), e)) if env(name) == StringConst =>
       REC(RegexConstraint(StringVar(name), expectRegExp(e)))
-    case _ => throw new Exception(s"Cannot interpret given expression as of Bool sort.")
+    case _ => throw new Exception(s"${e.getPos}: Cannot interpret given expression as of Bool sort: ${e}")
   }
 
   type SolverOption = Unit
@@ -656,6 +671,89 @@ object Solver {
     ).renamed
   }
 
+  def untilFirstNSST[C](i: Int, j: Int, target: Seq[C], alphabet: Set[C]): SolverSST[C] = {
+    type Q = (Int, Int)
+    sealed trait X
+    case object XIn extends X
+    case object XJ extends X
+    type A = Option[C]
+    type B = Option[C]
+    type Update = Concepts.Update[X, B]
+    val base = solverNsstTemplate[C, X](i, alphabet, XIn, Set(XJ), List(Cop1(XIn), Cop1(XJ), Cop2(None)))
+    val xs = base.variables
+    val updates: Monoid[Update] = Concepts.updateMonoid(xs)
+    val dfa = postfixDFA(target, alphabet)
+    val inSet = alphabet.map(Some(_): Option[C]) + None
+    type Edges = Set[(Q, A, Update, Q)]
+    val edges: Edges = {
+      val notFromJ: Edges = {
+        val baseEdges = base.edges.filter { case ((q, _), a, _, _) => q != j && !(q == j - 1 && a == None) }
+        // On state (j-1, 0), machine should transition to (j, q0) by reading None.
+        baseEdges + (
+          (
+            (j - 1, 0),
+            None,
+            updates.unit + (XIn -> List(Cop1(XIn), Cop2(None))),
+            (j, dfa.q0)
+          )
+        )
+      }
+      val jthComponent: Edges = {
+        val states = dfa.states
+        // On non-final states q, when translated SST reads None, it should append to variable i
+        // the prefix of target string stored in DFA that followed by one arbitrary character,
+        // because no target string has been found.
+        val toNext: Edges =
+          (states -- dfa.finalStates).map(q => {
+            val stored = target.take(q) :+ alphabet.head
+            val appendStored: Update = {
+              Map(
+                XIn -> List(Cop1(XIn), Cop2(None)),
+                XJ -> (List(Cop1(XJ)) ++ stored.toList.map(a => Cop2(Some(a))))
+              )
+            }
+            ((j, q), None, appendStored, (j + 1, 0))
+          })
+        // On the other hand, being on final states means target has been found.
+        // Thus it should keep XJ unchanged.
+        val onFinal: Edges =
+          for (q <- dfa.finalStates; a <- inSet)
+            yield ((j, q), a, Map(XIn -> List(Cop1(XIn), Cop2(a)), XJ -> List(Cop1(XJ))), (j + 1, 0))
+        // In each transition, DFA discards some (possibly empty) prefix string.
+        // SST should store it in variable XJ (it should also store input char in XIn, of course).
+        val edgesFromDfa: Edges = {
+          for (q <- states -- dfa.finalStates; a <- alphabet)
+            yield {
+              val r = dfa.transition((q, a))
+              val append =
+                if (dfa.finalStates contains r) Seq.empty
+                else {
+                  val qStored = target.take(q) ++ List(a)
+                  qStored.take(qStored.length - r).toList.map(Some(_))
+                }
+              val m = updates.combine(
+                appendWordTo(XIn, xs, List(Some(a))),
+                appendWordTo(XJ, xs, append.toList)
+              )
+              ((j, q), Some(a), m, (j, r))
+            }
+        }
+        edgesFromDfa ++ toNext ++ onFinal
+      }
+      (notFromJ ++ jthComponent)
+    }
+    val states = edges.map { case (q, _, _, _) => q } + ((i, 0))
+    val q0 = if (j == 0) (j, dfa.q0) else (0, 0)
+    NSST[Q, A, B, X](
+      states,
+      inSet,
+      xs,
+      edges,
+      q0,
+      base.partialF
+    ).renamed
+  }
+
   /** Returns NSST that outputs the same string as input iff it meets constriant given by `dfas`.
     * That is, it reads input of the form w0#w1#...w(n-1)# (where n = dfas.length and # = None) and
     * outputs it if dfa(i) accepts w(i) for all i. */
@@ -745,6 +843,7 @@ object Solver {
       case IntEq(e1, e2) => inIE(e1) ++ inIE(e2)
       case IntLt(e1, e2) => inIE(e1) ++ inIE(e2)
       case IntConj(cs)   => cs.toSet.flatMap(inIC)
+      case IntDisj(cs)   => cs.toSet.flatMap(inIC)
       case IntNeg(c)     => inIC(c)
     }
     inIC(IntConj(is)).toSeq
@@ -776,6 +875,7 @@ object Solver {
     case TransCstr(_, trans, _) =>
       trans match {
         case ReplaceAll(target, word)                                       => (target ++ word).toSet
+        case UntilFirst(target)                                             => target.toSet
         case Insert(_, word)                                                => word.toSet
         case At(_) | Reverse() | Substr(_, _) | TakePrefix() | TakeSuffix() => Set.empty
       }
@@ -809,6 +909,7 @@ object Solver {
         case Substr(from, len)        => substrNSST(i, j, from, len, alphabet)
         case TakePrefix()             => takePrefixNSST(i, j, alphabet)
         case TakeSuffix()             => takeSuffixNSST(i, j, alphabet)
+        case UntilFirst(target)       => untilFirstNSST(i, j, target, alphabet)
       }
   }
 
@@ -984,11 +1085,13 @@ object Solver {
             case LenExp(v)      => stringVarsIntExpr(v)
             case AddExp(es)     => ctx.mkAdd(es.toSeq.map(intExpToArithExp): _*)
             case SubExp(e1, e2) => ctx.mkSub(intExpToArithExp(e1), intExpToArithExp(e2))
+            case MinusExp(e)    => ctx.mkUnaryMinus(intExpToArithExp(e))
           }
           def intConstraintToBoolExpr(ic: IntConstraint): z3.BoolExpr = ic match {
             case IntEq(e1, e2) => ctx.mkEq(intExpToArithExp(e1), intExpToArithExp(e2))
             case IntLt(e1, e2) => ctx.mkLt(intExpToArithExp(e1), intExpToArithExp(e2))
             case IntConj(cs)   => ctx.mkAnd(cs.toSeq.map(intConstraintToBoolExpr): _*)
+            case IntDisj(cs)   => ctx.mkOr(cs.toSeq.map(intConstraintToBoolExpr): _*)
             case IntNeg(c)     => ctx.mkNot(intConstraintToBoolExpr(c))
           }
           c.is.map(intConstraintToBoolExpr)
