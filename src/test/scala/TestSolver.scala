@@ -2,7 +2,7 @@ package com.github.kmn4.sst
 
 import org.scalatest.funsuite._
 import Solver._
-import com.github.kmn4.sst.Constraint.SLConstraint
+import com.github.kmn4.sst.Constraint._
 
 class TestSolver extends AnyFunSuite {
   def toOptionList(s: String): List[Option[Char]] = s.toList.map(c => if (c == '#') None else Some(c))
@@ -22,8 +22,8 @@ class TestSolver extends AnyFunSuite {
   }
   test("replaceAllNSST") {
     {
-      val n = replaceAllNSST("aab".toList, "b".toList, 1, 0, alphabet)
-      testTransduce(n, "aaab#", "aaab#ab#")
+      val n = ReplaceAll("aab", "b").toSolverSST(1, 0, alphabet)
+      testTransduce(n, "aaabaab#", "aaabaab#abb#")
     }
   }
 
@@ -57,20 +57,20 @@ class TestSolver extends AnyFunSuite {
   }
   test("insertNSST") {
     {
-      val n = insertNSST(2, 0, 1, "aa".toList, alphabet)
+      val n = Insert(1, "aa").toSolverSST(2, 0, alphabet)
       testTransduce(n, "bb##", "bb##baab#")
       testTransduce(n, "##", "###")
     }
   }
   test("reverseNSST") {
     {
-      val n = reverseNSST(2, 0, alphabet)
+      val n = Reverse().toSolverSST(2, 0, alphabet)
       testTransduce(n, "ab##", "ab##ba#")
     }
   }
   test("atNSST") {
     {
-      val n = atNSST(2, 0, 1, alphabet)
+      val n = At(1).toSolverSST(2, 0, alphabet)
       testTransduce(n, "aba##", "aba##b#")
       testTransduce(n, "ab#a#", "ab#a#b#")
       testTransduce(n, "a#b#", "a#b##")
@@ -78,7 +78,7 @@ class TestSolver extends AnyFunSuite {
   }
   test("substrNSST") {
     {
-      val n = substrNSST(2, 0, 1, 2, alphabet)
+      val n = Substr(1, 2).toSolverSST(2, 0, alphabet)
       testTransduce(n, "##", "###")
       testTransduce(n, "a##", "a###")
       testTransduce(n, "ab##", "ab##b#")
@@ -89,7 +89,7 @@ class TestSolver extends AnyFunSuite {
 
   test("takePrefixNSST") {
     {
-      val n = takePrefixNSST(2, 0, alphabet)
+      val n = TakePrefix().toSolverSST(2, 0, alphabet)
       assert(
         n.transduce(toOptionList("abb##")) == Set(
           "abb###",
@@ -103,7 +103,7 @@ class TestSolver extends AnyFunSuite {
 
   test("takeSuffixNSST") {
     {
-      val n = takeSuffixNSST(2, 0, alphabet)
+      val n = TakeSuffix().toSolverSST(2, 0, alphabet)
       assert(
         n.transduce(toOptionList("abb##")) == Set(
           "abb###",

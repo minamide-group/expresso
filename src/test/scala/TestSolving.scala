@@ -3,7 +3,9 @@ package com.github.kmn4.sst
 import org.scalatest.flatspec._
 
 class TestSolving extends AnyFlatSpec {
-  import Solver.{replaceAllNSST, concatNSST, regularNSST, parikhNSST}
+  import Solver.{concatNSST, regularNSST, parikhNSST}
+  def replaceAllNSST(target: String, word: String, i: Int, j: Int, alphabet: Set[Char]) =
+    Constraint.ReplaceAll(target, word).toSolverSST(i, j, alphabet)
   def compositionRight[A, X](l: Seq[NSST[Int, A, A, Int]]): NSST[Int, A, A, Int] = l.reduceRight(_ compose _)
   def toOptionList(s: String): List[Option[Char]] = s.toList.map(c => if (c == '#') None else Some(c))
   def fromOptionList(l: List[Option[Char]]): String = l.map(_.getOrElse('#')).mkString

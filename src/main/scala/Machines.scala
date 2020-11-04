@@ -133,6 +133,29 @@ case class NSST[Q, A, B, X](
     outF(q).map { flatMap1(_, m) }.map(erase1)
   def transduce(w: List[A]): Set[List[B]] =
     transition(Set(q0), w).flatMap { case (q, m) => outputAt(q, m) }
+  def transduce1(w: List[A]): Set[List[B]] = {
+    import cats._
+    import cats.implicits._
+    import cats.data.WriterT
+    type Config = WriterT[List, Update[X, B], Q]
+    def Config(l: List[(Update[X, B], Q)]) = WriterT[List, Update[X, B], Q](l)
+    val alphaCoalg: Map[A, Map[Q, Config]] = {
+      graphToMap(edges) { case (q, a, m, r) => a -> (q, m, r) }.view
+        .mapValues { case qmr => graphToMap(qmr) { case (q, m, r) => q -> (m, r) } }
+        .map {
+          case (a, m) =>
+            a -> m.map { case (q, s) => q -> Config(s.toList) }.withDefaultValue(Config(Nil))
+        }
+        .toMap
+        .withDefaultValue(Map.empty)
+    }
+    w.foldLeft(Config(List((monoid.unit, q0)))) {
+        case (acc, a) => acc.flatMap(alphaCoalg(a))
+      }
+      .run
+      .flatMap { case (m, q) => outputAt(q, m) }
+      .toSet
+  }
 
   def isCopyless: Boolean = {
     val e = edges.forall { case (_, _, m, _) => isCopylessUpdate(m) }
