@@ -171,6 +171,9 @@ object Solver {
     case SimpleApp("str.replaceall", Seq(SimpleQualID(name), SString(target), SString(word)))
         if env(name) == StringConst =>
       (name, ReplaceAll(target, word))
+    case SimpleApp("str.replace_some", Seq(SimpleQualID(name), SString(target), SString(word)))
+        if env(name) == StringConst =>
+      (name, ReplaceSome(target, word))
     case SimpleApp("str.at", Seq(SimpleQualID(name), SNumeral(pos))) if env(name) == StringConst =>
       (name, At(pos.toInt))
     case SimpleApp("str.insert", Seq(SimpleQualID(name), SNumeral(pos), SString(word)))
@@ -181,7 +184,7 @@ object Solver {
       (name, Substr(from.toInt, len.toInt))
     case SimpleApp("str.until_first", Seq(SimpleQualID(name), SString(target))) if env(name) == StringConst =>
       (name, UntilFirst(target))
-    case _ => throw new Exception("Cannot interpret given S-expression as transduction")
+    case _ => throw new Exception(s"${e.getPos}: Cannot interpret given S-expression as transduction: ${e}")
   }
   private def expectInt(e: Term, env: FunctionEnv): IntExp = e match {
     case SNumeral(i)                                 => ConstExp(i.toInt)
@@ -521,6 +524,7 @@ object Solver {
     case TransCstr(_, trans, _) =>
       trans match {
         case ReplaceAll(target, word)                                       => (target ++ word).toSet
+        case ReplaceSome(target, word)                                      => (target ++ word).toSet
         case UntilFirst(target)                                             => target.toSet
         case Insert(_, word)                                                => word.toSet
         case At(_) | Reverse() | Substr(_, _) | TakePrefix() | TakeSuffix() => Set.empty

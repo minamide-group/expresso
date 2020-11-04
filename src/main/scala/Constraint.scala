@@ -100,6 +100,90 @@ object Constraint {
     }
   }
 
+  /** x(i) := replace_some x(j) target word */
+  case class ReplaceSome[C](target: Seq[C], word: Seq[C]) extends Transduction[C] {
+
+    // TODO Abstract duplicate lines of ReplaceAll
+    def toSolverSST(i: Int, j: Int, alphabet: Set[C]): Solver.SolverSST[C] = {
+      type Q = (Int, Int)
+      sealed trait X
+      case object XIn extends X
+      case object XJ extends X
+      type A = Option[C]
+      type B = Option[C]
+      type Update = Concepts.Update[X, B]
+      val base = solverNsstTemplate[C, X](i, alphabet, XIn, Set(XJ), List(Cop1(XIn), Cop1(XJ), Cop2(None)))
+      val xs = base.variables
+      val updates: Monoid[Update] = Concepts.updateMonoid(xs)
+      val dfa = postfixDFA(target, alphabet)
+      type Edges = Set[(Q, A, Update, Q)]
+      val edges: Edges = {
+        val notFromJ: Edges = {
+          val baseEdges = base.edges.filter { case ((q, _), a, _, _) => q != j && !(q == j - 1 && a == None) }
+          // On state (j-1, 0), machine should transition to (j, q0) by reading None.
+          baseEdges + (
+            (
+              (j - 1, 0),
+              None,
+              updates.unit + (XIn -> List(Cop1(XIn), Cop2(None))),
+              (j, dfa.q0)
+            )
+          )
+        }
+        val jthComponent: Edges = {
+          val states = dfa.states -- dfa.finalStates
+          // On each state q, DFA has partially matched prefix of target string.
+          // If translated SST reads None, it should append the stored string to variable i.
+          val toNext: Edges =
+            states.map(q => {
+              val stored = target.take(q)
+              val appendStored: Update = {
+                Map(
+                  XIn -> List(Cop1(XIn), Cop2(None)),
+                  XJ -> (List(Cop1(XJ)) ++ stored.toList.map(a => Cop2(Some(a))))
+                )
+              }
+              ((j, q), None, appendStored, (j + 1, 0))
+            })
+          val edgesFromDfa: Edges = {
+            states.flatMap { q =>
+              alphabet.flatMap { a =>
+                // TODO Difference from ReplaceAll
+                val t = dfa.transition((q, a))
+                val (r, appends) =
+                  if (dfa.finalStates contains t)
+                    (dfa.q0, (Seq(word.map(Some.apply), target.map(Some.apply))))
+                  else {
+                    val qStored = target.take(q) ++ List(a)
+                    (t, Seq(qStored.take(qStored.length - t).toList.map(Some(_))))
+                  }
+                appends.map(append => {
+                  val m = updates.combine(
+                    appendWordTo(XIn, xs, List(Some(a))),
+                    appendWordTo(XJ, xs, append.toList)
+                  )
+                  ((j, q), Some(a), m, (j, r))
+                })
+              }
+            }
+          }
+          edgesFromDfa ++ toNext
+        }
+        (notFromJ ++ jthComponent)
+      }
+      val states = edges.map { case (q, _, _, _) => q } + ((i, 0))
+      val q0 = if (j == 0) (j, dfa.q0) else (0, 0)
+      NSST[Q, A, B, X](
+        states,
+        alphabet.map(Some(_): Option[C]) + None,
+        xs,
+        edges,
+        q0,
+        base.partialF
+      ).renamed
+    }
+  }
+
   /** x(i) := insert(x(j), pos, word) */
   case class Insert[C](pos: Int, word: Seq[C]) extends Transduction[C] {
 

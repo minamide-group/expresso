@@ -27,6 +27,20 @@ class TestSolver extends AnyFunSuite {
     }
   }
 
+  test("ReplaceSome") {
+    {
+      val n = ReplaceSome("aab", "b").toSolverSST(1, 0, alphabet)
+      assert(
+        n.transduce(toOptionList("aaabaab#")).map(fromOptionList) == Set(
+          "aaabaab#aaabaab#",
+          "aaabaab#aaabb#",
+          "aaabaab#abaab#",
+          "aaabaab#abb#"
+        )
+      )
+    }
+  }
+
   test("concatNSST") {
     {
       // 2 := a0bb
