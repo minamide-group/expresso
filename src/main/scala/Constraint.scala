@@ -16,263 +16,191 @@ object Constraint {
       * @param alphabet
       * @return
       */
-    def toSolverSST(i: Int, j: Int, alphabet: Set[C]): Solver.SolverSST[C]
+    def toSolverSST(i: Int, j: Int, alphabet: Set[C]): Solver.SolverSST[C] = {
+      sealed trait X
+      case object XIn extends X
+      case class XJ(x: Int) extends X
+      type Q = (Int, Int)
+      type A = Option[C]
+      type B = Option[C]
+      type Update = Concepts.Update[X, B]
+      type Edges = Iterable[(Q, A, Update, Q)]
+      val jsst = this.toSST(alphabet)
+      val xjs: Set[X] = jsst.variables.map(XJ.apply)
+      val xj = xjs.head
+      val base = solverNsstTemplate[C, X](i, alphabet, XIn, xjs, List(Cop1(XIn), Cop1(xj), Cop2(None)))
+      val xs = base.variables
+      val updates: Monoid[Update] = Concepts.updateMonoid(xs)
+      def append(b: B): Update = updates.unit + (XIn -> List(Cop1(XIn), Cop2(b)))
+      val states: Set[Q] = base.states - ((j, 0)) ++ jsst.states.map((j, _))
+      val edges: Edges = {
+        val baseNoJ = base.edges.filter { case (q, a, m, r) => (q._1 != j) && (r._1 != j) }
+        val toJ = ((j - 1, 0), None, append(None), (j, jsst.q0))
+        def embedList(l: Concepts.Cupstar[Int, C]): Concepts.Cupstar[X, B] =
+          l.map { case Cop1(y) => Cop1(XJ(y)); case Cop2(c) => Cop2(Some(c)) }
+        def embedUpdate(m: Concepts.Update[Int, C]): Concepts.Update[X, B] =
+          m.map { case (x, l) => XJ(x) -> embedList(l) }
+        val withinJ: Edges = jsst.edges.map {
+          case (q, a, m, r) =>
+            (((j, q), Some(a), embedUpdate(m) + (XIn -> List(Cop1(XIn), Cop2(Some(a)))), (j, r)))
+        }
+        val fromJ: Edges =
+          for ((qf, s) <- jsst.outF; l <- s)
+            yield ((j, qf), None, append(None) + (xj -> embedList(l)), (j + 1, 0))
+
+        baseNoJ + toJ ++ withinJ ++ fromJ
+      }
+      base
+        .copy(
+          states = states,
+          variables = xs ++ xjs,
+          edges = edges.toSet,
+          q0 = if (j == 0) (j, jsst.q0) else (0, 0)
+        )
+        .renamed
+    }
+
+    /**
+      * Construct NSST that performs this transduction and has non-empty set of variables.
+      *
+      * @param alphabet
+      * @return NSST that performs this transduction and has non-empty set of variables.
+      */
+    def toSST(alphabet: Set[C]): NSST[Int, C, C, Int]
   }
 
   case class ReplaceAll[C](target: Seq[C], word: Seq[C]) extends Transduction[C] {
 
-    /** Construct NSST which replaces `target` in `j`-th input string with `word`,
-      * and output it as `i`-th string. */
-    def toSolverSST(i: Int, j: Int, alphabet: Set[C]): Solver.SolverSST[C] = {
-      type Q = (Int, Int)
-      sealed trait X
-      case object XIn extends X
-      case object XJ extends X
-      type A = Option[C]
-      type B = Option[C]
-      type Update = Concepts.Update[X, B]
-      val base = solverNsstTemplate[C, X](i, alphabet, XIn, Set(XJ), List(Cop1(XIn), Cop1(XJ), Cop2(None)))
-      val xs = base.variables
-      val updates: Monoid[Update] = Concepts.updateMonoid(xs)
+    /** Construct NSST which replaces `target` input string with `word` */
+    def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
+      type Q = Int
+      type X = Int
+      type Update = Concepts.Update[X, C]
+      type Edges = Iterable[(Q, C, Update, Q)]
+      val x = 0
       val dfa = postfixDFA(target, alphabet)
-      type Edges = Set[(Q, A, Update, Q)]
+      val states = dfa.states -- dfa.finalStates
       val edges: Edges = {
-        val notFromJ: Edges = {
-          val baseEdges = base.edges.filter { case ((q, _), a, _, _) => q != j && !(q == j - 1 && a == None) }
-          // On state (j-1, 0), machine should transition to (j, q0) by reading None.
-          baseEdges + (
-            (
-              (j - 1, 0),
-              None,
-              updates.unit + (XIn -> List(Cop1(XIn), Cop2(None))),
-              (j, dfa.q0)
-            )
-          )
-        }
-        val jthComponent: Edges = {
-          val states = dfa.states -- dfa.finalStates
-          // On each state q, DFA has partially matched prefix of target string.
-          // If translated SST reads None, it should append the stored string to variable i.
-          val toNext: Edges =
-            states.map(q => {
-              val stored = target.take(q)
-              val appendStored: Update = {
-                Map(
-                  XIn -> List(Cop1(XIn), Cop2(None)),
-                  XJ -> (List(Cop1(XJ)) ++ stored.toList.map(a => Cop2(Some(a))))
-                )
+        // In each transition, DFA discards some prefix string (possibly empty one).
+        // SST should store it in variable.
+        for (q <- states; a <- alphabet)
+          yield {
+            val t = dfa.transition((q, a))
+            val (r, append) =
+              if (dfa.finalStates contains t) (dfa.q0, word)
+              else {
+                val qStored = target.take(q) ++ List(a)
+                (t, qStored.take(qStored.length - t).toList)
               }
-              ((j, q), None, appendStored, (j + 1, 0))
-            })
-          // In each transition, DFA discards some prefix string (possibly empty one).
-          // SST should store it in variable 1 (it should also store input char in 0, of course).
-          val edgesFromDfa: Edges = {
-            for (q <- states; a <- alphabet)
-              yield {
-                val t = dfa.transition((q, a))
-                val (r, append) =
-                  if (dfa.finalStates contains t) (dfa.q0, word.map(Some(_)))
-                  else {
-                    val qStored = target.take(q) ++ List(a)
-                    (t, qStored.take(qStored.length - t).toList.map(Some(_)))
-                  }
-                val m = updates.combine(
-                  appendWordTo(XIn, xs, List(Some(a))),
-                  appendWordTo(XJ, xs, append.toList)
-                )
-                ((j, q), Some(a), m, (j, r))
-              }
+            val m = Map(x -> (Cop1(x) +: append.map[Cop[X, C]](Cop2.apply)).toList)
+            (q, a, m, r)
           }
-          edgesFromDfa ++ toNext
-        }
-        (notFromJ ++ jthComponent)
       }
-      val states = edges.map { case (q, _, _, _) => q } + ((i, 0))
-      val q0 = if (j == 0) (j, dfa.q0) else (0, 0)
-      NSST[Q, A, B, X](
-        states,
-        alphabet.map(Some(_): Option[C]) + None,
-        xs,
-        edges,
-        q0,
-        base.partialF
-      ).renamed
+      val outF: Map[Q, Set[Concepts.Cupstar[X, C]]] = NSST.graphToMap {
+        // On each state q, DFA has partially matched prefix of target string.
+        states.toList.map(q => {
+          val stored = target.take(q)
+          q -> (List(Cop1(x)) ++ stored.toList.map(Cop2.apply))
+        })
+      }(identity)
+      NSST[Q, C, C, X](states, alphabet, Set(x), edges.toSet, dfa.q0, outF)
     }
+
   }
 
   /** x(i) := replace_some x(j) target word */
   case class ReplaceSome[C](target: Seq[C], word: Seq[C]) extends Transduction[C] {
 
-    // TODO Abstract duplicate lines of ReplaceAll
-    def toSolverSST(i: Int, j: Int, alphabet: Set[C]): Solver.SolverSST[C] = {
-      type Q = (Int, Int)
-      sealed trait X
-      case object XIn extends X
-      case object XJ extends X
-      type A = Option[C]
-      type B = Option[C]
-      type Update = Concepts.Update[X, B]
-      val base = solverNsstTemplate[C, X](i, alphabet, XIn, Set(XJ), List(Cop1(XIn), Cop1(XJ), Cop2(None)))
-      val xs = base.variables
-      val updates: Monoid[Update] = Concepts.updateMonoid(xs)
+    def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
+      type Q = Int
+      type X = Int
+      type Update = Concepts.Update[X, C]
+      type Edges = Iterable[(Q, C, Update, Q)]
+      val x = 0
       val dfa = postfixDFA(target, alphabet)
-      type Edges = Set[(Q, A, Update, Q)]
+      val states = dfa.states -- dfa.finalStates
       val edges: Edges = {
-        val notFromJ: Edges = {
-          val baseEdges = base.edges.filter { case ((q, _), a, _, _) => q != j && !(q == j - 1 && a == None) }
-          // On state (j-1, 0), machine should transition to (j, q0) by reading None.
-          baseEdges + (
-            (
-              (j - 1, 0),
-              None,
-              updates.unit + (XIn -> List(Cop1(XIn), Cop2(None))),
-              (j, dfa.q0)
-            )
-          )
-        }
-        val jthComponent: Edges = {
-          val states = dfa.states -- dfa.finalStates
-          // On each state q, DFA has partially matched prefix of target string.
-          // If translated SST reads None, it should append the stored string to variable i.
-          val toNext: Edges =
-            states.map(q => {
-              val stored = target.take(q)
-              val appendStored: Update = {
-                Map(
-                  XIn -> List(Cop1(XIn), Cop2(None)),
-                  XJ -> (List(Cop1(XJ)) ++ stored.toList.map(a => Cop2(Some(a))))
-                )
+        // In each transition, DFA discards some prefix string (possibly empty one).
+        // SST should store it in variable.
+        states.flatMap { q =>
+          alphabet.flatMap { a =>
+            val t = dfa.transition((q, a))
+            // Difference from ReplaceAll
+            val (r, appends) =
+              if (dfa.finalStates contains t) (dfa.q0, (Seq(word, target)))
+              else {
+                val qStored = target.take(q) ++ List(a)
+                (t, Seq(qStored.take(qStored.length - t).toList))
               }
-              ((j, q), None, appendStored, (j + 1, 0))
+            appends.map(append => {
+              val m = Map(x -> (Cop1(x) +: append.map[Cop[X, C]](Cop2.apply)).toList)
+              (q, a, m, r)
             })
-          val edgesFromDfa: Edges = {
-            states.flatMap { q =>
-              alphabet.flatMap { a =>
-                // TODO Difference from ReplaceAll
-                val t = dfa.transition((q, a))
-                val (r, appends) =
-                  if (dfa.finalStates contains t)
-                    (dfa.q0, (Seq(word.map(Some.apply), target.map(Some.apply))))
-                  else {
-                    val qStored = target.take(q) ++ List(a)
-                    (t, Seq(qStored.take(qStored.length - t).toList.map(Some(_))))
-                  }
-                appends.map(append => {
-                  val m = updates.combine(
-                    appendWordTo(XIn, xs, List(Some(a))),
-                    appendWordTo(XJ, xs, append.toList)
-                  )
-                  ((j, q), Some(a), m, (j, r))
-                })
-              }
-            }
           }
-          edgesFromDfa ++ toNext
         }
-        (notFromJ ++ jthComponent)
       }
-      val states = edges.map { case (q, _, _, _) => q } + ((i, 0))
-      val q0 = if (j == 0) (j, dfa.q0) else (0, 0)
-      NSST[Q, A, B, X](
-        states,
-        alphabet.map(Some(_): Option[C]) + None,
-        xs,
-        edges,
-        q0,
-        base.partialF
-      ).renamed
+      val outF: Map[Q, Set[Concepts.Cupstar[X, C]]] = NSST.graphToMap {
+        // On each state q, DFA has partially matched prefix of target string.
+        states.toList.map(q => {
+          val stored = target.take(q)
+          q -> (List(Cop1(x)) ++ stored.toList.map(Cop2.apply))
+        })
+      }(identity)
+      NSST[Q, C, C, X](states, alphabet, Set(x), edges.toSet, dfa.q0, outF)
     }
   }
 
   /** x(i) := insert(x(j), pos, word) */
   case class Insert[C](pos: Int, word: Seq[C]) extends Transduction[C] {
 
-    def toSolverSST(i: Int, j: Int, alphabet: Set[C]): Solver.SolverSST[C] = {
-      sealed trait X
-      case object XIn extends X
-      case object XJ extends X
-      type Q = (Int, Int)
-      type A = Option[C]
-      type B = Option[C]
+    def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
+      type X = Int
+      val x = 0
+      type Q = Int
+      type A = C
+      type B = C
       type Update = Concepts.Update[X, B]
       type Edge = (Q, A, Update, Q)
-      val base = solverNsstTemplate[C, X](i, alphabet, XIn, Set(XJ), List(Cop1(XIn), Cop1(XJ), Cop2(None)))
-      val newStates = (0 to pos + 1).map((j, _)).toSet
-      val baseEdges = base.edges.view.filterNot { case (q, _, _, _) => q._1 == j }
-      val newEdges = newStates.view.flatMap {
-        case (_, l) if l < pos =>
-          alphabet.map[Edge](a =>
-            (
-              (j, l),
-              Some(a),
-              Map(XIn -> List(Cop1(XIn), Cop2(Some(a))), XJ -> List(Cop1(XJ), Cop2(Some(a)))),
-              (j, l + 1)
-            )
-          ) + (((j, l), None, Map(XIn -> List(Cop1(XIn), Cop2(None)), XJ -> List(Cop1(XJ))), (j + 1, 0)))
-        case (_, l) if l == pos =>
-          base.in.map[Edge](a =>
-            (
-              (j, l),
-              a,
-              Map(
-                XIn -> List(Cop1(XIn), Cop2(a)),
-                XJ -> (List(Cop1(XJ)) ++ word.map(c => Cop2(Some(c))) ++ List(Cop2(a)))
-              ),
-              (j, l + 1)
-            )
-          ) + (
-            (
-              (j, l),
-              None,
-              Map(
-                XIn -> List(Cop1(XIn), Cop2(None)),
-                XJ -> (List(Cop1(XJ)) ++ word.map(c => Cop2(Some(c))))
-              ),
-              (j + 1, 0)
-            )
+      val states = (0 to pos + 1).toSet
+      val edges = states.flatMap { l =>
+        if (l < pos) alphabet.map[Edge](a => (l, a, Map(x -> List(Cop1(x), Cop2(a))), l + 1))
+        else if (l == pos)
+          alphabet.map(a =>
+            (l, a, Map(x -> (List(Cop1(x)) ++ word.map(c => Cop2(c)) ++ List(Cop2(a)))), l + 1)
           )
-        case (_, l) if l == pos + 1 =>
-          alphabet.map[Edge](a =>
-            (
-              (j, l),
-              Some(a),
-              Map(XIn -> List(Cop1(XIn), Cop2(Some(a))), XJ -> List(Cop1(XJ), Cop2(Some(a)))),
-              (j, l)
-            )
-          ) + (((j, l), None, Map(XIn -> List(Cop1(XIn), Cop2(None)), XJ -> List(Cop1(XJ))), (j + 1, 0)))
+        else alphabet.map[Edge](a => (l, a, Map(x -> List(Cop1(x), Cop2(a))), l))
       }
-      base
-        .copy(
-          states = base.states ++ newStates,
-          edges = (baseEdges ++ newEdges).toSet
+      val outF = states
+        .map(q =>
+          q -> Set {
+            if (q < pos) List(Cop1(x))
+            else if (q == pos) List[Cop[X, B]](Cop1(x)) ++ word.map(c => Cop2(c))
+            else List(Cop1(x))
+          }
         )
-        .renamed
-
+        .toMap
+      NSST(states, alphabet, Set(x), edges, 0, outF)
     }
 
   }
 
   /** x(i) := at(x(j), pos) */
   case class At[C](pos: Int) extends Transduction[C] {
-
-    def toSolverSST(i: Int, j: Int, alphabet: Set[C]): Solver.SolverSST[C] =
-      Substr(pos, 1).toSolverSST(i, j, alphabet)
-
+    def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = Substr(pos, 1).toSST(alphabet)
   }
 
   /** x(i) := reverse(x(j)) */
   case class Reverse[C]() extends Transduction[C] {
 
-    def toSolverSST(i: Int, j: Int, alphabet: Set[C]): Solver.SolverSST[C] = {
-      sealed trait X
-      case object XIn extends X
-      case object XJ extends X
-      val base = solverNsstTemplate[C, X](i, alphabet, XIn, Set(XJ), List(Cop1(XIn), Cop1(XJ), Cop2(None)))
-      val edges = base.edges.map {
-        case (q, a, m, r) if q._1 == j && a != None => (q, a, m + (XJ -> List(Cop2(a), Cop1(XJ))), r)
-        case edge                                   => edge
-      }
-      base.copy(edges = edges).renamed
+    def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
+      NSST(
+        Set(0),
+        alphabet,
+        Set(0),
+        alphabet.map(a => (0, a, Map(0 -> List(Cop2(a), Cop1(0))), 0)),
+        0,
+        Map(0 -> Set(List(Cop1(0))))
+      )
     }
 
   }
@@ -280,77 +208,37 @@ object Constraint {
   /** x(i) := substr(x(j), from, len) */
   case class Substr[C](from: Int, len: Int) extends Transduction[C] {
 
-    def toSolverSST(i: Int, j: Int, alphabet: Set[C]): Solver.SolverSST[C] = {
-      sealed trait X
-      case object XIn extends X
-      case object XJ extends X
-      type Q = (Int, Int)
-      type A = Option[C]
-      type B = Option[C]
-      type Update = Concepts.Update[X, B]
-      type Edge = (Q, A, Update, Q)
-      val base = solverNsstTemplate[C, X](i, alphabet, XIn, Set(XJ), List(Cop1(XIn), Cop1(XJ), Cop2(None)))
-      val newStates = (0 to from + len).map((j, _)).toSet
-      val baseEdges = base.edges.view.filterNot { case (q, _, _, _) => q._1 == j }
-      val newEdges = newStates.view.flatMap {
-        case (_, l) if l < from =>
-          alphabet.map[Edge](a =>
-            ((j, l), Some(a), Map(XIn -> List(Cop1(XIn), Cop2(Some(a))), XJ -> Nil), (j, l + 1))
-          ) + (((j, l), None, Map(XIn -> List(Cop1(XIn), Cop2(None)), XJ -> List(Cop1(XJ))), (j + 1, 0)))
-        case (_, l) if l < from + len =>
-          base.in.map[Edge](a =>
-            ((j, l), a, Map(XIn -> List(Cop1(XIn), Cop2(a)), XJ -> (List(Cop1(XJ), Cop2(a)))), (j, l + 1))
-          ) + (((j, l), None, Map(XIn -> List(Cop1(XIn), Cop2(None)), XJ -> List(Cop1(XJ))), (j + 1, 0)))
-        case (_, l) =>
-          alphabet.map[Edge](a =>
-            ((j, l), Some(a), Map(XIn -> List(Cop1(XIn), Cop2(Some(a))), XJ -> List(Cop1(XJ))), (j, l))
-          ) + (((j, l), None, Map(XIn -> List(Cop1(XIn), Cop2(None)), XJ -> List(Cop1(XJ))), (j + 1, 0)))
+    def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
+      val x = 0
+      val states = (0 to from + len).toSet
+      val edges = states.flatMap { q =>
+        if (q < from) alphabet.map(a => (q, a, Map(x -> Nil), q + 1))
+        else if (q < from + len) alphabet.map(a => (q, a, Map(x -> List(Cop1(x), Cop2(a))), q + 1))
+        else alphabet.map(a => (q, a, Map(x -> List(Cop1(x))), q))
       }
-      base
-        .copy(
-          states = base.states ++ newStates,
-          edges = (baseEdges ++ newEdges).toSet
-        )
-        .renamed
+      val outF = states.map(q => q -> Set(List[Cop[Int, C]](Cop1(x))))
+      NSST(states, alphabet, Set(x), edges.toSet, 0, outF.toMap)
     }
-
   }
 
   /** x(i) is prefix of x(j) */
   case class TakePrefix[C]() extends Transduction[C] {
 
-    def toSolverSST(i: Int, j: Int, alphabet: Set[C]): Solver.SolverSST[C] = {
-      sealed trait X
-      case object XIn extends X
-      case object XJ extends X
-      val base = solverNsstTemplate[C, X](i, alphabet, XIn, Set(XJ), List(Cop1(XIn), Cop1(XJ), Cop2(None)))
-      val states = base.states + ((j, 1))
-      val variables = Set[X](XIn, XJ)
-      val idUpdate = Concepts.updateMonoid[X, Option[C]](variables).unit
-      val update: Map[Option[C], Concepts.Update[X, Option[C]]] =
-        base.in.map(a => a -> (idUpdate + (XIn -> List(Cop1(XIn), Cop2(a))))).toMap
-      val edges = {
-        val baseEdges = base.edges.view.filterNot { case ((q, _), _, _, _) => q == j }
-        val someEdges =
-          alphabet.view.flatMap(a =>
-            Iterable(
-              ((j, 0), Some(a), update(Some(a)) + (XJ -> List(Cop1(XJ), Cop2(Some(a)))), (j, 0)),
-              ((j, 0), Some(a), update(Some(a)), (j, 1)),
-              ((j, 1), Some(a), update(Some(a)), (j, 1))
-            )
+    def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
+      NSST(
+        Set(0, 1),
+        alphabet,
+        Set(0),
+        alphabet.flatMap(a =>
+          Iterable(
+            (0, a, Map(0 -> List(Cop1(0), Cop2(a))), 0),
+            (0, a, Map(0 -> List(Cop1(0))), 1),
+            (1, a, Map(0 -> List(Cop1(0))), 1)
           )
-        val noneEdges =
-          Iterable(((j, 0), None, update(None), (j + 1, 0)), ((j, 1), None, update(None), (j + 1, 0)))
-        baseEdges ++ someEdges ++ noneEdges
-      }
-      NSST[(Int, Int), Option[C], Option[C], X](
-        states,
-        base.in,
-        variables,
-        edges.toSet,
-        (0, 0),
-        base.outF
-      ).renamed
+        ),
+        0,
+        Map(0 -> Set(List(Cop1(0))), 1 -> Set(List(Cop1(0))))
+      )
     }
 
   }
@@ -358,129 +246,74 @@ object Constraint {
   /** x(i) is suffix of x(j) */
   case class TakeSuffix[C]() extends Transduction[C] {
 
-    def toSolverSST(i: Int, j: Int, alphabet: Set[C]): Solver.SolverSST[C] = {
-      sealed trait X
-      case object XIn extends X
-      case object XJ extends X
-      val base = solverNsstTemplate[C, X](i, alphabet, XIn, Set(XJ), List(Cop1(XIn), Cop1(XJ), Cop2(None)))
-      val states = base.states + ((j, 1))
-      val variables = Set[X](XIn, XJ)
-      val idUpdate = Concepts.updateMonoid[X, Option[C]](variables).unit
-      val update: Map[Option[C], Concepts.Update[X, Option[C]]] =
-        base.in.map(a => a -> (idUpdate + (XIn -> List(Cop1(XIn), Cop2(a))))).toMap
-      val edges = {
-        val baseEdges = base.edges.view.filterNot { case ((q, _), _, _, _) => q == j }
-        val someEdges =
-          alphabet.view.flatMap(a =>
-            Iterable(
-              ((j, 0), Some(a), update(Some(a)), (j, 0)),
-              ((j, 0), Some(a), update(Some(a)) + (XJ -> List(Cop1(XJ), Cop2(Some(a)))), (j, 1)),
-              ((j, 1), Some(a), update(Some(a)) + (XJ -> List(Cop1(XJ), Cop2(Some(a)))), (j, 1))
-            )
+    def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
+      NSST(
+        Set(0, 1),
+        alphabet,
+        Set(0),
+        alphabet.flatMap(a =>
+          Iterable(
+            (0, a, Map(0 -> List(Cop1(0))), 0),
+            (0, a, Map(0 -> List(Cop1(0), Cop2(a))), 1),
+            (1, a, Map(0 -> List(Cop1(0), Cop2(a))), 1)
           )
-        val noneEdges =
-          Iterable(((j, 0), None, update(None), (j + 1, 0)), ((j, 1), None, update(None), (j + 1, 0)))
-        baseEdges ++ someEdges ++ noneEdges
-      }
-      NSST[(Int, Int), Option[C], Option[C], X](
-        states,
-        base.in,
-        variables,
-        edges.toSet,
-        (0, 0),
-        base.outF
-      ).renamed
+        ),
+        0,
+        Map(0 -> Set(List(Cop1(0))), 1 -> Set(List(Cop1(0))))
+      )
     }
-
   }
 
   /** x(i) := prefix of x(j) that excludes longet prefix of x(j) that excludes leftmost `target`.
     * If x(j) does not contain `target`, then x(i) will be x(j) followed by additional one character. */
   case class UntilFirst[C](target: Seq[C]) extends Transduction[C] {
 
-    def toSolverSST(i: Int, j: Int, alphabet: Set[C]): Solver.SolverSST[C] = {
-      type Q = (Int, Int)
-      sealed trait X
-      case object XIn extends X
-      case object XJ extends X
-      type A = Option[C]
-      type B = Option[C]
-      type Update = Concepts.Update[X, B]
-      val base = solverNsstTemplate[C, X](i, alphabet, XIn, Set(XJ), List(Cop1(XIn), Cop1(XJ), Cop2(None)))
-      val xs = base.variables
-      val updates: Monoid[Update] = Concepts.updateMonoid(xs)
+    def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
+      type Q = Int
+      type X = Int
+      type Update = Concepts.Update[X, C]
+      type Edges = Iterable[(Q, C, Update, Q)]
+      val x = 0
       val dfa = postfixDFA(target, alphabet)
-      val inSet = alphabet.map(Some(_): Option[C]) + None
-      type Edges = Set[(Q, A, Update, Q)]
+      val states = dfa.states
       val edges: Edges = {
-        val notFromJ: Edges = {
-          val baseEdges = base.edges.filter { case ((q, _), a, _, _) => q != j && !(q == j - 1 && a == None) }
-          // On state (j-1, 0), machine should transition to (j, q0) by reading None.
-          baseEdges + (
-            (
-              (j - 1, 0),
-              None,
-              updates.unit + (XIn -> List(Cop1(XIn), Cop2(None))),
-              (j, dfa.q0)
-            )
-          )
-        }
-        val jthComponent: Edges = {
-          val states = dfa.states
-          // On non-final states q, when translated SST reads None, it should append to variable i
-          // the prefix of target string stored in DFA that followed by one arbitrary character,
-          // because no target string has been found.
-          val toNext: Edges =
-            (states -- dfa.finalStates).map(q => {
-              val stored = target.take(q) :+ alphabet.head
-              val appendStored: Update = {
-                Map(
-                  XIn -> List(Cop1(XIn), Cop2(None)),
-                  XJ -> (List(Cop1(XJ)) ++ stored.toList.map(a => Cop2(Some(a))))
-                )
-              }
-              ((j, q), None, appendStored, (j + 1, 0))
-            })
-          // On the other hand, being on final states means target has been found.
-          // Thus it should keep XJ unchanged.
-          val onFinal: Edges =
-            for (q <- dfa.finalStates; a <- inSet)
-              yield ((j, q), a, Map(XIn -> List(Cop1(XIn), Cop2(a)), XJ -> List(Cop1(XJ))), (j + 1, 0))
-          // In each transition, DFA discards some (possibly empty) prefix string.
-          // SST should store it in variable XJ (it should also store input char in XIn, of course).
-          val edgesFromDfa: Edges = {
-            for (q <- states -- dfa.finalStates; a <- alphabet)
-              yield {
-                val r = dfa.transition((q, a))
-                val append =
-                  if (dfa.finalStates contains r) Seq.empty
-                  else {
-                    val qStored = target.take(q) ++ List(a)
-                    qStored.take(qStored.length - r).toList.map(Some(_))
-                  }
-                val m = updates.combine(
-                  appendWordTo(XIn, xs, List(Some(a))),
-                  appendWordTo(XJ, xs, append.toList)
-                )
-                ((j, q), Some(a), m, (j, r))
-              }
-          }
-          edgesFromDfa ++ toNext ++ onFinal
-        }
-        (notFromJ ++ jthComponent)
+        for (q <- states; a <- alphabet)
+          yield
+            if (!dfa.finalStates(q)) {
+              val r = dfa.transition((q, a))
+              val append =
+                if (dfa.finalStates(r)) Seq.empty
+                else {
+                  val stored = target.take(q) ++ List(a)
+                  stored.take(stored.length - r)
+                }
+              val m = Map(x -> (Cop1(x) :: append.map(Cop2.apply).toList))
+              (q, a, m, r)
+            } else {
+              (q, a, Map(x -> List[Cop[Int, C]](Cop1(x))), q)
+            }
       }
-      val states = edges.map { case (q, _, _, _) => q } + ((i, 0))
-      val q0 = if (j == 0) (j, dfa.q0) else (0, 0)
-      NSST[Q, A, B, X](
-        states,
-        inSet,
-        xs,
-        edges,
-        q0,
-        base.partialF
-      ).renamed
+      val outF: Map[Q, Set[Concepts.Cupstar[X, C]]] =
+        // On each state q, DFA has partially matched prefix of target string.
+        states
+          .map(q =>
+            q -> {
+              // On non-final states q, it should append to variable
+              // the prefix of target string stored in DFA that followed by one arbitrary character,
+              // because no target string has been found.
+              if (!dfa.finalStates(q)) {
+                val stored = target.take(q) :+ alphabet.head
+                Set(List[Cop[X, C]](Cop1(x)) ++ stored.toList.map(Cop2.apply))
+              } else {
+                // On the other hand, being on final states means target has been found.
+                // Thus it should output variable as is.
+                Set(List[Cop[X, C]](Cop1(x)))
+              }
+            }
+          )
+          .toMap
+      NSST[Q, C, C, X](states, alphabet, Set(x), edges.toSet, dfa.q0, outF)
     }
-
   }
 
   case class StringVar(name: String)

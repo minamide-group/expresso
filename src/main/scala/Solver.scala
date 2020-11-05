@@ -27,7 +27,7 @@ class Solver(options: Solver.SolverOption) {
 
   var sst: Option[Solver.SolverSST[Char]] = None
   var nft: Option[Solver.ParikhNFT[Char]] = None
-  var currentModel: Map[String, String] = Map.empty
+  var currentModel: Option[Map[String, String]] = None
 
   def currentSL(): Either[String, SLConstraint[Char]] = {
     val AssertionLevel(env, assertions) :: tl = assertionStack
@@ -115,19 +115,17 @@ class Solver(options: Solver.SolverOption) {
           val o = Solver
             .getModelIfSat(sl, alphabet)
             .map(model => model.map { case (Constraint.StringVar(name), value) => name -> value.mkString })
+          currentModel = o
           o match {
-            case None =>
-              ("unsat", UnsatMode)
-            case Some(model) =>
-              currentModel = model
-              ("sat", SatMode)
+            case None        => ("unsat", UnsatMode)
+            case Some(model) => ("sat", SatMode)
           }
         case Left(msg) => println(msg); ???
       }
     case GetModel() =>
       currentMode match {
         case SatMode =>
-          val s = currentModel
+          val s = currentModel.get
             .map { case (name, value) => s"""(define-fun $name () String "${value}")""" }
             .mkString("\n  ")
           (s"(model\n  $s\n)", SatMode)
@@ -596,15 +594,17 @@ object Solver {
     import duration._
     import ExecutionContext.Implicits.global
     val ssts = atomSSTs :+ regexSST
+    // TODO Find a way to safely cancel slower computation
     val solverSST = {
-      val right = {
-        implicit val logger = new BufferedLogger
-        Future { (atomSSTs :+ regexSST).reduceRight(_ compose _) }
-          .map { sst =>
-            println(s"## SOLVER RIGHT FOLDING FINISHED\n${logger.flushString}")
-            sst
-          }
-      }
+      // val right = {
+      //   implicit val logger = new BufferedLogger
+      //   Future { (atomSSTs :+ regexSST).reduceRight(_ compose _) }
+      //     .map { sst =>
+      //       println(s"## SOLVER RIGHT FOLDING FINISHED\n${logger.flushString}")
+      //       sst
+      //     }
+      // }
+      val right = Future.never
       val left = {
         implicit val logger = new BufferedLogger
         Future { (atomSSTs :+ regexSST).reduceLeft(_ compose _) }
@@ -624,14 +624,15 @@ object Solver {
       if (c.is.isEmpty) Future { None }
       else {
         val pSST = parikhNSST(stringVars.length, alphabet)
-        val right = {
-          implicit val logger = new BufferedLogger
-          Future { Some((ssts.foldRight(pSST)(_ compose _).parikhEnft)) }
-            .map { sst =>
-              println(s"## PARIKH RIGHT FOLDING FINISHED\n${logger.flushString}")
-              sst
-            }
-        }
+        // val right = {
+        //   implicit val logger = new BufferedLogger
+        //   Future { Some((ssts.foldRight(pSST)(_ compose _).parikhEnft)) }
+        //     .map { sst =>
+        //       println(s"## PARIKH RIGHT FOLDING FINISHED\n${logger.flushString}")
+        //       sst
+        //     }
+        // }
+        val right = Future.never
         val left = {
           implicit val logger = new BufferedLogger
           Future { Some((ssts.reduceLeft[SolverSST[A]](_ compose _) compose pSST).parikhEnft) }

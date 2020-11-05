@@ -129,6 +129,15 @@ class TestSolver extends AnyFunSuite {
     }
   }
 
+  test("UntilFirst") {
+    val n = UntilFirst("aa").toSST(alphabet)
+    println(n)
+    assert(n.transduce("aa".toList) == Set("".toList))
+    assert(n.transduce("baa".toList) == Set("b".toList))
+    assert(n.transduce("abaa".toList) == Set("ab".toList))
+    assert(n.transduce("aba".toList) == Set("abaa".toList))
+  }
+
 //   test("Nondeterministic case 1") {
 //     val input = """
 // (declare-const x String)
@@ -160,4 +169,63 @@ class TestSolver extends AnyFunSuite {
 // (assert (= (str.len x1) (str.len y1)))
 // (assert (= 10 (str.len x1)))
 // """
+
+  val constraintBase = "./constraints"
+  def solveFile(fname: String)(check: Option[Map[String, String]] => Unit) = {
+    import smtlib.trees.Commands.{Script, GetModel}
+    import java.nio.file.FileSystems
+    val path = FileSystems.getDefault().getPath(s"$constraintBase/$fname")
+    val lexer = new smtlib.lexer.Lexer(new java.io.FileReader(path.toFile()))
+    val parser = new smtlib.parser.Parser(lexer)
+    val script = Script(parser.parseScript.commands.filter { case GetModel() => false; case _ => true })
+    val solver = new Solver(())
+    solver.executeTransPrint(script)
+    check(solver.currentModel)
+  }
+  test("deleteall.smt2") {
+    solveFile("deleteall.smt2") {
+      case Some(model) => {
+        assert(model("x1") + model("y1") == model("xy"))
+        assert(model("xy") == "<script>")
+      }
+      case None => fail()
+    }
+  }
+  test("zhu/int3.smt2") {
+    solveFile("zhu/int3.smt2") {
+      case Some(model) => {
+        val x0 = model("x0")
+        val x1 = model("x1")
+        val x2 = model("x2")
+        assert(x1 == x0.reverse)
+        assert(x2 == x1.replaceAll("ab", "c"))
+        assert(x1.length() >= x2.length() + 5)
+      }
+      case None => fail()
+    }
+  }
+  test("replace_some_1.smt2") {
+    solveFile("nondet/replace_some_1.smt2") {
+      case Some(model) => {
+        val x = model("x")
+        val y = model("y")
+        info(s"x:${x},y:${y}")
+        assert("a+".r.matches(x))
+        assert("(:?ab)+".r.matches(y))
+      }
+      case None => fail()
+    }
+  }
+  test("replace_some_2.smt2") {
+    solveFile("nondet/replace_some_2.smt2") {
+      case Some(model) => fail()
+      case None        => {}
+    }
+  }
+  test("ab_star_prefix.smt2") {
+    solveFile("nondet/ab_star_prefix.smt2") {
+      case Some(model) => fail()
+      case None        => {}
+    }
+  }
 }
