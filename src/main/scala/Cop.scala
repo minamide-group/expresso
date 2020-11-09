@@ -4,9 +4,15 @@ sealed trait Cop[+A, +B] {
   def map1[C](f: A => C): Cop[C, B] = Cop.map1(this, f)
   def map2[C](f: B => C): Cop[A, C] = Cop.map2(this, f)
   def commute: Cop[B, A] = Cop.commute(this)
+  def is1: Boolean
+  def is2: Boolean = !is1
 }
-case class Cop1[A, T <: A](a: T) extends Cop[A, Nothing]
-case class Cop2[B, T <: B](b: T) extends Cop[Nothing, B]
+case class Cop1[A, T <: A](a: T) extends Cop[A, Nothing] {
+  def is1 = true
+}
+case class Cop2[B, T <: B](b: T) extends Cop[Nothing, B] {
+  def is1 = false
+}
 object Cop {
   def flatten[A](a: Cop[A, A]): A = a match { case Cop1(a) => a; case Cop2(a) => a }
   def map1[A, B, C](ab: Cop[A, B], f: A => C): Cop[C, B] = ab match {
@@ -18,8 +24,8 @@ object Cop {
     case Cop2(b) => Cop2(f(b))
   }
   def commute[A, B](ab: Cop[A, B]): Cop[B, A] = ab match {
-      case Cop1(a) => Cop2(a)
-      case Cop2(b) => Cop1(b)
+    case Cop1(a) => Cop2(a)
+    case Cop2(b) => Cop1(b)
   }
   def flatMap1[A, B, C](ab: Cop[A, B], f: A => Cop[C, B]): Cop[C, B] = ab match {
     case Cop1(a) => f(a)

@@ -31,6 +31,11 @@ object Concepts {
       }
   }
 
+  def charsIn[X, B](xbs: Cupstar[X, B]): Set[B] =
+    xbs.flatMap { case Cop1(x) => None; case Cop2(b) => Some(b) }.toSet
+
+  def charsIn[X, B](m: Update[X, B]): Set[B] = m.flatMap { case (_, xbs) => charsIn(xbs) }.toSet
+
   type M1[X] = Map[X, List[X]]
   type M2[X, A] = Map[(X, Boolean), List[A]]
   def gamma[X, A](
@@ -301,10 +306,191 @@ case class NSST[Q, A, B, X](
     logger.redundantVarsRemoved(res)
     res
   }
+
+  // Returns SST S' that satisfies the following condition:
+  // for all w, S'(w) contains w'b (here b is in bs) iff there exist w' and w'' s.t. S(w) contains w' b w''.
+  def sstEndsWith(bs: Set[B]): NSST[(Q, Option[X]), A, B, X] = {
+    val outGraph = mapToGraph(outF)(identity).toList
+    val newOutF = {
+      val graph =
+        for {
+          (q, vs) <- outF
+          xbs <- vs
+          i <- 0 until xbs.length
+        } yield xbs(i) match {
+          case Cop1(x)          => Some(((q, Some(x)), xbs.take(i + 1)))
+          case Cop2(b) if bs(b) => Some((q, None), xbs.take(i + 1))
+          case _                => None
+        }
+      graphToMap(graph.flatten)(identity)
+    }
+    type NQ = (Q, Option[X])
+    val backTrans = graphToMap(edges) { case (q, a, m, r) => (r, a) -> (q, m) }
+    def prevStates(nq: NQ, a: A): Iterable[(NQ, Update[X, B])] = {
+      // q -[a / m]-> r
+      val (r, x) = nq
+      x match {
+        case Some(x) => {
+          // If q -[a / m]-> r and m(x) = u y v, then
+          // (q, y) -[a / m[x mapsto u y]]-> (r, x)
+          val assignY =
+            for {
+              (q, m) <- backTrans((r, a))
+              (y, uy) <- {
+                val mx = m(x)
+                mx.zipWithIndex.flatMap {
+                  case (Cop1(y), i) => Some((y, mx.take(i + 1)))
+                  case _            => None
+                }
+              }
+            } yield ((q, Some(y)), m + (x -> uy))
+          // Also, if q -[a / m]-> r and m(x) = u b v and b is in bs,
+          // then (q, _) -[a / m[x mapsto u b]]-> (r, x)
+          val assignB =
+            for {
+              (q, m) <- backTrans((r, a))
+              ub <- {
+                val mx = m(x)
+                mx.zipWithIndex.flatMap {
+                  case (Cop2(b), i) if bs(b) => Some(mx.take(i + 1))
+                  case _                     => None
+                }
+              }
+            } yield ((q, None), m + (x -> ub))
+          assignY ++ assignB
+        }
+        case None => backTrans((r, a)).map { case (q, m) => ((q, None), m) }
+      }
+    }
+    val newStates = collection.mutable.Set.from(newOutF.keySet)
+    var newEdges: List[(NQ, A, Update[X, B], NQ)] = Nil
+    var stack = newOutF.keySet.toList
+    while (stack.nonEmpty) {
+      val h = stack.head
+      stack = stack.tail
+      for {
+        a <- in
+        (q, m) <- prevStates(h, a)
+      } {
+        newEdges ::= (q, a, m, h)
+        if (newStates.add(q)) {
+          stack ::= q
+        }
+      }
+    }
+    NSST(
+      newStates.toSet,
+      in,
+      variables,
+      newEdges.toSet,
+      (q0, None),
+      newOutF
+    )
+  }
+
+  /**
+    * Returns CA that reads input w$ and outputs integer n s.t.
+    * there exists word w' this SST outputs when it reads w and len(w') == n.
+    *
+    * @return
+    */
+  def lengthCA: CounterAutomaton[Option[(Q, Set[X])], Option[A]] = {
+    val newOutF: Map[(Q, Set[X]), Set[Int]] = {
+      val graph =
+        for ((q, vs) <- outF.toList; alpha <- vs) yield (q, varsIn(alpha)) -> alpha.filter(_.is2).length
+      graphToMap(graph)(identity)
+    }
+    val finalStates = newOutF.keySet
+    val backTrans = graphToMap(edges) {
+      case (q, a, m, r) => {
+        val xsn: Map[X, (Set[X], Int)] = m.map {
+          case (x, xbs) =>
+            x -> xbs.foldLeft[(Set[X], Int)]((Set.empty, 0)) {
+              case (acc, Cop1(x)) => acc.copy(_1 = acc._1 + x)
+              case (acc, Cop2(b)) => acc.copy(_2 = acc._2 + 1)
+            }
+        }
+        (r, a) -> (q, xsn)
+      }
+    }
+    def prevStates(qx: (Q, Set[X]), a: A): Set[((Q, Set[X]), Int)] = {
+      // If q -[a / m]-> r then ∪ vars(m(x)) is one of previous vars
+      // and Σ |chars(m(x))| is length to be added
+      val (r, xs) = qx
+      backTrans((r, a)).map {
+        case (q, m) =>
+          (
+            (q, xs.flatMap(x => m(x)._1)),
+            xs.foldLeft(0) { case (acc, x) => acc + m(x)._2 }
+          )
+      }
+    }
+    val newStates = collection.mutable.Set.from(finalStates)
+    var newEdges: List[((Q, Set[X]), A, Int, (Q, Set[X]))] = Nil
+    var stack = List.from(finalStates)
+    while (stack.nonEmpty) {
+      val h = stack.head
+      stack = stack.tail
+      for {
+        a <- in
+        (q, n) <- prevStates(h, a)
+      } {
+        newEdges ::= (q, a, n, h)
+        if (newStates.add(q)) stack ::= q
+      }
+    }
+    val newQ0s = newStates.filter { case (q, _) => q == q0 }
+    type R = Option[(Q, Set[X])]
+    CounterAutomaton(
+      addNone(newStates.toSet),
+      addNone(in), {
+        val hoge = newEdges.view
+          .map[(R, Option[A], Int, R)] { case (q, a, n, r) => (Some(q), Some(a), n, Some(r)) }
+        val fuga = for ((q, s) <- newOutF; n <- s) yield { (Some(q), None, n, None) }
+        (hoge ++ fuga).toSet
+      },
+      wrapSome(newQ0s.toSet),
+      Set(None)
+    )
+  }
+
+  /** Test whether `this` NSST is functional, i.e. for any input there exists at most one output. */
+  def isFunctional: Boolean = {
+    // this is functional iff in response to any input
+    // 1. it does not output two strings with different length
+    // 2. for each pair of diffrent input chars, say a and b,
+    //    it does not output two strings that ends with a and b with same length.
+
+    // First decide if 1 holds.
+    val ca = lengthCA
+    if ((ca diffCM ca) isNonZeroReachable) return false
+
+    // And next, check if 2 holds.
+    val outSet = {
+      edges.flatMap { case (_, _, m, _) => charsIn(m) } ++
+        outF.flatMap { case (_, s)      => s.flatMap(xbs => charsIn(xbs)) }
+    }
+    val idxAlphabet = outSet.toList.zipWithIndex
+    val n = LazyList.from(0).find(1 << _ >= in.size).get
+    val partitions =
+      (0 until n).map(sh => idxAlphabet partition { case (a, i) => ((1 << sh) & i) == 0 }).map {
+        case (l1, l2) => (l1.map(_._1).toSet, l2.map(_._1).toSet)
+      }
+    for ((s1, s2) <- partitions) {
+      val ends1 = sstEndsWith(s1)
+      val ends2 = sstEndsWith(s2)
+      if ((ends1.lengthCA diffCM ends2.lengthCA) isZeroReachable) return false
+    }
+    true
+  }
 }
 
 object NSST {
   import Concepts._
+
+  def wrapSome[T](s: Set[T]): Set[Option[T]] = s.map[Option[T]](Some.apply)
+  def addNone[T](s: Set[T]): Set[Option[T]] = wrapSome(s) + None
+
   type Edges[Q, A, X, B] = Map[(Q, A), Set[(Q, Update[X, B])]]
   def isCopylessUpdate[X, B](update: Update[X, B]): Boolean = {
     val vars = update.keySet
@@ -334,6 +520,9 @@ object NSST {
       .mapValues(_.map { case (k, v) => v }.toSet)
       .toMap
       .withDefaultValue(Set.empty)
+
+  def mapToGraph[E, K, V](map: Map[K, Set[V]])(f: ((K, V)) => E): Iterable[E] =
+    for ((k, vs) <- map; v <- vs) yield f(k, v)
 
   /** Returns a set of `Map`s that maps each variable y in `xbs` to
     *  a pair of k(y), t(y) and a string over (X cup C), where
@@ -681,6 +870,167 @@ object NSST {
       q0,
       newF
     )
+  }
+}
+
+case class CounterAutomaton[Q, A](
+    states: Set[Q],
+    inSet: Set[A],
+    edges: Set[(Q, A, Int, Q)],
+    q0s: Set[Q],
+    finalStates: Set[Q]
+) {
+  val trans = NSST.graphToMap(edges) { case (q, a, n, r) => (q, a) -> (r, n) }
+  def transduce(w: List[A]): Set[Int] =
+    Monoid.transition(q0s, w, (q: Q, a: A) => trans((q, a))).withFilter(qn => finalStates(qn._1)).map(_._2)
+  def diffCM[R](that: CounterAutomaton[R, A]): CounterMachine[(Q, R)] = {
+    require(inSet == that.inSet)
+    val newQ0s = for (q01 <- q0s; q02 <- that.q0s) yield (q01, q02)
+    def nexts(qr: (Q, R), a: A): Set[((Q, R), Int)] = {
+      val (q, r) = qr
+      for {
+        (nextQ, n1) <- trans((q, a))
+        (nextR, n2) <- that.trans((r, a))
+      } yield ((nextQ, nextR), n1 - n2)
+    }
+    val newStates = collection.mutable.Set.from(newQ0s)
+    var newEdges: List[((Q, R), Int, (Q, R))] = Nil
+    var stack = List.from(newQ0s)
+    while (stack.nonEmpty) {
+      val h = stack.head
+      stack = stack.tail
+      for {
+        a <- inSet
+        (qr, n) <- nexts(h, a)
+      } {
+        newEdges ::= (h, n, qr)
+        if (newStates.add(qr)) {
+          stack ::= qr
+        }
+      }
+    }
+    CounterMachine(
+      newStates.toSet,
+      newEdges.toSet,
+      newQ0s,
+      newStates.filter { case (q, r) => finalStates(q) && that.finalStates(r) }.toSet
+    )
+  }
+}
+
+case class CounterMachine[Q](
+    states: Set[Q],
+    edges: Set[(Q, Int, Q)],
+    q0s: Set[Q],
+    finalStates: Set[Q]
+) {
+  val trans = NSST.graphToMap(edges) { case (q, n, r) => q -> (r, n) }
+  def normalized: CounterMachine[(Q, Int)] = {
+    val rangeN = edges.foldLeft(Map.from { states.map(q => q -> (0, 0)) }) {
+      case (acc, (q, n, _)) => {
+        val (min, max) = acc(q)
+        acc + (q -> (math.min(min, n), math.max(max, n)))
+      }
+    }
+    val newStates = states.flatMap { q =>
+      val (min, max) = rangeN(q)
+      (min + 1 to max - 1).map((q, _))
+    }
+    val (zeros, nonZeros) = edges partition { case (_, n, _) => n == 0 }
+    val (pos, neg) = nonZeros partition { case (_, n, _)     => n > 0 }
+    val newEdges = {
+      val embedZero = zeros.map { case (q, _, r) => ((q, 0), 0, (r, 0)) }
+      val chain = rangeN.toSet[(Q, (Int, Int))].flatMap {
+        case (q, (min, max)) =>
+          (0 to min + 2 by -1).map(i => ((q, i), -1, (q, i - 1))) ++
+            (0 to max - 2).map(i => ((q, i), 1, (q, i + 1)))
+      }
+      val finishPos = pos.map { case (q, n, r) => ((q, n - 1), 1, (r, 0)) }
+      val finishNeg = neg.map { case (q, n, r) => ((q, n + 1), -1, (r, 0)) }
+      embedZero ++ chain ++ finishPos ++ finishNeg
+    }
+    CounterMachine(newStates, newEdges, q0s.map((_, 0)), finalStates.map((_, 0)))
+  }
+  def isNonZeroReachable: Boolean = {
+    sealed trait R
+    case class RQ(q: Q) extends R
+    case object RPos extends R
+    case object RNeg extends R
+    val rs = states.map[R](RQ.apply) + RPos + RNeg
+    CounterMachine(
+      rs,
+      edges.map[(R, Int, R)] { case (q, n, r) => (RQ(q), n, RQ(r)) } ++
+        finalStates.flatMap(q => List((RQ(q), -1, RPos), (RQ(q), 1, RNeg))) ++
+        List((RPos, -1, RPos), (RNeg, 1, RNeg)),
+      q0s.map[R](RQ.apply),
+      Set[R](RPos, RNeg)
+    ).isZeroReachable
+  }
+  def isZeroReachable: Boolean = normalized.isZeroReachableNormal
+  private def isZeroReachableNormal: Boolean = {
+    require(edges.forall { case (_, n, _) => -1 <= n && n <= 1 })
+    sealed trait G // Stack alphabet
+    case object Z extends G // Zero
+    case object P extends G // Plus
+    case object M extends G // Minus
+
+    // P-automaton, where P is this CM seen as pushdown system (PDS).
+    case class NFA[R](states: Set[R], edges: Set[(R, G, R)], finals: Set[R])
+    // NFA accepting initial configurations of this PDS i.e. {(q, Z) | q is a initial state}
+    type R = Option[Q]
+    val initCfg = NFA[R](NSST.addNone(this.states), q0s.map(q => (Some(q), Z, None)), Set(None))
+
+    // NQ: states of new P-automaton that accepts post configurations of initCfg.
+    type NQ = Either[R, (Q, List[G], Q)]
+    var trans: Set[(Q, G, NQ)] = for ((Some(q), g, r) <- initCfg.edges) yield (q, g, Left(r))
+    var postEdges: Set[(NQ, G, NQ)] = Set.empty
+    var postStates: Set[NQ] = initCfg.states.map(Left.apply)
+    var postFinals: Set[NQ] = initCfg.finals.map(Left.apply)
+
+    val pdsEdges: Set[(Q, List[G], Q)] = edges.flatMap {
+      case (q, n, r) => {
+          if (n < 0) List(List(Z, M, Z), List(M, M, M), List(P))
+          else if (n == 0) List(List(Z, Z), List(M, M), List(P, P))
+          else List(List(Z, P, Z), List(M), List(P, P, P))
+        }.map(gs => (q, gs, r))
+    }
+
+    for (r @ (p, List(_, g1, _), p1) <- pdsEdges) {
+      postStates += Right(r)
+      trans += ((p1, g1, Right(r)))
+    }
+    var eps: Map[NQ, Set[Q]] = Map.empty.withDefaultValue(Set.empty)
+    while (trans.nonEmpty) {
+      val t @ (p, g, q) = trans.head
+      trans -= t
+      val tt = t.copy(_1 = Left(Option(t._1)))
+      if (!postEdges(tt)) {
+        postEdges += tt
+        for ((pp, List(gg), p1) <- pdsEdges if pp == p && gg == g && !eps(q)(p1)) {
+          eps += q -> (eps(q) + p1)
+          for ((qq, g1, q1) <- postEdges if qq == q) trans += ((p1, g1, q1))
+          if (postFinals(q)) postFinals += Left(Option(p1))
+        }
+        for ((pp, List(gg, g1), p1) <- pdsEdges if pp == p && gg == g)
+          trans += ((p1, g1, q))
+        for (r @ (pp, List(gg, g1, g2), p1) <- pdsEdges if pp == p && gg == g) {
+          postEdges += ((Right(r), g2, q))
+          for (p2 <- eps(Right(r))) trans += ((p2, g2, q))
+        }
+      }
+    }
+
+    val postMap = NSST.graphToMap(postEdges) { case (q, a, r) => (q, Option(a)) -> r }
+    finalStates.exists { qf =>
+      val nfa = new com.github.kmn4.sst.NFA[NQ, G](
+        postStates,
+        Set(Z, P, M),
+        postMap,
+        Left(Option(qf)),
+        postFinals
+      )
+      nfa.accept(List(Z))
+    }
   }
 }
 
