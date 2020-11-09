@@ -925,6 +925,17 @@ case class CounterMachine[Q](
     finalStates: Set[Q]
 ) {
   val trans = NSST.graphToMap(edges) { case (q, n, r) => q -> (r, n) }
+  def renamed: CounterMachine[Int] = {
+    val stateMap = states.zipWithIndex.toMap
+    CounterMachine(
+      states.map(stateMap),
+      edges.withFilter { case (q, _, r) => states(q) && states(r) }.map {
+        case (q, n, r) => (stateMap(q), n, stateMap(r))
+      },
+      q0s.intersect(states).map(stateMap),
+      finalStates.intersect(states).map(stateMap)
+    )
+  }
   def normalized: CounterMachine[(Q, Int)] = {
     val rangeN = edges.foldLeft(Map.from { states.map(q => q -> (0, 0)) }) {
       case (acc, (q, n, _)) => {
@@ -934,7 +945,7 @@ case class CounterMachine[Q](
     }
     val newStates = states.flatMap { q =>
       val (min, max) = rangeN(q)
-      (min + 1 to max - 1).map((q, _))
+      (min + 1 to max - 1).map((q, _)) :+ (q, 0)
     }
     val (zeros, nonZeros) = edges partition { case (_, n, _) => n == 0 }
     val (pos, neg) = nonZeros partition { case (_, n, _)     => n > 0 }
@@ -966,9 +977,10 @@ case class CounterMachine[Q](
       Set[R](RPos, RNeg)
     ).isZeroReachable
   }
-  def isZeroReachable: Boolean = normalized.isZeroReachableNormal
+  def isZeroReachable: Boolean = normalized.renamed.isZeroReachableNormal
   private def isZeroReachableNormal: Boolean = {
     require(edges.forall { case (_, n, _) => -1 <= n && n <= 1 })
+    println(s"Q: ${states.size}, D: ${edges.size}, Q0: ${q0s.size}, Qf: ${finalStates.size}")
     sealed trait G // Stack alphabet
     case object Z extends G // Zero
     case object P extends G // Plus
@@ -995,6 +1007,19 @@ case class CounterMachine[Q](
         }.map(gs => (q, gs, r))
     }
 
+    val pdsEdges0: Map[(Q, G), Set[Q]] = NSST.graphToMap(pdsEdges.flatMap {
+      case (q, List(g), r) => Some((q, g) -> r)
+      case _               => None
+    })(identity)
+    val pdsEdges1: Map[(Q, G), Set[(Q, G)]] = NSST.graphToMap(pdsEdges.flatMap {
+      case (q, List(g, g1), r) => Some((q, g) -> (r, g1))
+      case _                   => None
+    })(identity)
+    val pdsEdges2: Map[(Q, G), Set[(Q, G, G)]] = NSST.graphToMap(pdsEdges.flatMap {
+      case (q, List(g, g1, g2), r) => Some((q, g) -> (r, g1, g2))
+      case _                       => None
+    })(identity)
+
     for (r @ (p, List(_, g1, _), p1) <- pdsEdges) {
       postStates += Right(r)
       trans += ((p1, g1, Right(r)))
@@ -1006,14 +1031,14 @@ case class CounterMachine[Q](
       val tt = t.copy(_1 = Left(Option(t._1)))
       if (!postEdges(tt)) {
         postEdges += tt
-        for ((pp, List(gg), p1) <- pdsEdges if pp == p && gg == g && !eps(q)(p1)) {
+        for (p1 <- pdsEdges0((p, g)) if !eps(q)(p1)) {
           eps += q -> (eps(q) + p1)
           for ((qq, g1, q1) <- postEdges if qq == q) trans += ((p1, g1, q1))
           if (postFinals(q)) postFinals += Left(Option(p1))
         }
-        for ((pp, List(gg, g1), p1) <- pdsEdges if pp == p && gg == g)
-          trans += ((p1, g1, q))
-        for (r @ (pp, List(gg, g1, g2), p1) <- pdsEdges if pp == p && gg == g) {
+        for ((p1, g1) <- pdsEdges1((p, g))) trans += ((p1, g1, q))
+        for ((p1, g1, g2) <- pdsEdges2((p, g))) {
+          val r = (p, List(g, g1, g2), p1)
           postEdges += ((Right(r), g2, q))
           for (p2 <- eps(Right(r))) trans += ((p2, g2, q))
         }

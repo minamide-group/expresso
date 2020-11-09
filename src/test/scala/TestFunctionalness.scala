@@ -60,4 +60,73 @@ class TestFunctionalness extends AnyFunSuite {
     assert(!TakePrefix().toSST(alpha).isFunctional)
     assert(!TakeSuffix().toSST(alpha).isFunctional)
   }
+
+  // Random test takes too long (sometimes more than 3 mins).
+  // test("Random test for isFunctional (when functional only)") {
+  //   import TestRandom._
+  //   var c = 0
+  //   for (_ <- 0 until 20) {
+  //     val n = {
+  //       val in = Set('a', 'b')
+  //       val out = in
+  //       val vars = Set('X', 'Y')
+  //       val maxStates = 3
+  //       val maxFNum = 2
+  //       val maxRepeatB = 2
+  //       val maxTransition = 2
+  //       randomNSST(
+  //         new NextState().nextState _,
+  //         in,
+  //         out,
+  //         vars,
+  //         maxStates,
+  //         maxFNum,
+  //         maxRepeatB,
+  //         maxTransition
+  //       )
+  //     }
+  //     if (n.isFunctional) {
+  //       c += 1
+  //       for (_ <- 0 until 100) {
+  //         val w = nextAs("ab".toList, 5)
+  //         assert(n.transduce(w).size <= 1)
+  //       }
+  //     }
+  //   }
+  //   info(s"$c cases were functional")
+  // }
+
+  test("isFunctional should terminates in reasonable time for composed solver SST") {
+    val constraintBase = "./constraints"
+    def compileFile(fname: String) = {
+      import smtlib.trees.Commands.{Script, GetModel, CheckSat}
+      import java.nio.file.FileSystems
+      val path = FileSystems.getDefault().getPath(s"$constraintBase/$fname")
+      val lexer = new smtlib.lexer.Lexer(new java.io.FileReader(path.toFile()))
+      val parser = new smtlib.parser.Parser(lexer)
+      val script = Script(parser.parseScript.commands.filter {
+        case GetModel() => false
+        case CheckSat() => false
+        case _          => true
+      })
+      val solver = new Solver(())
+      solver.executeTransPrint(script)
+
+      val sl = solver.currentSL().getOrElse(???)
+      val alphabet = {
+        import Solver._
+        val Constraint.SLConstraint(atoms, is, rs) = sl
+        val contained =
+          (atoms.map(usedAlphabetAtomic) ++ rs.map(c => usedAlhpabetRegExp(c.re)))
+            .fold(Set.empty)(_ union _)
+        val printable = ' ' to '~'
+        contained ++ printable.find(c => !contained.contains(c))
+      }
+      Solver.compileConstraint(sl, alphabet)
+    }
+    assert(compileFile("deleteall.smt2")._1.isFunctional)
+    // SST of replace_some_1 should be functional,
+    // because it does not change length and y is unique for each length.
+    assert(compileFile("nondet/replace_some_1.smt2")._1.isFunctional)
+  }
 }
