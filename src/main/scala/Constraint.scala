@@ -316,28 +316,20 @@ object Constraint {
     }
   }
 
-  case class StringVar(name: String)
-  case class IntVar(name: String)
+  sealed trait Var
+  case class StringVar(name: String) extends Var
+  case class IntVar(name: String) extends Var
 
   sealed trait AtomicConstraint[A]
   case class Constant[A](lhs: StringVar, word: Seq[A]) extends AtomicConstraint[A]
   case class CatCstr[A](lhs: StringVar, rhs: Seq[Either[Seq[A], StringVar]]) extends AtomicConstraint[A]
   case class TransCstr[A](lhs: StringVar, trans: Transduction[A], rhs: StringVar) extends AtomicConstraint[A]
 
-  sealed trait IntExp
-  case class ConstExp(i: Int) extends IntExp
-  case class VarExp(v: IntVar) extends IntExp
-  case class LenExp(v: StringVar) extends IntExp
-  case class AddExp(es: Iterable[IntExp]) extends IntExp
-  case class SubExp(e1: IntExp, e2: IntExp) extends IntExp
-  case class MinusExp(i: IntExp) extends IntExp
-
-  sealed trait IntConstraint
-  case class IntEq(e1: IntExp, e2: IntExp) extends IntConstraint
-  case class IntLt(e1: IntExp, e2: IntExp) extends IntConstraint
-  case class IntConj(cs: Iterable[IntConstraint]) extends IntConstraint
-  case class IntDisj(cs: Iterable[IntConstraint]) extends IntConstraint
-  case class IntNeg(c: IntConstraint) extends IntConstraint
+  /**
+    * Interpret terms made up from StringVar as length of them.
+    */
+  type IntConstraint = Presburger.Formula[Var]
+  type IntExp = Presburger.Term[Var]
 
   case class RegexConstraint[A](v: StringVar, re: RegExp[A])
   case class SLConstraint[A](
@@ -371,11 +363,12 @@ object ConstraintExamples {
   }
   // Involving integer constraint
   val c3 = {
+    import Presburger._
     val Seq(x0, x1, x2) = (0 to 2).map(i => StringVar(s"x$i"))
     val s1 = TransCstr(x1, ReplaceAll("ab", "c"), x0)
     val s2 = TransCstr(x2, ReplaceAll("ac", "aaaa"), x1)
-    val i1 = IntLt(LenExp(x0), ConstExp(5)) // x0 <= 4
-    val i2 = IntLt(AddExp(Seq(LenExp(x0), ConstExp(1))), LenExp(x2)) // x0 + 2 <= x2
+    val i1: Formula[Constraint.Var] = Lt(Var(x0), Const(5)) // x0 <= 4
+    val i2: Formula[Constraint.Var] = Lt(Add(Seq(Var(x0), Const(1))), Var(x2)) // x0 + 2 <= x2
     SLConstraint(Seq(s1, s2), Seq(i1, i2), Nil)
   }
 }

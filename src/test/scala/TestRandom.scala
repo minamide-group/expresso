@@ -163,7 +163,7 @@ class TestRandom extends AnyFlatSpec {
   }
 
   "Presburger formula of randomly generated NSSTs" should
-  "be sat iff the domain is nonempty" in {
+    "be sat iff the domain is nonempty" in {
     import com.microsoft.z3
     val cfg = new java.util.HashMap[String, String]()
     cfg.put("model", "true")
@@ -193,7 +193,7 @@ class TestRandom extends AnyFlatSpec {
       val freeVars = out.map(a => s"y$a").map(y => y -> ctx.mkIntConst(y))
       val zero = ctx.mkInt(0)
       val positives = freeVars.map { case (_, v) => ctx.mkGe(v, zero) }
-      val expr = Parikh.Formula.formulaToExpr(ctx, freeVars.toMap, f)
+      val expr = Presburger.Formula.formulaToExpr(ctx, freeVars.toMap, f)
       val solver = ctx.mkSolver()
       solver.add(expr +: positives: _*)
       if (solver.check() == z3.Status.SATISFIABLE) {

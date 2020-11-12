@@ -48,13 +48,16 @@ class TestParikhPresburger extends AnyFlatSpec {
     import scala.collection.immutable.{HashMap, HashSet}
     import com.microsoft.z3
     val List(a, b, x, y) = "abxy".toList
-    val n = NSST[Int,Char,Char,Char](
-      states=Set(1, 2),
-      in=Set(a, b),
-      variables=Set(x, y),
-      edges=Set((1,b,Map(x -> List(Cop2(a)), y -> List(Cop2(a), Cop1(x), Cop2(b), Cop1(y), Cop2(a))),2), (1,a,Map(x -> List(Cop1(x)), y -> List(Cop2(a))),2)),
-      q0=1,
-      partialF=Map(1 -> Set(), 2 -> Set(List()))
+    val n = NSST[Int, Char, Char, Char](
+      states = Set(1, 2),
+      in = Set(a, b),
+      variables = Set(x, y),
+      edges = Set(
+        (1, b, Map(x -> List(Cop2(a)), y -> List(Cop2(a), Cop1(x), Cop2(b), Cop1(y), Cop2(a))), 2),
+        (1, a, Map(x -> List(Cop1(x)), y -> List(Cop2(a))), 2)
+      ),
+      q0 = 1,
+      partialF = Map(1 -> Set(), 2 -> Set(List()))
     )
     val f = n.presburgerFormula
     val cfg = new java.util.HashMap[String, String]()
@@ -63,7 +66,7 @@ class TestParikhPresburger extends AnyFlatSpec {
     val freeVars = Seq(a, b).map(a => s"y$a").map(y => y -> ctx.mkIntConst(y))
     val zero = ctx.mkInt(0)
     val positives = freeVars.map { case (_, v) => ctx.mkGe(v, zero) }
-    val expr = Parikh.Formula.formulaToExpr(ctx, freeVars.toMap, f)
+    val expr = Presburger.Formula.formulaToExpr(ctx, freeVars.toMap, f)
     val solver = ctx.mkSolver()
     solver.add(expr +: positives: _*)
     assert(solver.check() == z3.Status.SATISFIABLE)

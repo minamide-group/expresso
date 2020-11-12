@@ -183,13 +183,13 @@ object Solver {
     case _ => throw new Exception(s"${e.getPos}: Cannot interpret given S-expression as transduction: ${e}")
   }
   private def expectInt(e: Term, env: FunctionEnv): IntExp = e match {
-    case SNumeral(i)                                 => ConstExp(i.toInt)
-    case SimpleApp("-", Seq(e))                      => MinusExp(expectInt(e, env))
-    case SimpleQualID(name) if env(name) == IntConst => VarExp(IntVar(name))
+    case SNumeral(i)                                 => Presburger.Const(i.toInt)
+    case SimpleApp("-", Seq(e))                      => Presburger.Sub(Presburger.Const(0), expectInt(e, env))
+    case SimpleQualID(name) if env(name) == IntConst => Presburger.Var(IntVar(name))
     case SimpleApp("str.len", Seq(SimpleQualID(name))) if env(name) == StringConst =>
-      LenExp(StringVar(name))
-    case SimpleApp("+", es)          => AddExp(es.map(expectInt(_, env)))
-    case SimpleApp("-", Seq(e1, e2)) => SubExp(expectInt(e1, env), expectInt(e2, env))
+      Presburger.Var(StringVar(name))
+    case SimpleApp("+", es)          => Presburger.Add(es.map(expectInt(_, env)))
+    case SimpleApp("-", Seq(e1, e2)) => Presburger.Sub(expectInt(e1, env), expectInt(e2, env))
     case _ =>
       throw new Exception(s"${e.getPos}: Cannot interpret given S-expression ${e} as int expression")
   }
@@ -238,26 +238,26 @@ object Solver {
     case SimpleApp("=", Seq(e1, e2)) =>
       val i1 = expectInt(e1, env)
       val i2 = expectInt(e2, env)
-      IntC(IntEq(i1, i2))
+      IntC(Presburger.Eq(i1, i2))
     case SimpleApp("<", Seq(e1, e2)) =>
       val i1 = expectInt(e1, env)
       val i2 = expectInt(e2, env)
-      IntC(IntLt(i1, i2))
+      IntC(Presburger.Lt(i1, i2))
     case SimpleApp("<=", Seq(e1, e2)) =>
       val i1 = expectInt(e1, env)
       val i2 = expectInt(e2, env)
-      IntC(IntNeg(IntLt(i2, i1)))
+      IntC(Presburger.Not(Presburger.Lt(i2, i1)))
     case SimpleApp(">", Seq(e1, e2)) =>
       val i1 = expectInt(e1, env)
       val i2 = expectInt(e2, env)
-      IntC(IntLt(i2, i1))
+      IntC(Presburger.Lt(i2, i1))
     case SimpleApp(">=", Seq(e1, e2)) =>
       val i1 = expectInt(e1, env)
       val i2 = expectInt(e2, env)
-      IntC(IntNeg(IntLt(i1, i2)))
+      IntC(Presburger.Not(Presburger.Lt(i1, i2)))
     case SimpleApp("not", Seq(e)) =>
       expectConstraint(e, env) match {
-        case IntC(i) => IntC(IntNeg(i))
+        case IntC(i) => IntC(Presburger.Not(i))
         case _       => throw new Exception(s"Not supported negation.")
       }
     case SimpleApp("and", es) =>
@@ -265,13 +265,13 @@ object Solver {
         case IntC(i) => i
         case _       => throw new Exception(s"Not supported conjunction.")
       })
-      IntC(IntConj(is))
+      IntC(Presburger.Conj(is))
     case SimpleApp("or", es) =>
       val is = es.map(expectConstraint(_, env) match {
         case IntC(i) => i
         case _       => throw new Exception(s"Not supported disjunction.")
       })
-      IntC(IntDisj(is))
+      IntC(Presburger.Disj(is))
     case SimpleApp("str.in.re", Seq(SimpleQualID(name), e)) if env(name) == StringConst =>
       REC(RegexConstraint(StringVar(name), expectRegExp(e)))
     case _ => throw new Exception(s"${e.getPos}: Cannot interpret given expression as of Bool sort: ${e}")
@@ -475,19 +475,23 @@ object Solver {
   def intVarsSL[A](constraint: SLConstraint[A]): Seq[IntVar] = {
     val SLConstraint(_, is, _) = constraint
     def inIE(ie: IntExp): Set[IntVar] = ie match {
-      case VarExp(v)      => Set(v)
-      case AddExp(es)     => es.toSet.flatMap(inIE)
-      case SubExp(e1, e2) => inIE(e1) ++ inIE(e2)
-      case _              => Set.empty
+      case Presburger.Var(v: IntVar) => Set(v)
+      case Presburger.Add(es)        => es.toSet.flatMap(inIE)
+      case Presburger.Sub(e1, e2)    => inIE(e1) ++ inIE(e2)
+      case _                         => Set.empty
     }
     def inIC(ic: IntConstraint): Set[IntVar] = ic match {
-      case IntEq(e1, e2) => inIE(e1) ++ inIE(e2)
-      case IntLt(e1, e2) => inIE(e1) ++ inIE(e2)
-      case IntConj(cs)   => cs.toSet.flatMap(inIC)
-      case IntDisj(cs)   => cs.toSet.flatMap(inIC)
-      case IntNeg(c)     => inIC(c)
+      case Presburger.Top() | Presburger.Bot() => Set.empty
+      case Presburger.Eq(e1, e2)               => inIE(e1) ++ inIE(e2)
+      case Presburger.Lt(e1, e2)               => inIE(e1) ++ inIE(e2)
+      case Presburger.Le(e1, e2)               => inIE(e1) ++ inIE(e2)
+      case Presburger.Conj(cs)                 => cs.toSet.flatMap(inIC)
+      case Presburger.Disj(cs)                 => cs.toSet.flatMap(inIC)
+      case Presburger.Not(c)                   => inIC(c)
+      case Presburger.Exists(vs, f) =>
+        inIC(f) -- vs.flatMap { case Presburger.Var(x: IntVar) => Some(x); case _ => None }
     }
-    inIC(IntConj(is)).toSeq
+    inIC(Presburger.Conj(is)).toSeq
   }
   def stringVarsAtoms[A](as: Seq[AtomicConstraint[A]]): Seq[StringVar] = {
     def rhsVars(c: AtomicConstraint[A]): Seq[StringVar] = c match {
@@ -676,7 +680,7 @@ object Solver {
         // TODO Duplicate codes with NSST.presburgerFormula
         import com.microsoft.z3
         // i-th string variable will be named s"y$i"
-        val parikhFormula: Parikh.Formula[String] = {
+        val parikhFormula: Presburger.Formula[String] = {
           import Parikh._
           type E = (Int, Image[Int], Int)
           type X = EnftVar[Int, Int, E]
@@ -694,7 +698,7 @@ object Solver {
               case Dist(q) => qMap.getOrElse(q, { val s = s"x${newVar()}"; qMap += q -> s; s })
             }
           }
-          Formula.renameVars(Parikh.parikhEnftToPresburgerFormula(nft), new Renamer().renamer _)
+          Presburger.Formula.renameVars(parikhEnftToPresburgerFormula(nft), new Renamer().renamer _)
         }
         val stringVars = stringVarsSL(c)
         // Parikh formula and positiveness of free variables are already added to solver.
@@ -706,7 +710,7 @@ object Solver {
           val stringVarsIntExpr = (stringVars zip freeVars).map { case (v, (_, e)) => v -> e }.toMap
           val zero = ctx.mkInt(0)
           val positives = freeVars.map { case (_, v) => ctx.mkGe(v, zero) }
-          val expr = Parikh.Formula.formulaToExpr(ctx, freeVars.toMap, parikhFormula)
+          val expr = Presburger.Formula.formulaToExpr(ctx, freeVars.toMap, parikhFormula)
           val solver = ctx.mkSolver()
           solver.add(expr +: positives: _*)
           (ctx, solver, stringVarsIntExpr)
@@ -715,24 +719,8 @@ object Solver {
         // Integer free variables' names start with 'z'
         val intVarIntExpr: Map[IntVar, z3.IntExpr] =
           intVars.map(v => v -> ctx.mkIntConst(s"z${v.name}")).toMap
-        val intConstraints: Seq[z3.BoolExpr] = {
-          def intExpToArithExp(ie: IntExp): z3.ArithExpr = ie match {
-            case ConstExp(i)    => ctx.mkInt(i)
-            case VarExp(v)      => intVarIntExpr(v)
-            case LenExp(v)      => stringVarsIntExpr(v)
-            case AddExp(es)     => ctx.mkAdd(es.toSeq.map(intExpToArithExp): _*)
-            case SubExp(e1, e2) => ctx.mkSub(intExpToArithExp(e1), intExpToArithExp(e2))
-            case MinusExp(e)    => ctx.mkUnaryMinus(intExpToArithExp(e))
-          }
-          def intConstraintToBoolExpr(ic: IntConstraint): z3.BoolExpr = ic match {
-            case IntEq(e1, e2) => ctx.mkEq(intExpToArithExp(e1), intExpToArithExp(e2))
-            case IntLt(e1, e2) => ctx.mkLt(intExpToArithExp(e1), intExpToArithExp(e2))
-            case IntConj(cs)   => ctx.mkAnd(cs.toSeq.map(intConstraintToBoolExpr): _*)
-            case IntDisj(cs)   => ctx.mkOr(cs.toSeq.map(intConstraintToBoolExpr): _*)
-            case IntNeg(c)     => ctx.mkNot(intConstraintToBoolExpr(c))
-          }
-          c.is.map(intConstraintToBoolExpr)
-        }
+        val freeVars: Map[Constraint.Var, z3.IntExpr] = (stringVarsIntExpr ++ intVarIntExpr).toMap
+        val intConstraints: Seq[z3.BoolExpr] = c.is.map(Presburger.Formula.formulaToExpr(ctx, freeVars, _))
         solver.add(intConstraints: _*)
         val res =
           if (solver.check() == z3.Status.SATISFIABLE) {

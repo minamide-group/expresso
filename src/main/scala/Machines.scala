@@ -263,12 +263,11 @@ case class NSST[Q, A, B, X](
     *
     * @return
     */
-  def presburgerFormula: Parikh.Formula[String] = {
-    import Parikh._
+  def presburgerFormula: Presburger.Formula[String] = {
     val coutingNft = NSST.convertNsstParikhNft(this)
-    val formula = Parikh.parikhMnftToPresburgerFormula(coutingNft)
-    type E = (Int, Image[B], Int)
-    type X = EnftVar[Int, B, E]
+    val formula = Parikh.parikhEnftToPresburgerFormula(coutingNft.unifyInitAndFinal)
+    type E = (Int, Parikh.Image[B], Int)
+    type X = Parikh.EnftVar[Int, B, E]
     class Renamer() {
       var i = 0
       private def newVar() = {
@@ -278,12 +277,12 @@ case class NSST[Q, A, B, X](
       var eMap: Map[E, String] = Map.empty
       var qMap: Map[Int, String] = Map.empty
       def renamer(x: X): String = x match {
-        case BNum(b) => s"y${b}"
-        case ENum(e) => eMap.getOrElse(e, { val s = s"x${newVar()}"; eMap += e -> s; s })
-        case Dist(q) => qMap.getOrElse(q, { val s = s"x${newVar()}"; qMap += q -> s; s })
+        case Parikh.BNum(b) => s"y${b}"
+        case Parikh.ENum(e) => eMap.getOrElse(e, { val s = s"x${newVar()}"; eMap += e -> s; s })
+        case Parikh.Dist(q) => qMap.getOrElse(q, { val s = s"x${newVar()}"; qMap += q -> s; s })
       }
     }
-    Formula.renameVars(formula, new Renamer().renamer _)
+    Presburger.Formula.renameVars(formula, new Renamer().renamer _)
   }
 
   /** Returns an input string that give some output.
