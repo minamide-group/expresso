@@ -6,8 +6,6 @@ import Terms._
 
 import Constraint._
 import Solver._
-import cats.data.Writer
-import cats.implicits._
 
 class Solver(options: Solver.SolverOption) {
 
@@ -450,15 +448,11 @@ object Solver {
 
   /** Returns NSST which transduces a string of form "w0#...w(n-1)#" to
     * "w'0 ... w'(n-1)" where each length of w'(i) is equal to that of w(i) and
-    * each w'(i) is made up of only one integer i. */
+    * each w'(i) is made up of only one integer i.
+    * Note that output does not contain delimiter '#'. */
   def parikhNSST[C](n: Int, alpha: Set[C]): NSST[Int, Option[C], Int, Int] = {
     val states = Set.from(0 to n)
-    type Q = Int
-    type A = Option[C]
-    type B = Int
-    type X = Int
-    type Update = Concepts.Update[X, B]
-    type Edge = (Q, A, Update, Q)
+    type Edge = (Int, Option[C], Concepts.Update[Int, Int], Int)
     val edges: Iterable[Edge] = {
       val loop: Iterable[Edge] =
         for (q <- 0 until n; a <- alpha)
@@ -679,6 +673,7 @@ object Solver {
       }
       // When c has integer constraint
       case (sst, Some(nft)) => {
+        // TODO Duplicate codes with NSST.presburgerFormula
         import com.microsoft.z3
         // i-th string variable will be named s"y$i"
         val parikhFormula: Parikh.Formula[String] = {

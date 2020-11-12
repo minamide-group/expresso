@@ -1,7 +1,6 @@
 package com.github.kmn4.sst
 
 import scala.collection.immutable.Queue
-import cats.data.Writer
 
 /**
   * Types and functions relatively independent of concrete machines.
@@ -138,29 +137,6 @@ case class NSST[Q, A, B, X](
     outF(q).map { flatMap1(_, m) }.map(erase1)
   def transduce(w: List[A]): Set[List[B]] =
     transition(Set(q0), w).flatMap { case (q, m) => outputAt(q, m) }
-  def transduce1(w: List[A]): Set[List[B]] = {
-    import cats._
-    import cats.implicits._
-    import cats.data.WriterT
-    type Config = WriterT[List, Update[X, B], Q]
-    def Config(l: List[(Update[X, B], Q)]) = WriterT[List, Update[X, B], Q](l)
-    val alphaCoalg: Map[A, Map[Q, Config]] = {
-      graphToMap(edges) { case (q, a, m, r) => a -> (q, m, r) }.view
-        .mapValues { case qmr => graphToMap(qmr) { case (q, m, r) => q -> (m, r) } }
-        .map {
-          case (a, m) =>
-            a -> m.map { case (q, s) => q -> Config(s.toList) }.withDefaultValue(Config(Nil))
-        }
-        .toMap
-        .withDefaultValue(Map.empty)
-    }
-    w.foldLeft(Config(List((monoid.unit, q0)))) {
-        case (acc, a) => acc.flatMap(alphaCoalg(a))
-      }
-      .run
-      .flatMap { case (m, q) => outputAt(q, m) }
-      .toSet
-  }
 
   def isCopyless: Boolean = {
     val e = edges.forall { case (_, _, m, _) => isCopylessUpdate(m) }
@@ -254,8 +230,7 @@ case class NSST[Q, A, B, X](
     Map.from { res.map { case (q, s) => q -> Set.from(s) } }.withDefaultValue(Set.empty)
   }
 
-  /** Returns NSST redundant variables removed.
-    */
+  /** Returns a NSST with redundant variables removed. */
   def removeRedundantVars: NSST[Q, A, B, X] = {
     type Cupstar = Concepts.Cupstar[X, B]
     val newVars = states.flatMap(usedVarsAt) intersect states.flatMap(nonEmptyVarsAt)
@@ -280,7 +255,36 @@ case class NSST[Q, A, B, X](
   }
 
   def parikhEnft: ENFT[Int, A, Map[B, Int]] = NSST.convertNsstParikhNft(this).unifyInitAndFinal
-  def presburgerFormula: Parikh.Formula[String] = NSST.parikhImagePresburger(this)
+
+  /**
+    * Generate a Presburger formula that is satisfied by any assignment which represents a Parikh image of
+    * an output string of this NSST.
+    * Variables representing the number of each output symbol are its `toString` value prefixed with 'y'.
+    *
+    * @return
+    */
+  def presburgerFormula: Parikh.Formula[String] = {
+    import Parikh._
+    val coutingNft = NSST.convertNsstParikhNft(this)
+    val formula = Parikh.parikhMnftToPresburgerFormula(coutingNft)
+    type E = (Int, Image[B], Int)
+    type X = EnftVar[Int, B, E]
+    class Renamer() {
+      var i = 0
+      private def newVar() = {
+        i += 1
+        i
+      }
+      var eMap: Map[E, String] = Map.empty
+      var qMap: Map[Int, String] = Map.empty
+      def renamer(x: X): String = x match {
+        case BNum(b) => s"y${b}"
+        case ENum(e) => eMap.getOrElse(e, { val s = s"x${newVar()}"; eMap += e -> s; s })
+        case Dist(q) => qMap.getOrElse(q, { val s = s"x${newVar()}"; qMap += q -> s; s })
+      }
+    }
+    Formula.renameVars(formula, new Renamer().renamer _)
+  }
 
   /** Returns an input string that give some output.
     * If this NSST is empty, then exception will be thrown.
@@ -748,10 +752,11 @@ object NSST {
   def countCharOfX[X, A](m: Update[X, A]): Map[X, Map[A, Int]] =
     m.map { case (x, alpha) => x -> countOf2(alpha) }
 
-  /** Convert given NSST to NFT that transduces each input to its Parikh image. */
+  /** Convert the given NSST to a NFT that transduces each input to the Parikh image of the output of the NSST. */
   def convertNsstParikhNft[Q, A, B, X](
       nsst: NSST[Q, A, B, X]
   ): MNFT[(Q, Set[X]), A, Map[B, Int]] = {
+    // TODO This computes the set of states forward manner, but backward manner is likely to be even faster.
     type NQ = (Q, Set[X])
     type O = Map[B, Int]
     // Returns a set of p' s.t. string containing p' updated by m will contain p.
@@ -824,29 +829,6 @@ object NSST {
     ).optimized
   }
 
-  def parikhImagePresburger[Q, A, B, X](n: NSST[Q, A, B, X]) = {
-    import Parikh._
-    val coutingNft = NSST.convertNsstParikhNft(n)
-    val formula = Parikh.parikhMnftToPresburgerFormula(coutingNft)
-    type E = (Int, Image[B], Int)
-    type X = EnftVar[Int, B, E]
-    class Renamer() {
-      var i = 0
-      private def newVar() = {
-        i += 1
-        i
-      }
-      var eMap: Map[E, String] = Map.empty
-      var qMap: Map[Int, String] = Map.empty
-      def renamer(x: X): String = x match {
-        case BNum(b) => s"y${b}"
-        case ENum(e) => eMap.getOrElse(e, { val s = s"x${newVar()}"; eMap += e -> s; s })
-        case Dist(q) => qMap.getOrElse(q, { val s = s"x${newVar()}"; qMap += q -> s; s })
-      }
-    }
-    Formula.renameVars(formula, new Renamer().renamer _)
-  }
-
   def apply(
       states: Iterable[Int],
       vars: Iterable[Char],
@@ -883,7 +865,7 @@ case class CounterAutomaton[Q, A](
   val trans = NSST.graphToMap(edges) { case (q, a, n, r) => (q, a) -> (r, n) }
   def transduce(w: List[A]): Set[Int] =
     Monoid.transition(q0s, w, (q: Q, a: A) => trans((q, a))).withFilter(qn => finalStates(qn._1)).map(_._2)
-  def diffCM[R](that: CounterAutomaton[R, A]): CounterMachine[(Q, R)] = {
+  def diffCA[R](that: CounterAutomaton[R, A]): CounterAutomaton[(Q, R), A] = {
     require(inSet == that.inSet)
     val newQ0s = for (q01 <- q0s; q02 <- that.q0s) yield (q01, q02)
     def nexts(qr: (Q, R), a: A): Set[((Q, R), Int)] = {
@@ -894,7 +876,7 @@ case class CounterAutomaton[Q, A](
       } yield ((nextQ, nextR), n1 - n2)
     }
     val newStates = collection.mutable.Set.from(newQ0s)
-    var newEdges: List[((Q, R), Int, (Q, R))] = Nil
+    var newEdges: List[((Q, R), A, Int, (Q, R))] = Nil
     var stack = List.from(newQ0s)
     while (stack.nonEmpty) {
       val h = stack.head
@@ -903,18 +885,23 @@ case class CounterAutomaton[Q, A](
         a <- inSet
         (qr, n) <- nexts(h, a)
       } {
-        newEdges ::= (h, n, qr)
+        newEdges ::= (h, a, n, qr)
         if (newStates.add(qr)) {
           stack ::= qr
         }
       }
     }
-    CounterMachine(
+    CounterAutomaton(
       newStates.toSet,
+      inSet,
       newEdges.toSet,
       newQ0s,
       newStates.filter { case (q, r) => finalStates(q) && that.finalStates(r) }.toSet
     )
+  }
+  def diffCM[R](that: CounterAutomaton[R, A]): CounterMachine[(Q, R)] = {
+    val ca = diffCA(that)
+    CounterMachine(ca.states, ca.edges.map { case (q, a, n, r) => (q, n, r) }, ca.q0s, ca.finalStates)
   }
 }
 
