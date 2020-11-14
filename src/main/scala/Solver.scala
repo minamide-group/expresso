@@ -1,6 +1,7 @@
 package com.github.kmn4.sst
 
 import smtlib.trees._
+import smtlib.theories.experimental.Strings
 import Commands._
 import Terms._
 
@@ -25,9 +26,10 @@ class Solver(options: Solver.SolverOption) {
 
   private var sst: Option[Solver.SolverSST[Char]] = None
   private var nft: Option[Solver.ParikhNFT[Char]] = None
-  private var currentModel: Option[Map[String, String]] = None
+  private var currentStringModel: Option[Map[String, String]] = None
+  private var currentIntModel: Option[Map[String, Int]] = None
 
-  def model(): Option[Map[String, String]] = currentModel
+  def model(): Option[Map[String, String]] = currentStringModel
 
   def currentSL(): Either[String, SLConstraint[Char]] = {
     def checkSort(t: Term, env: FunctionEnv): Boolean = true // TODO
@@ -37,6 +39,12 @@ class Solver(options: Solver.SolverOption) {
     val AssertionLevel(env, assertions) :: _ = assertionStack
     var unused = LazyList.from(0).iterator // temporary variable ID
     def interpret(t: Term): Seq[BoolExp] = {
+      object := {
+        def unapply(t: Term): Option[(String, Term)] = t match {
+          case SimpleApp("=", Seq(SimpleQualID(name), exp)) => Some((name, exp))
+          case _                                            => None
+        }
+      }
       object SimpleTransduction {
         def unapply(e: Term): Option[(String, Transduction[Char])] =
           e match {
@@ -44,13 +52,13 @@ class Solver(options: Solver.SolverOption) {
               Some((name, ReplaceAll(target, word)))
             case SimpleApp("str.replace_some", Seq(SimpleQualID(name), SString(target), SString(word))) =>
               Some((name, ReplaceSome(target, word)))
-            case SimpleApp("str.at", Seq(SimpleQualID(name), SNumeral(pos))) if env(name) == StringConst =>
+            case Strings.At(SimpleQualID(name), SimpleQualID(pos)) =>
               Some((name, At(pos.toInt)))
             case SimpleApp("str.insert", Seq(SimpleQualID(name), SNumeral(pos), SString(word))) =>
               Some((name, Insert(pos.toInt, word)))
-            case SimpleApp("str.reverse", Seq(SimpleQualID(name))) if env(name) == StringConst =>
+            case SimpleApp("str.reverse", Seq(SimpleQualID(name))) =>
               Some((name, Reverse()))
-            case SimpleApp("str.substr", Seq(SimpleQualID(name), SNumeral(from), SNumeral(len))) =>
+            case Strings.Substring(SimpleQualID(name), SNumeral(from), SNumeral(len)) =>
               Some((name, Substr(from.toInt, len.toInt)))
             case SimpleApp("str.until_first", Seq(SimpleQualID(name), SString(target))) =>
               Some((name, UntilFirst(target)))
@@ -60,30 +68,20 @@ class Solver(options: Solver.SolverOption) {
       object TransductionConstraint {
         def unapply(t: Term): Option[Constraint.TransductionConstraint[Char]] =
           t match {
-            case SimpleApp(
-                "=",
-                Seq(SimpleQualID(n), SimpleApp("str.indexof", Seq(SimpleQualID(x), SString(w), SNumeral(i))))
-                ) if i == BigInt(0) =>
+            case n := Strings.Experimental.IndexOf(SimpleQualID(x), SString(w), SNumeral(i))
+                if i == BigInt(0) =>
               val trans = Constraint.IndexOfFromZero(w)
               Some(Constraint.ParamTransCstr(trans, StringVar(x), Seq.empty, Seq(IntVar(n))))
-            case SimpleApp(
-                "=",
-                Seq(
-                  SimpleQualID(y),
-                  SimpleApp("str.substr", Seq(SimpleQualID(x), SimpleQualID(i), SimpleQualID(l)))
-                )
-                ) =>
+            case y := Strings.Substring(SimpleQualID(x), SimpleQualID(i), SimpleQualID(l)) =>
               val trans = Constraint.GeneralSubstr[Char]()
               Some(
                 Constraint.ParamTransCstr(trans, StringVar(x), Seq(StringVar(y)), Seq(IntVar(i), IntVar(l)))
               )
-            case SimpleApp("=", Seq(SimpleQualID(name), SimpleTransduction(rhs, trans))) =>
+            case name := SimpleTransduction(rhs, trans) =>
               Some(SimpleTransCstr(StringVar(name), trans, StringVar(rhs)))
-            case SimpleApp("str.prefixof", Seq(SimpleQualID(lhs), SimpleQualID(rhs)))
-                if env(lhs) == StringConst && env(rhs) == StringConst =>
+            case Strings.Experimental.PrefixOf(SimpleQualID(lhs), SimpleQualID(rhs)) =>
               Some(SimpleTransCstr(StringVar(lhs), TakePrefix(), StringVar(rhs)))
-            case SimpleApp("str.suffixof", Seq(SimpleQualID(lhs), SimpleQualID(rhs)))
-                if env(lhs) == StringConst && env(rhs) == StringConst =>
+            case Strings.Experimental.SuffixOf(SimpleQualID(lhs), SimpleQualID(rhs)) =>
               Some(SimpleTransCstr(StringVar(lhs), TakeSuffix(), StringVar(rhs)))
             case _ => None
           }
@@ -94,7 +92,6 @@ class Solver(options: Solver.SolverOption) {
           Atom(assign) +: ints.map(IntC.apply)
         case _ => Seq(expectConstraint(t, env))
       }
-
     }
     if (!assertions.forall(checkSort(_, env))) return Left("Sort error")
     val normalized = assertions.map(foldConstant).flatMap(normalizedAssertions)
@@ -146,18 +143,10 @@ class Solver(options: Solver.SolverOption) {
             (success, AssertMode)
           case _ => ???
         }
-    case DeclareConst(SSymbol(name), Sort(SimpleIdentifier(SSymbol(sortName)), Nil)) =>
-      sortName match {
-        case "Int"    => addFunction(name, IntConst)
-        case "String" => addFunction(name, StringConst)
-        case _        => ???
-      }
-    case DeclareFun(SSymbol(name), Nil, Sort(SimpleIdentifier(SSymbol(sortName)), Nil)) =>
-      sortName match {
-        case "Int"    => addFunction(name, IntConst)
-        case "String" => addFunction(name, StringConst)
-        case _        => ???
-      }
+    case DeclareConst(SSymbol(name), smtlib.theories.Ints.IntSort())    => addFunction(name, IntConst)
+    case DeclareConst(SSymbol(name), Strings.StringSort())              => addFunction(name, StringConst)
+    case DeclareFun(SSymbol(name), Nil, smtlib.theories.Ints.IntSort()) => addFunction(name, IntConst)
+    case DeclareFun(SSymbol(name), Nil, Strings.StringSort())           => addFunction(name, StringConst)
     case Assert(term) =>
       val hd :: tl = assertionStack
       assertionStack = hd.copy(assertions = term :: hd.assertions) :: tl
@@ -180,8 +169,15 @@ class Solver(options: Solver.SolverOption) {
           // val (sst, nft) = Solver.compileConstraint(sl, alphabet)
           val o = Solver
             .getModelIfSat(sl, alphabet)
-            .map(model => model.map { case (Constraint.StringVar(name), value) => name -> value.mkString })
-          currentModel = o
+            .map {
+              case (sModel, iModel) =>
+                (
+                  sModel.map { case (Constraint.StringVar(name), value) => name -> value.mkString },
+                  iModel.map { case (Constraint.IntVar(name), value)    => name -> value }
+                )
+            }
+          currentStringModel = o.map(_._1)
+          currentIntModel = o.map(_._2)
           o match {
             case None        => ("unsat", UnsatMode)
             case Some(model) => ("sat", SatMode)
@@ -191,9 +187,12 @@ class Solver(options: Solver.SolverOption) {
     case GetModel() =>
       currentMode match {
         case SatMode =>
-          val s = currentModel.get
-            .map { case (name, value) => s"""(define-fun $name () String "${value}")""" }
-            .mkString("\n  ")
+          val s = {
+            currentStringModel.get
+              .map { case (name, value) => s"""(define-fun $name () String "${value}")""" } ++
+              currentIntModel.get
+                .map { case (name, value) => s"""(define-fun $name () Int ${value})""" }
+          }.mkString("\n  ")
           (s"(model\n  $s\n)", SatMode)
         case _ => ???
       }
@@ -696,7 +695,10 @@ object Solver {
   /** Get a model of constraint `c` if it is satisfiable.
     * `alphabet` is needed because set of alphabet may be specified by user,
     * thus cannot be determined from `c`. */
-  def getModelIfSat[A](c: SLConstraint[A], alphabet: Set[A]): Option[Map[StringVar, Seq[A]]] = {
+  def getModelIfSat[A](
+      c: SLConstraint[A],
+      alphabet: Set[A]
+  ): Option[(Map[StringVar, Seq[A]], Map[IntVar, Int])] = {
     def witnessToModel(w: Seq[Option[A]]): Map[StringVar, List[A]] = {
       val valuation = w.foldRight[List[List[A]]](Nil) {
         case (None, acc)         => Nil :: acc
@@ -712,7 +714,7 @@ object Solver {
         else {
           val input = sst.takeInput
           val witness = sst.transduce(input).head
-          Some(witnessToModel(witness))
+          Some((witnessToModel(witness), Map.empty))
         }
       }
       // When c has integer constraint
@@ -768,13 +770,31 @@ object Solver {
             val stringVarsValue: Map[StringVar, Int] = stringVarsIntExpr.map {
               case (v, e) => v -> z3Model.eval(e, false).toString().toInt
             }
+            val intVarsValue: Map[IntVar, Int] = intVarIntExpr.map {
+              case (v, e) => v -> z3Model.eval(e, false).toString().toInt
+            }
             // indexValue(i) == length of content of i-th string variable
             val indexValue: Map[Int, Int] = stringVars.zipWithIndex.map {
               case (v, i) => i -> stringVarsValue(v)
             }.toMap
             val input = nft.takeInputFor(indexValue, m => m.exists { case (a, i) => i > indexValue(a) })
-            val witness = sst.transduce(input).head
-            Some(witnessToModel(witness))
+            val witness = sst
+              .transduce(input)
+              .find { w =>
+                val ws =
+                  w.foldRight[List[List[A]]](Nil) {
+                    case (None, acc)         => Nil :: acc
+                    case (Some(a), hd :: tl) => (a :: hd) :: tl
+                    case _                   => throw new Exception("This cannot happen.")
+                  }
+                val valuation = (stringVarsSL(c) zip ws).toMap
+                stringVarsValue.forall {
+                  case (x, v) if valuation.isDefinedAt(x) => valuation(x).length == v
+                  case _                                  => false
+                }
+              }
+              .get
+            Some((witnessToModel(witness), intVarsValue))
           } else None
 
         ctx.close()

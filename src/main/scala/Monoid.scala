@@ -14,11 +14,10 @@ object Monoid {
     def unit = ()
     def combine(u1: Unit, u2: Unit) = ()
   }
-  implicit def vectorMonoid[K, V](
-      ks: Iterable[K]
-  )(implicit m: Monoid[V]): Monoid[Map[K, V]] = new Monoid[Map[K, V]] {
-    def unit = Map.empty.withDefaultValue(m.unit)
-    def combine(v1: Map[K, V], v2: Map[K, V]) = ks.map(k => k -> m.combine(v1(k), v2(k))).toMap
+  implicit def vectorMonoid[K, V: Monoid](ks: Iterable[K]): Monoid[Map[K, V]] = new Monoid[Map[K, V]] {
+    def unit = Map.empty.withDefaultValue(Monoid[V].unit)
+    def combine(v1: Map[K, V], v2: Map[K, V]) =
+      ks.map(k => k -> Monoid[V].combine(v1(k), v2(k))).toMap
   }
   implicit val intAdditiveMonoid: Monoid[Int] = new Monoid[Int] {
     def unit = 0

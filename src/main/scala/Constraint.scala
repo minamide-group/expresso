@@ -105,8 +105,8 @@ object Constraint {
       val d: T = Var(Right(0))
       val r: T = Var(Right(1))
       Seq(
-        Implies(Gt(r, d), Eq(j, Const(-1))),
-        Implies(Le(r, d), Eq(j, r))
+        Implies(Ge(r, d), Eq(j, Const(-1))),
+        Implies(Lt(r, d), Eq(j, r))
       )
     }
   }
