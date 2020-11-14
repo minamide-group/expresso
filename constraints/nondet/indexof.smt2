@@ -9,10 +9,10 @@
 ;; (assert (= i (str.indexof x "aa"))) can be encoded as follows:
 (declare-const t String)
 ;; Helper function `str.until_first' returns longet prefix of `x' that excludes leftmost "aa".
-;; If `x' does not contain "aa", then `t' will be `x' followed by additional one character.
+;; If `x' does not contain "aa", then `t' will be `x'.
 (assert (= t (str.until_first x "aa")))
-(assert (or (and (<= (str.len t) (str.len x)) (= i (str.len t)))
-            (and (> (str.len t) (str.len x)) (= i (- 1)))))
+(assert (or (and (< (str.len t) (str.len x)) (= i (str.len t)))
+            (and (>= (str.len t) (str.len x)) (= i (- 1)))))
 
 (assert (str.suffixof y x))
 (assert (= (str.len y) (- (str.len x) i)))

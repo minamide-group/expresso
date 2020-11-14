@@ -1,3 +1,6 @@
+;; This constarint cannot be solved by OSTRICH
+;; The latest release of OSTRICH outputs "unknown",
+;; and master branch build says it is not straight-line.
 (set-logic QF_S)
 
 (declare-const x String)

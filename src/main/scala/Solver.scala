@@ -17,29 +17,97 @@ class Solver(options: Solver.SolverOption) {
 
   case class AssertionLevel(env: FunctionEnv, assertions: List[Terms.Term])
 
-  var currentLogic: Option[Logic] = None
-  var currentMode: Mode = StartMode
+  private var currentLogic: Option[Logic] = None
+  private var currentMode: Mode = StartMode
 
   /** This should never be empty */
-  var assertionStack: List[AssertionLevel] = List(AssertionLevel(Map.empty, Nil))
+  private var assertionStack: List[AssertionLevel] = List(AssertionLevel(Map.empty, Nil))
 
-  var sst: Option[Solver.SolverSST[Char]] = None
-  var nft: Option[Solver.ParikhNFT[Char]] = None
-  var currentModel: Option[Map[String, String]] = None
+  private var sst: Option[Solver.SolverSST[Char]] = None
+  private var nft: Option[Solver.ParikhNFT[Char]] = None
+  private var currentModel: Option[Map[String, String]] = None
+
+  def model(): Option[Map[String, String]] = currentModel
 
   def currentSL(): Either[String, SLConstraint[Char]] = {
-    val AssertionLevel(env, assertions) :: tl = assertionStack
-    try {
-      val sl = assertions.foldLeft(SLConstraint[Char](Nil, Nil, Nil)) { (acc, term) =>
-        expectConstraint(term, env) match {
-          case Atom(a) => acc.copy(as = a +: acc.as)
-          case IntC(i) => acc.copy(is = i +: acc.is)
-          case REC(r)  => acc.copy(rs = r +: acc.rs)
-        }
+    def checkSort(t: Term, env: FunctionEnv): Boolean = true // TODO
+    def foldConstant(t: Term): Term = t // TODO
+    def normalizedAssertions(t: Term): Seq[Term] = Seq(t) // TODO
+    def checkSL(ts: Seq[Term]): Boolean = true // TODO
+    val AssertionLevel(env, assertions) :: _ = assertionStack
+    var unused = LazyList.from(0).iterator // temporary variable ID
+    def interpret(t: Term): Seq[BoolExp] = {
+      object SimpleTransduction {
+        def unapply(e: Term): Option[(String, Transduction[Char])] =
+          e match {
+            case SimpleApp("str.replaceall", Seq(SimpleQualID(name), SString(target), SString(word))) =>
+              Some((name, ReplaceAll(target, word)))
+            case SimpleApp("str.replace_some", Seq(SimpleQualID(name), SString(target), SString(word))) =>
+              Some((name, ReplaceSome(target, word)))
+            case SimpleApp("str.at", Seq(SimpleQualID(name), SNumeral(pos))) if env(name) == StringConst =>
+              Some((name, At(pos.toInt)))
+            case SimpleApp("str.insert", Seq(SimpleQualID(name), SNumeral(pos), SString(word))) =>
+              Some((name, Insert(pos.toInt, word)))
+            case SimpleApp("str.reverse", Seq(SimpleQualID(name))) if env(name) == StringConst =>
+              Some((name, Reverse()))
+            case SimpleApp("str.substr", Seq(SimpleQualID(name), SNumeral(from), SNumeral(len))) =>
+              Some((name, Substr(from.toInt, len.toInt)))
+            case SimpleApp("str.until_first", Seq(SimpleQualID(name), SString(target))) =>
+              Some((name, UntilFirst(target)))
+            case _ => None
+          }
       }
-      Right(sl)
-    } catch {
-      case e: Throwable => Left(e.toString())
+      object TransductionConstraint {
+        def unapply(t: Term): Option[Constraint.TransductionConstraint[Char]] =
+          t match {
+            case SimpleApp(
+                "=",
+                Seq(SimpleQualID(n), SimpleApp("str.indexof", Seq(SimpleQualID(x), SString(w), SNumeral(i))))
+                ) if i == BigInt(0) =>
+              val trans = Constraint.IndexOfFromZero(w)
+              Some(Constraint.ParamTransCstr(trans, StringVar(x), Seq.empty, Seq(IntVar(n))))
+            case SimpleApp(
+                "=",
+                Seq(
+                  SimpleQualID(y),
+                  SimpleApp("str.substr", Seq(SimpleQualID(x), SimpleQualID(i), SimpleQualID(l)))
+                )
+                ) =>
+              val trans = Constraint.GeneralSubstr[Char]()
+              Some(
+                Constraint.ParamTransCstr(trans, StringVar(x), Seq(StringVar(y)), Seq(IntVar(i), IntVar(l)))
+              )
+            case SimpleApp("=", Seq(SimpleQualID(name), SimpleTransduction(rhs, trans))) =>
+              Some(SimpleTransCstr(StringVar(name), trans, StringVar(rhs)))
+            case SimpleApp("str.prefixof", Seq(SimpleQualID(lhs), SimpleQualID(rhs)))
+                if env(lhs) == StringConst && env(rhs) == StringConst =>
+              Some(SimpleTransCstr(StringVar(lhs), TakePrefix(), StringVar(rhs)))
+            case SimpleApp("str.suffixof", Seq(SimpleQualID(lhs), SimpleQualID(rhs)))
+                if env(lhs) == StringConst && env(rhs) == StringConst =>
+              Some(SimpleTransCstr(StringVar(lhs), TakeSuffix(), StringVar(rhs)))
+            case _ => None
+          }
+      }
+      t match {
+        case TransductionConstraint(ptc) =>
+          val (assign, ints) = ptc.atomicAssignAndIntConstraint(unused)
+          Atom(assign) +: ints.map(IntC.apply)
+        case _ => Seq(expectConstraint(t, env))
+      }
+
+    }
+    if (!assertions.forall(checkSort(_, env))) return Left("Sort error")
+    val normalized = assertions.map(foldConstant).flatMap(normalizedAssertions)
+    if (!checkSL(normalized)) return Left("Not straight-line")
+    Right {
+      normalized.flatMap(interpret).foldLeft(SLConstraint.empty[Char]) {
+        case (acc, exp) =>
+          exp match {
+            case Atom(a) => acc.copy(as = a +: acc.as)
+            case IntC(i) => acc.copy(is = i +: acc.is)
+            case REC(r)  => acc.copy(rs = r +: acc.rs)
+          }
+      }
     }
   }
 
@@ -48,12 +116,12 @@ class Solver(options: Solver.SolverOption) {
 
   type ExecutionResult = (Output, Mode)
 
-  def currentFuncEnv: FunctionEnv = assertionStack.head.env
-  def updateFunction(name: String, rank: Rank): Unit = {
+  private def currentFuncEnv: FunctionEnv = assertionStack.head.env
+  private def updateFunction(name: String, rank: Rank): Unit = {
     val hd :: tl = assertionStack
     assertionStack = hd.copy(env = hd.env + (name -> rank)) :: tl
   }
-  def addFunction(name: String, rank: Rank): ExecutionResult = {
+  private def addFunction(name: String, rank: Rank): ExecutionResult = {
     if (currentFuncEnv.isDefinedAt(name)) ("(error \"name $name is already defined\")", AssertMode)
     else {
       updateFunction(name, rank)
@@ -151,6 +219,7 @@ object Solver {
   private case class Atom(a: AtomicConstraint[Char]) extends BoolExp
   private case class IntC(i: IntConstraint) extends BoolExp
   private case class REC(r: RegexConstraint[Char]) extends BoolExp
+
   object SimpleQualID {
     def unapply(term: Term): Option[String] = term match {
       case QualifiedIdentifier(SimpleIdentifier(SSymbol(name)), None) => Some(name)
@@ -163,25 +232,7 @@ object Solver {
       case _                                              => None
     }
   }
-  private def expectTransduction(e: Term, env: FunctionEnv): (String, Transduction[Char]) = e match {
-    case SimpleApp("str.replaceall", Seq(SimpleQualID(name), SString(target), SString(word)))
-        if env(name) == StringConst =>
-      (name, ReplaceAll(target, word))
-    case SimpleApp("str.replace_some", Seq(SimpleQualID(name), SString(target), SString(word)))
-        if env(name) == StringConst =>
-      (name, ReplaceSome(target, word))
-    case SimpleApp("str.at", Seq(SimpleQualID(name), SNumeral(pos))) if env(name) == StringConst =>
-      (name, At(pos.toInt))
-    case SimpleApp("str.insert", Seq(SimpleQualID(name), SNumeral(pos), SString(word)))
-        if env(name) == StringConst =>
-      (name, Insert(pos.toInt, word))
-    case SimpleApp("str.reverse", Seq(SimpleQualID(name))) if env(name) == StringConst => (name, Reverse())
-    case SimpleApp("str.substr", Seq(SimpleQualID(name), SNumeral(from), SNumeral(len))) =>
-      (name, Substr(from.toInt, len.toInt))
-    case SimpleApp("str.until_first", Seq(SimpleQualID(name), SString(target))) if env(name) == StringConst =>
-      (name, UntilFirst(target))
-    case _ => throw new Exception(s"${e.getPos}: Cannot interpret given S-expression as transduction: ${e}")
-  }
+
   private def expectInt(e: Term, env: FunctionEnv): IntExp = e match {
     case SNumeral(i)                                 => Presburger.Const(i.toInt)
     case SimpleApp("-", Seq(e))                      => Presburger.Sub(Presburger.Const(0), expectInt(e, env))
@@ -226,15 +277,6 @@ object Solver {
         case SimpleQualID(name) => Right(StringVar(name))
         case SString(s)         => Left(s.toSeq)
       }))
-    case SimpleApp("=", Seq(SimpleQualID(name), e)) if env(name) == StringConst =>
-      val (rhs, trans) = expectTransduction(e, env)
-      Atom(TransCstr(StringVar(name), trans, StringVar(rhs)))
-    case SimpleApp("str.prefixof", Seq(SimpleQualID(lhs), SimpleQualID(rhs)))
-        if env(lhs) == StringConst && env(rhs) == StringConst =>
-      Atom(TransCstr(StringVar(lhs), TakePrefix(), StringVar(rhs)))
-    case SimpleApp("str.suffixof", Seq(SimpleQualID(lhs), SimpleQualID(rhs)))
-        if env(lhs) == StringConst && env(rhs) == StringConst =>
-      Atom(TransCstr(StringVar(lhs), TakeSuffix(), StringVar(rhs)))
     case SimpleApp("=", Seq(e1, e2)) =>
       val i1 = expectInt(e1, env)
       val i2 = expectInt(e2, env)
@@ -495,16 +537,16 @@ object Solver {
   }
   def stringVarsAtoms[A](as: Seq[AtomicConstraint[A]]): Seq[StringVar] = {
     def rhsVars(c: AtomicConstraint[A]): Seq[StringVar] = c match {
-      case Constant(_, _)     => Nil
-      case CatCstr(_, rhs)    => rhs.flatMap { case Right(v) => Some(v); case _ => None }
-      case TransCstr(_, _, r) => List(r)
+      case Constant(_, _)              => Nil
+      case CatCstr(_, rhs)             => rhs.flatMap { case Right(v) => Some(v); case _ => None }
+      case AtomicAssignment(_, _, rhs) => Seq(rhs)
     }
-    def lhsVar(c: AtomicConstraint[A]): StringVar = c match {
-      case Constant(l, _)     => l
-      case CatCstr(l, _)      => l
-      case TransCstr(l, _, _) => l
+    def lhsVar(c: AtomicConstraint[A]): Seq[StringVar] = c match {
+      case Constant(l, _)              => Seq(l)
+      case CatCstr(l, _)               => Seq(l)
+      case AtomicAssignment(lhs, _, _) => lhs
     }
-    val lhsVars = as.map(lhsVar)
+    val lhsVars = as.flatMap(lhsVar)
     val notInLHS = as.toSet.flatMap(rhsVars).filterNot(lhsVars.contains).toSeq
     notInLHS ++ lhsVars
   }
@@ -517,13 +559,14 @@ object Solver {
   def usedAlphabetAtomic[A](c: AtomicConstraint[A]): Set[A] = c match {
     case Constant(_, word) => word.toSet
     case CatCstr(_, rhs)   => rhs.flatMap { case Left(s) => s; case _ => Seq.empty }.toSet
-    case TransCstr(_, trans, _) =>
+    case AtomicAssignment(_, trans, _) =>
       trans match {
-        case ReplaceAll(target, word)                                       => (target ++ word).toSet
-        case ReplaceSome(target, word)                                      => (target ++ word).toSet
-        case UntilFirst(target)                                             => target.toSet
-        case Insert(_, word)                                                => word.toSet
-        case At(_) | Reverse() | Substr(_, _) | TakePrefix() | TakeSuffix() => Set.empty
+        case ReplaceAll(target, word)                                                         => (target ++ word).toSet
+        case ReplaceSome(target, word)                                                        => (target ++ word).toSet
+        case UntilFirst(target)                                                               => target.toSet
+        case Insert(_, word)                                                                  => word.toSet
+        case IndexOfFromZero(word)                                                            => word.toSet
+        case At(_) | Reverse() | Substr(_, _) | TakePrefix() | TakeSuffix() | GeneralSubstr() => Set.empty
       }
   }
   def usedAlhpabetRegExp[A](re: RegExp[A]): Set[A] = re match {
@@ -542,12 +585,9 @@ object Solver {
   def compileAtomic[A](alphabet: Set[A], ordering: Map[StringVar, Int])(
       a: AtomicConstraint[A]
   ): SolverSST[A] = a match {
-    case Constant(l, word) => constantNSST(ordering(l), word, alphabet)
-    case CatCstr(l, rhs)   => concatNSST(ordering(l), rhs.map(_.map(ordering)), alphabet)
-    case TransCstr(l, t, r) =>
-      val i = ordering(l)
-      val j = ordering(r)
-      t.toSolverSST(i, j, alphabet)
+    case Constant(l, word)                 => constantNSST(ordering(l), word, alphabet)
+    case CatCstr(l, rhs)                   => concatNSST(ordering(l), rhs.map(_.map(ordering)), alphabet)
+    case AtomicAssignment(lhs, trans, rhs) => trans.toSolverSST(ordering(lhs.head), ordering(rhs), alphabet)
   }
 
   /** Construct SST of constraint `c` assuming it is straight-line.
@@ -698,7 +738,7 @@ object Solver {
               case Dist(q) => qMap.getOrElse(q, { val s = s"x${newVar()}"; qMap += q -> s; s })
             }
           }
-          Presburger.Formula.renameVars(parikhEnftToPresburgerFormula(nft), new Renamer().renamer _)
+          Presburger.Formula.renameVars(parikhEnftToPresburgerFormula(nft))(new Renamer().renamer _)
         }
         val stringVars = stringVarsSL(c)
         // Parikh formula and positiveness of free variables are already added to solver.

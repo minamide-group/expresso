@@ -24,6 +24,8 @@ object Presburger {
   case class Conj[X](fs: Seq[Formula[X]]) extends Formula[X]
   case class Disj[X](fs: Seq[Formula[X]]) extends Formula[X]
   case class Not[X](f: Formula[X]) extends Formula[X]
+  def Implies[X](pre: Formula[X], post: Formula[X]): Formula[X] = Disj(Seq(Not(pre), post))
+  def Equiv[X](f1: Formula[X], f2: Formula[X]): Formula[X] = Conj(Seq(Implies(f1, f2), Implies(f2, f1)))
   case class Exists[X](vs: Seq[Var[X]], f: Formula[X]) extends Formula[X]
 
   object Term {
@@ -37,7 +39,7 @@ object Presburger {
   }
 
   object Formula {
-    def renameVars[X, Y](f: Formula[X], renamer: X => Y): Formula[Y] = {
+    def renameVars[X, Y](f: Formula[X])(renamer: X => Y): Formula[Y] = {
       def tm(t: Term[X]): Term[Y] = {
         def aux(t: Term[X]): Term[Y] = t match {
           case Const(i)          => Const(i)

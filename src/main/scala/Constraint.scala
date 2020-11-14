@@ -1,44 +1,69 @@
 package com.github.kmn4.sst
 
-// Input .smt2 file must declare string variables in straight-line order,
-// and must not declare unused string variables.
-object Constraint {
-  import Solver._
+import smtlib.theories.Ints.IntSort
+import smtlib.theories.experimental.Strings.StringSort
+import smtlib.trees.Terms.Sort
+import Solver._
 
-  /** Unary transduction */
-  sealed trait Transduction[C] {
+object Constraint {
+
+  /** Integer-parameterized transduction. */
+  trait ParameterizedTransduction[C] {
+
+    /** A SST whose output is a pair of strings delimited by '#' (which is represented by `None`). */
+    def toPairValuedSST(alphabet: Set[C]): NSST[Int, C, Option[C], Int]
+
+    def outputStringNum: Int
+
+    def defineStringNum: Int
 
     /**
-      * Construct SST that represents x(i) := T(x(j)).
-      *
-      * @param i
-      * @param j
-      * @param alphabet
-      * @return
+      * The number of integer variables constrained by this transduction.
+      * For example, taking substring uses two parameters (say i and l), i for the index of the head and
+      * l for the length to take. In order to let parameters range over arbitrary integers,
+      * y := substr x i l CONSTRAINS i and l by adding some formula to the set of integer constraints.
+      * See substr implementation for details.
       */
-    def toSolverSST(i: Int, j: Int, alphabet: Set[C]): Solver.SolverSST[C] = {
+    def intVarNum: Int
+
+    /**
+      * Presburger formulas that constrain ingeter variables by defining
+      * their relation with length of the input / outputs of the SST.
+      * A variable `Left(i)` should mean the i-th integer variable, whereas `Right(0)`
+      * mean the input SST reads and `Right(i)` with i > 0 is the i-th output string.
+      *
+      * The sequence of formulas is interpreted as conjunction.
+      */
+    def relationFormula: Seq[Presburger.Formula[Either[Int, Int]]]
+
+    /**
+      * Returns NSST that reads a '#' demilited input and ouputs '#' delimited strings.
+      *
+      * @param i The SST will read `i - 1` strings and output `i - 1 + outputStringNum` strings.
+      * @param j The index of string which the SST will transduce.
+      */
+    def toSolverSST(i: Int, j: Int, alphabet: Set[C]): SolverSST[C] = {
       sealed trait X
       case object XIn extends X
       case class XJ(x: Int) extends X
       type Q = (Int, Int)
       type A = Option[C]
-      type B = Option[C]
-      type Update = Concepts.Update[X, B]
+      type Update = Concepts.Update[X, A]
       type Edges = Iterable[(Q, A, Update, Q)]
-      val jsst = this.toSST(alphabet)
+      val jsst = this.toPairValuedSST(alphabet)
       val xjs: Set[X] = jsst.variables.map(XJ.apply)
       val xj = xjs.head
       val base = solverNsstTemplate[C, X](i, alphabet, XIn, xjs, List(Cop1(XIn), Cop1(xj), Cop2(None)))
       val xs = base.variables
       val updates: Monoid[Update] = Concepts.updateMonoid(xs)
-      def append(b: B): Update = updates.unit + (XIn -> List(Cop1(XIn), Cop2(b)))
       val states: Set[Q] = base.states - ((j, 0)) ++ jsst.states.map((j, _))
       val edges: Edges = {
         val baseNoJ = base.edges.filter { case (q, a, m, r) => (q._1 != j) && (r._1 != j) }
-        val toJ = ((j - 1, 0), None, append(None), (j, jsst.q0))
-        def embedList(l: Concepts.Cupstar[Int, C]): Concepts.Cupstar[X, B] =
-          l.map { case Cop1(y) => Cop1(XJ(y)); case Cop2(c) => Cop2(Some(c)) }
-        def embedUpdate(m: Concepts.Update[Int, C]): Concepts.Update[X, B] =
+        def unit(a: A): Update = updates.unit + (XIn -> List(Cop1(XIn), Cop2(a)))
+        def reset(a: A): Update = xs.map(_ -> Nil).toMap + (XIn -> List(Cop1(XIn), Cop2(a)))
+        val toJ = ((j - 1, 0), None, unit(None), (j, jsst.q0))
+        def embedList(l: Concepts.Cupstar[Int, A]): Concepts.Cupstar[X, A] = l.map(_.map1(XJ.apply))
+        def embedUpdate(m: Concepts.Update[Int, A]): Concepts.Update[X, A] =
           m.map { case (x, l) => XJ(x) -> embedList(l) }
         val withinJ: Edges = jsst.edges.map {
           case (q, a, m, r) =>
@@ -46,10 +71,11 @@ object Constraint {
         }
         val fromJ: Edges =
           for ((qf, s) <- jsst.outF; l <- s)
-            yield ((j, qf), None, append(None) + (xj -> embedList(l)), (j + 1, 0))
+            yield ((j, qf), None, reset(None) + (xj -> embedList(l)), (j + 1, 0))
 
         baseNoJ + toJ ++ withinJ ++ fromJ
       }
+      for (e @ (_, _, m, _) <- edges if !NSST.isCopylessUpdate(m)) println(e)
       base
         .copy(
           states = states,
@@ -58,6 +84,110 @@ object Constraint {
           q0 = if (j == 0) (j, jsst.q0) else (0, 0)
         )
         .renamed
+    }
+  }
+
+  /**
+    * For (assert (= j (str.indexof x w 0))), where w is a NON-EMPTY constant string and j a integer variable.
+    *
+    * @param target
+    */
+  case class IndexOfFromZero[C](target: Seq[C]) extends ParameterizedTransduction[C] {
+    def outputStringNum: Int = 1
+    def defineStringNum: Int = 0
+    def intVarNum: Int = 1
+    def toPairValuedSST(alphabet: Set[C]): NSST[Int, C, Option[C], Int] =
+      UntilFirst(target).toPairValuedSST(alphabet)
+    def relationFormula: Seq[Presburger.Formula[Either[Int, Int]]] = {
+      import Presburger._
+      type T = Term[Either[Int, Int]]
+      val j: T = Var(Left(0))
+      val d: T = Var(Right(0))
+      val r: T = Var(Right(1))
+      Seq(
+        Implies(Gt(r, d), Eq(j, Const(-1))),
+        Implies(Le(r, d), Eq(j, r))
+      )
+    }
+  }
+
+  object IndexOfFromZero {
+    def apply[C](target: Seq[C]): IndexOfFromZero[C] = {
+      require(target.nonEmpty)
+      new IndexOfFromZero(target)
+    }
+  }
+
+  /** For (assert (= y (str.substr x i l))), where both i and l are variables. */
+  case class GeneralSubstr[C]() extends ParameterizedTransduction[C] {
+
+    def toPairValuedSST(alphabet: Set[C]): NSST[Int, C, Option[C], Int] = {
+      val xs = Set(0, 1)
+      val unit: Concepts.Update[Int, Option[C]] = Concepts.updateMonoid(xs).unit
+      val edges = alphabet.flatMap { a =>
+        Iterable(
+          (0, a, unit + (1 -> List(Cop1(1), Cop2(Some(a)))), 0),
+          (0, a, unit + (0 -> List(Cop1(0), Cop2(Some(a)))), 1),
+          (1, a, unit + (0 -> List(Cop1(0), Cop2(Some(a)))), 1),
+          (1, a, unit, 2),
+          (2, a, unit, 2)
+        )
+      }
+      NSST(
+        Set(0, 1, 2),
+        alphabet,
+        xs,
+        edges,
+        0,
+        (0 to 2).map(_ -> Set(List[Cop[Int, Option[C]]](Cop1(0), Cop2(None), Cop1(1)))).toMap
+      )
+    }
+
+    def outputStringNum: Int = 2
+    // How many string variables will be in the LHS of this transduction.
+    def defineStringNum: Int = 1
+    // How many int variables does this transduction need / constrain ?
+    def intVarNum: Int = 2
+    def relationFormula: Seq[Presburger.Formula[Either[Int, Int]]] = {
+      // y := substr x i l
+      // r0, r1 := T(d)
+      // r0 will be y, whereas r1 is temporary
+      // What relation holds between |d|, |r0|, |r1|, i and l ?
+      // i < 0 || i >= len(d) || l < 0 => len(r0) == 0
+      // 0 <= i && i < len(d) && 0 <= l && l <= len(d) - i => len(r1) == i && len(r0) == l
+      // 0 <= i && i < len(d) && l > len(d) - i => len(r1) == i && len(r0) == len(d) - i
+      import Presburger._
+      type T = Term[Either[Int, Int]]
+      val i: T = Var(Left(0))
+      val l: T = Var(Left(1))
+      val d: T = Var(Right(0))
+      val r0: T = Var(Right(1))
+      val r1: T = Var(Right(2))
+      val zero: T = Const(0)
+      val idxOutOrNegLen = Disj(Seq(Lt(i, zero), Ge(i, d), Le(l, zero)))
+      Seq(
+        Implies(idxOutOrNegLen, Eq(r0, zero)),
+        Implies(Conj(Seq(Not(idxOutOrNegLen), Le(l, Sub(d, i)))), Conj(Seq(Eq(r1, i), Eq(r0, l)))),
+        Implies(Conj(Seq(Not(idxOutOrNegLen), Gt(l, Sub(d, i)))), Conj(Seq(Eq(r1, i), Eq(r0, Sub(d, i)))))
+      )
+    }
+  }
+
+  /** Unary transduction */
+  trait Transduction[C] extends ParameterizedTransduction[C] {
+    def intVarNum: Int = 0
+    def relationFormula: Seq[Presburger.Formula[Either[Int, Int]]] = Nil
+    def outputStringNum: Int = 1
+    def defineStringNum: Int = 1
+    def toPairValuedSST(alphabet: Set[C]): NSST[Int, C, Option[C], Int] = {
+      def embedList(l: Concepts.Cupstar[Int, C]): Concepts.Cupstar[Int, Option[C]] = l.map(_.map2(Some.apply))
+      def embedUpdate(m: Concepts.Update[Int, C]): Concepts.Update[Int, Option[C]] =
+        m.map { case (x, l) => x -> embedList(l) }
+      val s = toSST(alphabet)
+      s.copy(
+        edges = s.edges.map { case (q, c, m, r) => (q, c, embedUpdate(m), r) },
+        partialF = s.partialF.map { case (q, s) => q -> s.map(embedList) }
+      )
     }
 
     /**
@@ -265,7 +395,7 @@ object Constraint {
   }
 
   /** x(i) := prefix of x(j) that excludes longet prefix of x(j) that excludes leftmost `target`.
-    * If x(j) does not contain `target`, then x(i) will be x(j) followed by additional one character. */
+    * If x(j) does not contain `target`, then x(i) will be x(j). */
   case class UntilFirst[C](target: Seq[C]) extends Transduction[C] {
 
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
@@ -298,11 +428,9 @@ object Constraint {
         states
           .map(q =>
             q -> {
-              // On non-final states q, it should append to variable
-              // the prefix of target string stored in DFA that followed by one arbitrary character,
-              // because no target string has been found.
+              // On non-final states q, it should append to variable the prefix of target string stored in DFA.
               if (!dfa.finalStates(q)) {
-                val stored = target.take(q) :+ alphabet.head
+                val stored = target.take(q)
                 Set(List[Cop[X, C]](Cop1(x)) ++ stored.toList.map(Cop2.apply))
               } else {
                 // On the other hand, being on final states means target has been found.
@@ -323,11 +451,46 @@ object Constraint {
   sealed trait AtomicConstraint[A]
   case class Constant[A](lhs: StringVar, word: Seq[A]) extends AtomicConstraint[A]
   case class CatCstr[A](lhs: StringVar, rhs: Seq[Either[Seq[A], StringVar]]) extends AtomicConstraint[A]
-  case class TransCstr[A](lhs: StringVar, trans: Transduction[A], rhs: StringVar) extends AtomicConstraint[A]
+  case class AtomicAssignment[A](lhs: Seq[StringVar], trans: ParameterizedTransduction[A], rhs: StringVar)
+      extends AtomicConstraint[A]
+  trait TransductionConstraint[A] {
+    def trans: ParameterizedTransduction[A]
+    def readingVar: StringVar
+    def definedVars: Seq[StringVar]
+    def intVars: Seq[IntVar]
+    def atomicAssignAndIntConstraint(unused: Iterator[Int]): (AtomicAssignment[A], Seq[IntConstraint]) = {
+      val fs = trans.relationFormula
+      val tempVars =
+        unused
+          .take(trans.outputStringNum - trans.defineStringNum)
+          .map(i => StringVar(s".s$i"))
+          .toSeq
+      val stringVars = readingVar +: (definedVars ++ tempVars)
+      (
+        AtomicAssignment(definedVars ++ tempVars, trans, readingVar),
+        fs.map(f =>
+          Presburger.Formula.renameVars(f) {
+            case Left(i)  => intVars(i)
+            case Right(i) => stringVars(i)
+          }
+        )
+      )
+    }
+  }
+  case class SimpleTransCstr[A](lhs: StringVar, trans: Transduction[A], rhs: StringVar)
+      extends TransductionConstraint[A] {
+    def readingVar: StringVar = rhs
+    def definedVars: Seq[StringVar] = Seq(lhs)
+    def intVars: Seq[IntVar] = Nil
+  }
+  case class ParamTransCstr[A](
+      trans: ParameterizedTransduction[A],
+      readingVar: StringVar,
+      definedVars: Seq[StringVar],
+      intVars: Seq[IntVar]
+  ) extends TransductionConstraint[A]
 
-  /**
-    * Interpret terms made up from StringVar as length of them.
-    */
+  /** Interpret terms made from StringVar as length of them. */
   type IntConstraint = Presburger.Formula[Var]
   type IntExp = Presburger.Term[Var]
 
@@ -337,6 +500,9 @@ object Constraint {
       is: Seq[IntConstraint],
       rs: Seq[RegexConstraint[A]]
   )
+  object SLConstraint {
+    def empty[A]: SLConstraint[A] = SLConstraint(Seq.empty, Seq.empty, Seq.empty)
+  }
 
 }
 
@@ -345,7 +511,8 @@ object ConstraintExamples {
   // Zhu's case 1
   val c1 = {
     val Seq(x0, x1, x2) = (0 to 2).map(i => StringVar(s"x$i"))
-    val s1 = TransCstr(x1, ReplaceAll("a", "b"), x0)
+    val mock = LazyList.from(0).iterator
+    val (s1, _) = SimpleTransCstr(x1, ReplaceAll("a", "b"), x0).atomicAssignAndIntConstraint(mock)
     val s2 = CatCstr(x2, List(Left("a".toList), Right(x1), Left("b".toList)))
     val r = RegexConstraint(x2, CatExp(CatExp(CharExp('a'), StarExp(CharExp('b'))), CharExp('a')))
     SLConstraint(Seq(s1, s2), Nil, Seq(r))
@@ -353,8 +520,9 @@ object ConstraintExamples {
   // Zhu's case 2
   val c2 = {
     val Seq(x0, x1, x2, x3, x4) = (0 to 4).map(i => StringVar(s"x$i"))
-    val s1 = TransCstr(x2, ReplaceAll("<sc>", "a"), x0)
-    val s2 = TransCstr(x3, ReplaceAll("<sc>", "a"), x1)
+    val mock = LazyList.from(0).iterator
+    val (s1, _) = SimpleTransCstr(x2, ReplaceAll("<sc>", "a"), x0).atomicAssignAndIntConstraint(mock)
+    val (s2, _) = SimpleTransCstr(x3, ReplaceAll("<sc>", "a"), x1).atomicAssignAndIntConstraint(mock)
     val s3 = CatCstr[Char](x4, List(Right(x2), Right(x3)))
     val r = RegexConstraint(x4, "a<sc>a".toSeq.map(CharExp.apply).reduce[RegExp[Char]] {
       case (e1, e2) => CatExp(e1, e2)
@@ -365,10 +533,28 @@ object ConstraintExamples {
   val c3 = {
     import Presburger._
     val Seq(x0, x1, x2) = (0 to 2).map(i => StringVar(s"x$i"))
-    val s1 = TransCstr(x1, ReplaceAll("ab", "c"), x0)
-    val s2 = TransCstr(x2, ReplaceAll("ac", "aaaa"), x1)
+    val mock = LazyList.from(0).iterator
+    val (s1, _) = SimpleTransCstr(x1, ReplaceAll("ab", "c"), x0).atomicAssignAndIntConstraint(mock)
+    val (s2, _) = SimpleTransCstr(x2, ReplaceAll("ac", "aaaa"), x1).atomicAssignAndIntConstraint(mock)
     val i1: Formula[Constraint.Var] = Lt(Var(x0), Const(5)) // x0 <= 4
     val i2: Formula[Constraint.Var] = Lt(Add(Seq(Var(x0), Const(1))), Var(x2)) // x0 + 2 <= x2
     SLConstraint(Seq(s1, s2), Seq(i1, i2), Nil)
+  }
+  val c4 = {
+    import Presburger._
+    val x = StringVar("x")
+    val y = StringVar("y")
+    val i = IntVar("i")
+    val j = IntVar("j")
+    val k = IntVar("k")
+    val unused = LazyList.from(0).iterator
+    val (s1, is1) =
+      ParamTransCstr(IndexOfFromZero("ab"), x, Seq.empty, Seq(j)).atomicAssignAndIntConstraint(unused)
+    val (s2, is2) =
+      ParamTransCstr(GeneralSubstr[Char](), x, Seq(y), Seq(i, k)).atomicAssignAndIntConstraint(unused)
+    val i1: IntConstraint = Eq(Var(i), Const(0))
+    val i2: IntConstraint = Eq(Var(k), Const(2))
+    val r = RegexConstraint(y, CompExp(CatExp(CharExp('a'), CharExp('b'))))
+    SLConstraint(Seq(s1, s2), Seq(i1, i2) ++ is1 ++ is2, Seq(r))
   }
 }

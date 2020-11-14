@@ -131,11 +131,17 @@ class TestSolver extends AnyFunSuite {
 
   test("UntilFirst") {
     val n = UntilFirst("aa").toSST(alphabet)
-    println(n)
     assert(n.transduce("aa".toList) == Set("".toList))
     assert(n.transduce("baa".toList) == Set("b".toList))
     assert(n.transduce("abaa".toList) == Set("ab".toList))
-    assert(n.transduce("aba".toList) == Set("abaa".toList))
+    assert(n.transduce("aba".toList) == Set("aba".toList))
+  }
+
+  test("Copylessness") {
+    assert(GeneralSubstr().toPairValuedSST(" ab".toSet).isCopyless)
+    assert(IndexOfFromZero("aab").toPairValuedSST(" ab".toSet).isCopyless)
+    assert(IndexOfFromZero("aab").toSolverSST(1, 0, " ab".toSet).isCopyless)
+    assert(GeneralSubstr().toSolverSST(2, 0, " ab".toSet).isCopyless)
   }
 
 //   test("Nondeterministic case 1") {
@@ -180,7 +186,7 @@ class TestSolver extends AnyFunSuite {
     val script = Script(parser.parseScript.commands.filter { case GetModel() => false; case _ => true })
     val solver = new Solver(())
     solver.executeTransPrint(script)
-    check(solver.currentModel)
+    check(solver.model())
   }
   test("deleteall.smt2") {
     solveFile("deleteall.smt2") {

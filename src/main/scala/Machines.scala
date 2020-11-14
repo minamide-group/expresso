@@ -282,7 +282,7 @@ case class NSST[Q, A, B, X](
         case Parikh.Dist(q) => qMap.getOrElse(q, { val s = s"x${newVar()}"; qMap += q -> s; s })
       }
     }
-    Presburger.Formula.renameVars(formula, new Renamer().renamer _)
+    Presburger.Formula.renameVars(formula)(new Renamer().renamer _)
   }
 
   /** Returns an input string that give some output.
