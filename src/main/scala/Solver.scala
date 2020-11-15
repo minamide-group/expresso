@@ -777,7 +777,9 @@ object Solver {
             val indexValue: Map[Int, Int] = stringVars.zipWithIndex.map {
               case (v, i) => i -> stringVarsValue(v)
             }.toMap
+            println(indexValue)
             val input = nft.takeInputFor(indexValue, m => m.exists { case (a, i) => i > indexValue(a) })
+            println(input)
             val witness = sst
               .transduce(input)
               .find { w =>
@@ -787,11 +789,7 @@ object Solver {
                     case (Some(a), hd :: tl) => (a :: hd) :: tl
                     case _                   => throw new Exception("This cannot happen.")
                   }
-                val valuation = (stringVarsSL(c) zip ws).toMap
-                stringVarsValue.forall {
-                  case (x, v) if valuation.isDefinedAt(x) => valuation(x).length == v
-                  case _                                  => false
-                }
+                indexValue == ws.zipWithIndex.map { case (s, i) => i -> s.length }.toMap
               }
               .get
             Some((witnessToModel(witness), intVarsValue))

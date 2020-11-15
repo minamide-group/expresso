@@ -3,35 +3,19 @@ package com.github.kmn4.sst
 import com.microsoft.z3
 import Presburger._
 
-sealed trait RegExp[+A]
-case object EmptyExp extends RegExp[Nothing]
-case object EpsExp extends RegExp[Nothing]
-case object DotExp extends RegExp[Nothing]
-case class CharExp[A, B <: A](b: B) extends RegExp[A]
-case class OrExp[A, B <: A](b1: RegExp[B], b2: RegExp[B]) extends RegExp[A]
-case class CatExp[A, B <: A](b1: RegExp[B], b2: RegExp[B]) extends RegExp[A]
-case class StarExp[A, B <: A](b: RegExp[B]) extends RegExp[A]
-case class CompExp[A, B <: A](b: RegExp[B]) extends RegExp[A]
-
 object Parikh {
   type Image[A] = Map[A, Int]
   sealed trait EnftVar[Q, B, E]
-  case class BNum[Q, B, E](b: B) extends EnftVar[Q, B, E]
-  case class ENum[Q, B, E](e: E) extends EnftVar[Q, B, E]
-  case class Dist[Q, B, E](q: Q) extends EnftVar[Q, B, E]
-  // case class IsInit[Q, B, E](q: Q) extends EnftVar[Q, B,E]
-  // case class IsFin[Q, B, E](q: Q) extends EnftVar[Q, B,E]
+  case class BNum[Q, B, E](b: B) extends EnftVar[Q, B, E] // number of occurrence of output symbol b
+  case class ENum[Q, B, E](e: E) extends EnftVar[Q, B, E] // number of occurrence of edge e
+  case class Dist[Q, B, E](q: Q) extends EnftVar[Q, B, E] // distance from initial state to q
   def parikhEnftToPresburgerFormula[Q, A, B](
       enft: ENFT[Q, A, Image[B]]
   ): Formula[EnftVar[Q, B, (Q, Image[B], Q)]] = {
     type Edge = (Q, Image[B], Q)
     type X = EnftVar[Q, B, Edge]
     val states = enft.states.toSeq
-    val edges: Seq[Edge] = {
-      for (((q, a), s) <- enft.edges; (r, v) <- s)
-        yield (q, v, r)
-    } // Needed to exclude duplicate.
-    .toSet.toList
+    val edges: Seq[Edge] = enft.edges.map { case (q, _, m, r) => (q, m, r) }.toSeq
     val edgesFrom: Map[Q, Seq[Edge]] = edges.groupBy(_._1).withDefaultValue(Seq.empty)
     val edgesTo: Map[Q, Seq[Edge]] = edges.groupBy(_._3).withDefaultValue(Seq.empty)
     val input: Map[Q, Term[X]] = states

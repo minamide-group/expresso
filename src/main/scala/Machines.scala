@@ -121,10 +121,17 @@ case class NSST[Q, A, B, X](
   implicit val monoid: Monoid[Update[X, B]] = variables
   val outF: Map[Q, Set[Cupstar[X, B]]] = partialF.withDefaultValue(Set())
   val out: Set[B] = Set.from {
-    for ((_, _, m, _) <- edges;
-         (_, alpha) <- m;
-         b <- erase1(alpha))
-      yield b
+    for {
+      (_, _, m, _) <- edges;
+      (_, alpha) <- m
+      b <- erase1(alpha)
+    } yield b
+  } ++ Set.from {
+    for {
+      (q, s) <- outF
+      alpha <- s
+      b <- erase1(alpha)
+    } yield b
   }
 
   val delta: Map[(Q, A), Set[(Q, Update[X, B])]] =
@@ -743,89 +750,51 @@ object NSST {
     nsst
   }
 
-  def countOf2[A, B](alpha: Cupstar[A, B]): Map[B, Int] =
-    erase1(alpha)
-      .groupBy(identity)
-      .map { case (b, l) => b -> l.length }
-      .withDefaultValue(0)
-  def countCharOfX[X, A](m: Update[X, A]): Map[X, Map[A, Int]] =
-    m.map { case (x, alpha) => x -> countOf2(alpha) }
-
   /** Convert the given NSST to a NFT that transduces each input to the Parikh image of the output of the NSST. */
   def convertNsstParikhNft[Q, A, B, X](
       nsst: NSST[Q, A, B, X]
   ): MNFT[(Q, Set[X]), A, Map[B, Int]] = {
-    // TODO This computes the set of states forward manner, but backward manner is likely to be even faster.
     type NQ = (Q, Set[X])
-    type O = Map[B, Int]
-    // Returns a set of p' s.t. string containing p' updated by m will contain p.
-    def invert(m: Update[X, B], p: Set[X]): Set[Set[X]] = {
-      // Map from x to a set of variables in m(x).
-      val varsOf: Map[X, Set[X]] = Map.from {
-        for ((x, xbs) <- m) yield x -> (erase2(xbs).toSet)
-      }
-      // Map from y to x s.t. m(x) contains y.
-      // Because m is copyless, x is unique for each y.
-      val inverse: Map[X, X] = Map.from {
-        for ((x, ys) <- varsOf; y <- ys)
-          yield y -> x
-      }
-      val must = for (y <- p if inverse.isDefinedAt(y)) yield inverse(y)
-      if (must.flatMap(varsOf(_)) != p) {
-        return Set.empty
-      }
-      val empties = varsOf.withFilter { case (x, xs) => xs.isEmpty }.map(_._1).toSet
-      empties
-        .subsets()
-        .map(must ++ _)
-        .toSet
+    type V = Map[B, Int]
+    def charsVecOf(alpha: Cupstar[X, B]): V = alpha.foldLeft[V](Map.empty.withDefaultValue(0)) {
+      case (acc, Cop2(b)) => acc.updated(b, acc(b) + 1)
+      case (acc, _)       => acc
     }
-    val out: List[B] = nsst.out.toList
-    implicit val monoid: Monoid[Map[B, Int]] = Monoid.vectorMonoid(out)
-    // Ψ_{Gamma}^m in paper
-    def nextStates(nq: NQ, a: A): Set[(NQ, O)] = {
-      val (q1, p1) = nq
-      Set.from {
-        for ((q2, m) <- nsst.transOne(q1, a); p2 <- invert(m, p1))
-          yield {
-            val v = {
-              val countInM = countCharOfX(m)
-              // toList is necesasry because it is possible be that two varibles give the same vector.
-              Monoid.fold(p2.toList.map(countInM(_)))
-            }
-            ((q2, p2), v)
-          }
+    val backTrans = graphToMap(nsst.edges) { case (q, a, m, r) => (r, a) -> (q, m) }
+    val vectorMonoid: Monoid[V] = Monoid.vectorMonoid(nsst.out)(Monoid.intAdditiveMonoid)
+    def prevStates(nq: NQ, a: A): Set[(NQ, V)] = {
+      val (r, p) = nq
+      for ((q, m) <- backTrans(r, a)) yield {
+        (
+          (q, p.flatMap(m andThen varsIn _)),
+          Monoid.fold(p.toList.map(m andThen charsVecOf _))(vectorMonoid)
+        )
       }
     }
-    val initials = nsst.variables.subsets().map((nsst.q0, _)).toSet
-    var newStates: Set[NQ] = initials
-    var newEdges: Map[(NQ, A), Set[(NQ, O)]] = Map.empty
+    val outF: Map[NQ, Set[V]] = graphToMap {
+      for {
+        (q, s) <- nsst.outF.toSet
+        alpha <- s
+      } yield (q, varsIn(alpha)) -> charsVecOf(alpha)
+    }(identity)
+    var newStates = collection.mutable.Set.from(outF.keySet)
+    var newEdges: List[(NQ, A, V, NQ)] = Nil
     var stack: List[NQ] = newStates.toList
     while (stack.nonEmpty) {
-      val q = stack.head
+      val r = stack.head
       stack = stack.tail
-      for (a <- nsst.in) {
-        val edges = nextStates(q, a)
-        newEdges += (q, a) -> edges
-        val newOnes = edges.map(_._1) -- newStates
-        newStates ++= newOnes
-        stack = newOnes.toList ++ stack
+      for (a <- nsst.in; (q, v) <- prevStates(r, a)) {
+        newEdges ::= (q, a, v, r)
+        if (newStates.add(q)) stack ::= q
       }
     }
-    val acceptF: Map[NQ, Set[O]] = Map.from {
-      for ((q, p) <- newStates)
-        yield (q, p) -> {
-          for (alpha <- nsst.outF(q) if erase2(alpha).toSet == p)
-            yield countOf2(alpha)
-        }
-    }
-    new MNFT[NQ, A, O](
-      newStates,
+    new MNFT[NQ, A, V](
+      newStates.toSet,
       nsst.in,
-      newEdges,
-      initials,
-      acceptF
-    ).optimized
+      newEdges.toSet,
+      newStates.filter(_._1 == nsst.q0).toSet,
+      outF
+    )(vectorMonoid).optimized
   }
 
   def apply(
@@ -1082,16 +1051,16 @@ object NFT {
 }
 
 /** Monoid NFT */
-class MNFT[Q, A, M: Monoid](
-    val states: Set[Q],
-    val in: Set[A],
-    partialEdges: Map[(Q, A), Set[(Q, M)]],
-    val initials: Set[Q],
+case class MNFT[Q, A, M: Monoid](
+    states: Set[Q],
+    in: Set[A],
+    edges: Set[(Q, A, M, Q)],
+    initials: Set[Q],
     partialF: Map[Q, Set[M]]
 ) {
-  val edges = partialEdges.withDefaultValue(Set.empty)
+  val trans = NSST.graphToMap(edges) { case (q, a, m, r) => (q, a) -> (r, m) }
   val acceptF = partialF.withDefaultValue(Set.empty)
-  def transOne(q: Q, a: A): Set[(Q, M)] = edges((q, a))
+  def transOne(q: Q, a: A): Set[(Q, M)] = trans((q, a))
   def outputAt(q: Q, m: M): Set[M] = acceptF(q).map(mf => implicitly[Monoid[M]].combine(m, mf))
   def transition(qs: Set[Q], w: List[A]): Set[(Q, M)] = Monoid.transition(qs, w, transOne)
   def transduce(w: List[A]): Set[M] =
@@ -1106,61 +1075,37 @@ class MNFT[Q, A, M: Monoid](
     val reachable =
       Concepts.closure(
         initials,
-        edges.map { case ((q, _), s) => q -> s.map(_._1) }.withDefaultValue(Set.empty)
+        NSST.graphToMap(edges) { case (q, _, _, r) => q -> r }
       )
-    val invReachable = {
-      val invEdges = edges.toList
-        .map { case ((q, _), s) => (q, s) }
-        .flatMap { case (q, s) => s.map { case (r, _) => (r, q) } }
-        .groupBy(_._1)
-        .view
-        .mapValues(_.map(_._2).toSet)
-        .toMap
-        .withDefaultValue(Set.empty)
-      Concepts.closure(partialF.filter { case (q, s) => s.nonEmpty }.keySet, invEdges)
-    }
-    val newEdges = edges
-      .flatMap {
-        case ((q, a), s) =>
-          if (invReachable contains q) {
-            Map((q, a) -> s.filter { case (q, _) => invReachable contains q })
-          } else Map.empty
-      }
+    val invReachable =
+      Concepts.closure(partialF.filter { case (q, s) => s.nonEmpty }.keySet, NSST.graphToMap(edges) {
+        case (q, a, m, r) => r -> q
+      })
+    val needed = reachable intersect invReachable
     new MNFT[Q, A, M](
-      invReachable,
+      needed,
       in,
-      newEdges,
-      initials intersect invReachable,
-      acceptF.filter { case (q, _) => invReachable contains q }
+      edges.filter { case (q, a, m, r) => needed(q) && needed(r) },
+      initials intersect needed,
+      acceptF.filter { case (q, _) => needed(q) }
     )
   }
 
   def toENFT: ENFT[Int, A, M] = {
     trait NQ
-    case class OfQ(q: Q) extends NQ
+    case class OQ(q: Q) extends NQ
     case object Init extends NQ // New initial state
     case object Fin extends NQ // New final state
-    val newStates = states.map[NQ](OfQ.apply) + Init + Fin
-    type Edge = ((NQ, Option[A]), Set[(NQ, M)])
-    val newEdges: Iterable[Edge] = {
-      val fromInit: Edge =
-        (Init, None) -> initials.map(q => (OfQ(q), implicitly[Monoid[M]].unit)).toSet
-      val toFinal: Iterable[Edge] = {
-        for (q <- acceptF.keySet)
-          yield (OfQ(q), None) -> acceptF(q).map((Fin, _)).toSet
-      }
+    val newStates = states.map[NQ](OQ.apply) + Init + Fin
+    type Edge = (NQ, Option[A], M, NQ)
+    val newEdges = {
+      val fromInit = initials.map(q => (Init, None, Monoid[M].unit, OQ(q)))
+      val toFinal = for ((q, s) <- acceptF; m <- s) yield (OQ(q), None, m, Fin)
       edges
-        .map[Edge] { case ((q, a), s) => ((OfQ(q), Some(a)), s.map { case (r, m) => (OfQ(r), m) }) } ++
-        toFinal ++
-        Iterable(fromInit)
+        .map[Edge] { case (q, a, m, r) => (OQ(q), Some(a), m, OQ(r)) } ++
+        toFinal ++ fromInit
     }
-    new ENFT[NQ, A, M](
-      newStates,
-      in,
-      newEdges.toMap,
-      Init,
-      Fin
-    ).renamed
+    new ENFT[NQ, A, M](newStates, in, newEdges, Init, Fin).renamed
   }
 
   def unifyInitAndFinal = toENFT
@@ -1172,16 +1117,14 @@ class MNFT[Q, A, M: Monoid](
 class ENFT[Q, A, M: Monoid](
     val states: Set[Q],
     val in: Set[A],
-    partialEdges: Map[(Q, Option[A]), Set[(Q, M)]],
+    val edges: Set[(Q, Option[A], M, Q)],
     val initial: Q,
     val finalState: Q
 ) {
-  val edges = partialEdges.withDefaultValue(Set.empty)
+  val trans = NSST.graphToMap(edges) { case (q, a, m, r) => (q, a) -> (r, m) }
   def renamed: ENFT[Int, A, M] = {
     val stateMap = (states zip LazyList.from(0)).toMap
-    val newEdges =
-      for (((q, a), s) <- partialEdges)
-        yield (stateMap(q), a) -> s.map { case (q, m) => (stateMap(q), m) }
+    val newEdges = edges.map { case (q, a, m, r) => (stateMap(q), a, m, stateMap(r)) }
     new ENFT(
       stateMap.map(_._2).toSet,
       in,
@@ -1206,7 +1149,7 @@ class ENFT[Q, A, M: Monoid](
       if (q == finalState && m1 == wanted) return as1.reverse
       val added = {
         inO.flatMap(o =>
-          edges((q, o)).flatMap {
+          trans((q, o)).flatMap {
             case (q, m2) => {
               val as = o match {
                 case None    => as1
