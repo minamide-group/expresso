@@ -311,7 +311,15 @@ case class NSST[Q, A, B, X](
   def compose[R, C, Y](
       that: NSST[R, B, C, Y]
   )(implicit logger: CompositionLogger = NopLogger): NSST[Int, A, C, Int] = {
-    val nsst = NSST.composeNsstsToNsst(this, that)
+    if (!this.isCopyless) {
+      throw new Exception(s"Tried to compose NSST, but first NSST was copyfull: ${this.edges}")
+    }
+    if (!that.isCopyless) {
+      throw new Exception(s"Tried to compose NSST, but second NSST was copyfull: ${that.edges}")
+    }
+    val msst = NSST.composeNsstsToMsst(this, that)
+    val nsst = MSST.convertMsstToNsst(msst)
+    logger.nsstConstructed(nsst)
     val res = nsst.renamed.removeRedundantVars
     logger.redundantVarsRemoved(res)
     res
@@ -534,21 +542,19 @@ object NSST {
   def mapToGraph[E, K, V](map: Map[K, Set[V]])(f: ((K, V)) => E): Iterable[E] =
     for ((k, vs) <- map; v <- vs) yield f(k, v)
 
-  /** Returns a set of `Map`s that maps each variable y in `xbs` to
-    *  a pair of k(y), t(y) and a string over (X cup C), where
-    *  `nft` can transition with (k, t) from q to r, by reading `xbs` outputting the string.
+  /**
+    * For each element (f, xbs) of the returned set, the following holds: q -[xas / xbs]-> r by using f.
     */
   def possiblePreviousOf[Q, X, A, B](
       q: Q,
       r: Q,
       invTransA: Map[(Q, A), Set[(Q, B)]],
-      invTransX: Map[(Q, X), Set[Q]], // At q2 reading x can lead to transX(q2, x)
+      invTransX: Map[(Q, X), Set[Q]], // For each q2 in invTransX(r2, x), reading x at q2 may lead to r2
       xas: Cupstar[X, A]
   ): Set[(Map[X, (Q, Q)], Cupstar[X, B])] = {
-    // `acc` accumulates a set of pairs of a mapping and configuration (outputs are reversed).
     xas
       .foldRight[Set[(Map[X, (Q, Q)], (Q, Cupstar[X, B]))]](
-        Set((Map.empty, (r, Nil)))
+        Set((Map.empty, (r, Nil))) // accumulates a set of pairs of a mapping and configuration.
       ) {
         case (Cop1(x), acc) =>
           acc.flatMap {
@@ -574,14 +580,14 @@ object NSST {
 
     type NQ = (Q1, Map[X, (Q2, Q2)])
 
-    val invTrans: Map[Q1, Set[(Q1, A, Update[X, B])]] =
-      graphToMap(n1.edges) { case (q, a, m, r) => r -> (q, a, m) }
+    val invTransA: Map[(Q1, A), Set[(Q1, Update[X, B])]] =
+      graphToMap(n1.edges) { case (q, a, m, r) => (r, a) -> (q, m) }
 
     val invTransB: Map[(Q2, B), Set[(Q2, Update[Y, C])]] =
       graphToMap(n2.edges) { case (q, b, m, r) => (r, b) -> (q, m) }
 
     // Consider product construction of two NSSTs.
-    // invTransX(p)(q, x) is a set of state `r`s where q may transition to r by reading
+    // invTransX(p)(r, x) is a set of state `q`s where q may transition to r by reading
     // a content of x at state p.
     val invTransX: Map[Q1, Map[(Q2, X), Set[Q2]]] = {
       import scala.collection.mutable.{Map => MMap, Set => MSet}
@@ -594,13 +600,17 @@ object NSST {
       def trans(transX: (Q2, X) => MSet[Q2])(q: Q2, xb: Cop[X, B]): Set[(Q2, Unit)] =
         xb match {
           case Cop1(x) => Set.from(transX(q, x).map((_, ())))
-          case Cop2(b) => n2.transOne(q, b).map { case (r, m) => (r, List(Cop2(m))) }
+          case Cop2(b) => n2.transOne(q, b).map { case (r, _) => (r, ()) }
         }
       var updated = false
       do {
         updated = false
         // q1 =[???/m]=> r1, q2 =[(m(x)@q1)/???]=> r2 then q2 =[(x@r1)/???]=> r2
-        for ((q1, _, m, r1) <- n1.edges; x <- n1.variables; q2 <- n2.states) {
+        for {
+          (q1, _, m, r1) <- n1.edges
+          x <- n1.variables
+          q2 <- n2.states
+        } {
           val cur = res((r1, x, q2))
           val added = Monoid.transition(Set(q2), m(x), trans { case (q, y) => res((q1, y, q)) }).map(_._1)
           if (!(added subsetOf cur)) {
@@ -619,37 +629,27 @@ object NSST {
         .withDefaultValue(Map.empty.withDefault { case (q2, _) => Set(q2) })
     }
 
-    def previousStates(nq: NQ): Set[(NQ, A, Update[X, Update[Y, C]])] = {
+    def previousStates(nq: NQ, a: A): Set[(NQ, Update[X, Update[Y, C]])] = {
       val (r, kt) = nq
-      invTrans(r).flatMap {
-        case (q, a, m) => {
+      invTransA(r, a).flatMap {
+        case (q, m) => { // q -[a / m]-> r (first NSST)
           val candidates: List[(X, Set[(Map[X, (Q2, Q2)], Cupstar[X, Update[Y, C]])])] =
-            kt.keySet
-              .map(x =>
-                x -> {
-                  val (k, t) = kt(x)
-                  // Variables always empty at state q can be ignored
-                  val usedAtQ = n1.nonEmptyVarsAt(q)
-                  val filtered = m(x).filter { case Cop1(x) => usedAtQ contains x; case _ => true }
-                  possiblePreviousOf(k, t, invTransB, invTransX(q), filtered)
-                }
-              )
-              .toList
+            kt.map {
+              case (x, (k, t)) =>
+                // Variables always empty at state q can be ignored
+                val usedAtQ = n1.nonEmptyVarsAt(q)
+                val filtered = m(x).filter { case Cop1(x) => usedAtQ contains x; case _ => true }
+                x -> possiblePreviousOf(k, t, invTransB, invTransX(q), filtered)
+            }.toList
           def aux(
               candidates: List[(X, Set[(Map[X, (Q2, Q2)], Cupstar[X, Update[Y, C]])])]
           ): Set[(Map[X, (Q2, Q2)], Update[X, Update[Y, C]])] =
             candidates match {
               case Nil => Set((Map.empty, n1.variables.map(x => x -> Nil).toMap))
               case (x, s) :: tl =>
-                for ((kt1, mu) <- aux(tl); (kt2, alpha) <- s)
-                  yield (
-                    (kt1 ++ kt2),
-                    mu + (x -> alpha)
-                  )
+                for ((kt1, mu) <- aux(tl); (kt2, alpha) <- s) yield ((kt1 ++ kt2), mu + (x -> alpha))
             }
-          aux(candidates).map {
-            case (kt, m) => ((q, kt), a, m ++ Map.from((n1.variables -- m.keySet).map(x => x -> Nil)))
-          }
+          aux(candidates).map { case (kt, m) => ((q, kt), m) }
         }
       }
     }
@@ -658,16 +658,17 @@ object NSST {
       val outF1 = n1.outF.toList
       val outF2 = n2.outF.toList
       val graph =
-        for ((q1, s1) <- outF1;
-             xbs <- s1;
-             (q2, s2) <- outF2;
-             (kt, xms) <- {
-               val usedAtQ1 = n1.nonEmptyVarsAt(q1)
-               val filtered = xbs.filter { case Cop1(x) => usedAtQ1 contains x; case _ => true }
-               possiblePreviousOf(n2.q0, q2, invTransB, invTransX(q1), filtered)
-             };
-             ycs <- s2)
-          yield (q1, kt) -> (xms, ycs)
+        for {
+          (q1, s1) <- outF1
+          xbs <- s1
+          (q2, s2) <- outF2
+          (kt, xms) <- {
+            val usedAtQ1 = n1.nonEmptyVarsAt(q1)
+            val filtered = xbs.filter { case Cop1(x) => usedAtQ1 contains x; case _ => true }
+            possiblePreviousOf(n2.q0, q2, invTransB, invTransX(q1), filtered)
+          }
+          ycs <- s2
+        } yield (q1, kt) -> (xms, ycs)
       graphToMap(graph) { case (k, v) => k -> v }
     }
 
@@ -677,13 +678,14 @@ object NSST {
     while (stack.nonEmpty) {
       val r = stack.head
       stack = stack.tail
-      previousStates(r).foreach {
-        case (q, a, m) => {
-          edges ::= ((q, a, m, r))
-          if (!states.contains(q)) {
-            states += q
-            stack ::= q
-          }
+      for {
+        a <- n1.in;
+        (q, m) <- previousStates(r, a)
+      } {
+        edges ::= ((q, a, m, r))
+        if (!states.contains(q)) {
+          states += q
+          stack ::= q
         }
       }
     }
@@ -731,24 +733,6 @@ object NSST {
     res
   }
   // End of composeNsstsToMsst
-
-  def composeNsstsToNsst[Q1, Q2, A, B, C, X, Y](
-      n1: NSST[Q1, A, B, X],
-      n2: NSST[Q2, B, C, Y]
-  )(
-      implicit logger: CompositionLogger
-  ): (NSST[(Option[(Q1, Map[X, (Q2, Q2)])], Map[X, Concepts.M1[Y]]), A, C, (X, Y, Boolean)]) = {
-    if (!n1.isCopyless) {
-      throw new Exception(s"Tried to compose NSST, but first NSST was copyfull: ${n1.edges}")
-    }
-    if (!n2.isCopyless) {
-      throw new Exception(s"Tried to compose NSST, but second NSST was copyfull: ${n2.edges}")
-    }
-    val msst = NSST.composeNsstsToMsst(n1, n2)
-    val nsst = MSST.convertMsstToNsst(msst)
-    logger.nsstConstructed(nsst)
-    nsst
-  }
 
   /** Convert the given NSST to a NFT that transduces each input to the Parikh image of the output of the NSST. */
   def convertNsstParikhNft[Q, A, B, X](
