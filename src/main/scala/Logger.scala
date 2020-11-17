@@ -2,6 +2,7 @@ package com.github.kmn4.sst
 
 trait CompositionLogger {
   def start[Q1, Q2, A, B, C, X, Y](n1: NSST[Q1, A, B, X], n2: NSST[Q2, B, C, Y]): Unit
+  def invTransX[Q1, Q2, X](m: Map[Q1, Map[(Q2, X), Set[Q2]]]): Unit
   def backwardFinished[Q, A, M](states: Set[Q], edges: Iterable[(Q, A, M, Q)], initialStates: Set[Q]): Unit
   def unreachablesRemoved[Q](reachables: Set[Q]): Unit
   def msstConstructed[Q, A, C, X, Y](msst: MSST[Q, A, C, X, Y]): Unit
@@ -11,6 +12,7 @@ trait CompositionLogger {
 
 object NopLogger extends CompositionLogger {
   def start[Q1, Q2, A, B, C, X, Y](n1: NSST[Q1, A, B, X], n2: NSST[Q2, B, C, Y]): Unit = {}
+  def invTransX[Q1, Q2, X](m: Map[Q1, Map[(Q2, X), Set[Q2]]]): Unit = {}
   def backwardFinished[Q, A, M](
       states: Set[Q],
       edges: Iterable[(Q, A, M, Q)],
@@ -38,6 +40,7 @@ Composition ingredients:
 \t2:\t${sizes.started.second}
 Composition took\t${toMillis(times.redundantVars - times.start)} ms
 Detailed elapsed time:
+\tBackward reachability analysis\t${toMillis(times.invTrans - times.start)} ms
 \tBackward state exploration\t${toMillis(times.backward - times.start)} ms
 \tRemoving unreachable\t${toMillis(times.unreachables - times.backward)} ms
 \tMSST construction (overall)\t${toMillis(times.msst - times.start)} ms
@@ -52,6 +55,7 @@ Resulting SST:\t${sizes.finished}"""
 object CompositionLog {
   case class Times(
       start: Long = 0,
+      invTrans: Long = 0,
       backward: Long = 0,
       unreachables: Long = 0,
       msst: Long = 0,
@@ -103,6 +107,10 @@ class BufferedLogger extends CompositionLogger {
   def start[Q1, Q2, A, B, C, X, Y](n1: NSST[Q1, A, B, X], n2: NSST[Q2, B, C, Y]): Unit = {
     times = Times(start = System.nanoTime())
     sizes = Sizes(started = Started(first = NsstSummary(n1), second = NsstSummary(n2)))
+  }
+
+  def invTransX[Q1, Q2, X](m: Map[Q1, Map[(Q2, X), Set[Q2]]]): Unit = {
+    times = times.copy(invTrans = System.nanoTime())
   }
 
   def backwardFinished[Q, A, M](states: Set[Q], edges: Iterable[(Q, A, M, Q)], initialStates: Set[Q]) = {

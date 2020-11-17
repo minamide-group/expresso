@@ -628,6 +628,7 @@ object NSST {
         .toMap
         .withDefaultValue(Map.empty.withDefault { case (q2, _) => Set(q2) })
     }
+    logger.invTransX(invTransX)
 
     def previousStates(nq: NQ, a: A): Set[(NQ, Update[X, Update[Y, C]])] = {
       val (r, kt) = nq
