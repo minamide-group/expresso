@@ -43,8 +43,8 @@ object Parikh {
       )
       .toMap
     val euler: Formula[X] = {
-      val clauses = states.map(q => Eq(Sub(input(q), output(q)), Const(0)))
-      // `caluses` cannot be empty bacause MNFT has at least one state.
+      val clauses = states.map(q => Eq(input(q), output(q)))
+      // `caluses` cannot be empty bacause ENFT has at least two state.
       Conj(clauses)
     }
     val connectivity: Formula[X] = {
@@ -52,20 +52,19 @@ object Parikh {
         states.map(q => {
           val unreachable = Conj[X](Seq(Eq(Var(Dist(q)), Const(-1)), Eq(output(q), Const(0))))
           val reachable = {
-            val isInit: Formula[X] =
-              if (q == enft.initial) Eq(Var(Dist(q)), Const(0))
-              else Bot()
-            val reachedFromSomewhere = edgesTo(q).map(e => {
-              val (p, v, _) = e
-              Conj(
-                List[Formula[X]](
-                  Eq(Var(Dist(q)), Add(Seq(Var(Dist(p)), Const(1)))),
-                  Gt(Var(ENum(e)), Const(0)),
-                  Ge(Var(Dist(p)), Const(0))
+            val isInit: Formula[X] = if (q == enft.initial) Eq(Var(Dist(q)), Const(0)) else Bot()
+            val reachedFromSomewhere = edgesTo(q).map {
+              case e @ (p, v, _) => {
+                Conj(
+                  Seq[Formula[X]](
+                    Eq(Var(Dist(q)), Add(Seq(Var(Dist(p)), Const(1)))),
+                    Gt(Var(ENum(e)), Const(0)),
+                    Ge(Var(Dist(p)), Const(0))
+                  )
                 )
-              )
-            })
-            Disj(reachedFromSomewhere.appended(isInit))
+              }
+            }
+            Disj(isInit +: reachedFromSomewhere)
           }
           Disj(Seq(unreachable, reachable))
         })
@@ -74,11 +73,8 @@ object Parikh {
     val bs = edges.foldLeft[Set[B]](Set.empty) { case (acc, (_, v, _)) => acc union v.keySet }
     val parikh: Formula[X] = {
       val clauses = bs.toSeq.map[Formula[X]](b => {
-        val sum: Term[X] = Add(
-          edges.map[Term[X]] {
-            case (q, v, r) => Mult(Const(v.getOrElse(b, 0)), Var(ENum((q, v, r))))
-          }
-        )
+        val bNums = edges.map[Term[X]] { case e @ (q, v, r) => Mult(Const(v.getOrElse(b, 0)), Var(ENum(e))) }
+        val sum: Term[X] = Add(bNums)
         Eq(Var(BNum(b)), sum)
       })
       Conj(clauses)
@@ -92,7 +88,7 @@ object Parikh {
         case Dist(q) => Ge(Var(Dist(q)), Const(-1))
       }
     )
-    val conj: Formula[X] = Conj(List(euler, connectivity, parikh, positive))
+    val conj: Formula[X] = Conj(Seq(euler, connectivity, parikh, positive))
     Exists(boundedVars.map(Var.apply), conj)
   }
 }

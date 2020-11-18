@@ -120,6 +120,7 @@ case class NSST[Q, A, B, X](
 
   implicit val monoid: Monoid[Update[X, B]] = variables
   val outF: Map[Q, Set[Cupstar[X, B]]] = partialF.withDefaultValue(Set())
+  val outGraph: List[(Q, Cupstar[X, B])] = mapToGraph(partialF)(identity).toList
   val out: Set[B] = Set.from {
     for {
       (_, _, m, _) <- edges;
@@ -328,12 +329,10 @@ case class NSST[Q, A, B, X](
   // Returns SST S' that satisfies the following condition:
   // for all w, S'(w) contains w'b (here b is in bs) iff there exist w' and w'' s.t. S(w) contains w' b w''.
   def sstEndsWith(bs: Set[B]): NSST[(Q, Option[X]), A, B, X] = {
-    val outGraph = mapToGraph(outF)(identity).toList
     val newOutF = {
       val graph =
         for {
-          (q, vs) <- outF
-          xbs <- vs
+          (q, xbs) <- outGraph
           i <- 0 until xbs.length
         } yield xbs(i) match {
           case Cop1(x)          => Some(((q, Some(x)), xbs.take(i + 1)))
@@ -409,8 +408,6 @@ case class NSST[Q, A, B, X](
   /**
     * Returns CA that reads input w$ and outputs integer n s.t.
     * there exists word w' this SST outputs when it reads w and len(w') == n.
-    *
-    * @return
     */
   def lengthCA: CounterAutomaton[Option[(Q, Set[X])], Option[A]] = {
     val newOutF: Map[(Q, Set[X]), Set[Int]] = {
@@ -757,10 +754,7 @@ object NSST {
       }
     }
     val outF: Map[NQ, Set[V]] = graphToMap {
-      for {
-        (q, s) <- nsst.outF.toSet
-        alpha <- s
-      } yield (q, varsIn(alpha)) -> charsVecOf(alpha)
+      nsst.outGraph.map { case (q, alpha) => (q, varsIn(alpha)) -> charsVecOf(alpha) }
     }(identity)
     var newStates = collection.mutable.Set.from(outF.keySet)
     var newEdges: List[(NQ, A, V, NQ)] = Nil
@@ -804,6 +798,142 @@ object NSST {
       newEdges.toSet,
       q0,
       newF
+    )
+  }
+}
+
+/** Nondeterministic monoid SST */
+class MSST[Q, A, B, X, Y](
+    val states: Set[Q],
+    val in: Set[A],
+    val xs: Set[X],
+    val ys: Set[Y],
+    val edges: MSST.Edges[Q, A, B, X, Y],
+    val q0: Q,
+    val partialF: Map[Q, Set[(Concepts.Cupstar[X, Concepts.Update[Y, B]], Concepts.Cupstar[Y, B])]]
+) {
+  import Concepts._
+  implicit val updateXMonoid: Monoid[Update[X, Update[Y, B]]] = xs
+  implicit val updateYMonoid: Monoid[Update[Y, B]] = ys
+  val outF = partialF.withDefaultValue(Set())
+  def transOne(q: Q, a: A): Set[(Q, Update[X, Update[Y, B]])] =
+    edges.withDefaultValue(Set.empty)((q, a))
+  def transition(qs: Set[Q], w: List[A]): Set[(Q, Update[X, Update[Y, B]])] =
+    Monoid.transition(qs, w, (q: Q, a: A) => transOne(q, a))
+  def outputAt(q: Q, m: Update[X, Update[Y, B]]): Set[List[B]] =
+    outF(q).map {
+      case (alpha, beta) =>
+        val updateY = Monoid.fold(erase1(flatMap1(alpha, m(_))))
+        erase1(flatMap1(beta, updateY))
+    }
+  def transduce(w: List[A]): Set[List[B]] =
+    transition(Set(q0), w).flatMap { case (q, m) => outputAt(q, m) }
+}
+
+object MSST {
+  import Concepts._
+  import Monoid.fold
+  type Edges[Q, A, B, X, Y] = Map[(Q, A), Set[(Q, Update[X, Update[Y, B]])]]
+
+  def convertMsstToNsst[Q, A, B, X, Y](
+      msst: MSST[Q, A, B, X, Y]
+  )(implicit logger: CompositionLogger): NSST[(Q, Map[X, M1[Y]]), A, B, (X, Y, Boolean)] = {
+    type S = Map[X, M1[Y]]
+    type NQ = (Q, S)
+    type Z = (X, Y, Boolean)
+    val xs = msst.xs
+    val ys = msst.ys
+    val zs: Set[Z] = for (x <- xs; y <- ys; b <- List(true, false)) yield (x, y, b)
+    implicit val updateYMonoid: Monoid[Update[Y, Cop[Z, B]]] = ys
+
+    def iota(s: S)(x: X): Update[Y, Cop[Z, B]] = {
+      val prePost =
+        for (y <- ys; b <- List(false, true))
+          yield ((y, b) -> (if (b) List((x, y, b))
+                            else List((x, y, b))))
+      gamma(ys)(s(x), prePost.toMap).view
+        .mapValues(_.map { case Cop1(y) => Cop1(y); case Cop2(z) => Cop2(Cop1(z)) })
+        .toMap
+    }
+
+    def embedUpdate[X, A, B](m: Update[X, B]): Update[X, Cop[A, B]] = {
+      m.view
+        .mapValues(_.map {
+          case Cop1(x) => Cop1(x)
+          case Cop2(b) => Cop2(Cop2(b))
+        })
+        .toMap
+    }
+
+    def assignFold(s: S, alpha: Cupstar[X, Update[Y, B]]): Update[Y, Cop[Z, B]] = {
+      val iotaS = iota(s) _
+      val ms: List[Update[Y, Cop[Z, B]]] = alpha.map {
+        case Cop1(x) => iotaS(x)
+        case Cop2(m) => embedUpdate(m)
+      }
+      fold(ms)
+    }
+
+    def nextState(s: S, mu: Update[X, Update[Y, B]]): (S, Update[Z, B]) = {
+      val cache = xs.map(x => x -> proj(assignFold(s, mu(x)))).toMap
+      val nextS = cache.map { case (x, (perm, _)) => x -> perm }
+      val nextU: Update[Z, B] = zs.map { case (x, y, b) => (x, y, b) -> cache(x)._2(y, b) }.toMap
+      (
+        nextS,
+        nextU
+      )
+    }
+
+    def nextStates(q: NQ, a: A): Set[(NQ, Update[Z, B])] = q match {
+      case (q, s) =>
+        msst
+          .transOne(q, a)
+          .map {
+            case (nextQ, mu) => {
+              val (nextS, update) = nextState(s, mu)
+              ((nextQ, nextS), update)
+            }
+          }
+    }
+
+    val newQ0 = {
+      val id = ys.map(y => y -> List(y)).toMap
+      val const = xs.map(x => x -> id).toMap
+      (msst.q0, const)
+    }
+    var newStates: Set[NQ] = Set(newQ0)
+    var newEdges: List[(NQ, A, Update[Z, B], NQ)] = Nil
+    var stack = List(newQ0)
+    while (stack.nonEmpty) {
+      val q = stack.head
+      stack = stack.tail
+      for (a <- msst.in) {
+        val nexts = nextStates(q, a)
+        newEdges ++:= nexts.map { case (r, m) => (q, a, m, r) }
+        val newOnes = nexts.map(_._1) -- newStates
+        newStates ++= newOnes
+        stack ++:= newOnes.toList
+      }
+    }
+    val newOutF: Map[NQ, Set[Cupstar[Z, B]]] = {
+      for ((q, s) <- newStates) yield (q, s) -> msst.outF(q).map {
+        case (alpha, beta) =>
+          val m = assignFold(s, alpha)
+          val assigned = beta.flatMap {
+            case Cop1(y) => m(y)
+            case Cop2(b) => List(Cop2(Cop2(b)))
+          }
+          erase1(assigned)
+      }
+    }.toMap
+
+    NSST[NQ, A, B, Z](
+      newStates,
+      msst.in,
+      zs,
+      newEdges.toSet,
+      newQ0,
+      newOutF
     )
   }
 }
@@ -1151,142 +1281,6 @@ class ENFT[Q, A, M: Monoid](
       queue ++= added
     }
     throw new Exception("No input string gives wanted thing.")
-  }
-}
-
-/** Nondeterministic monoid SST */
-class MSST[Q, A, B, X, Y](
-    val states: Set[Q],
-    val in: Set[A],
-    val xs: Set[X],
-    val ys: Set[Y],
-    val edges: MSST.Edges[Q, A, B, X, Y],
-    val q0: Q,
-    val partialF: Map[Q, Set[(Concepts.Cupstar[X, Concepts.Update[Y, B]], Concepts.Cupstar[Y, B])]]
-) {
-  import Concepts._
-  implicit val updateXMonoid: Monoid[Update[X, Update[Y, B]]] = xs
-  implicit val updateYMonoid: Monoid[Update[Y, B]] = ys
-  val outF = partialF.withDefaultValue(Set())
-  def transOne(q: Q, a: A): Set[(Q, Update[X, Update[Y, B]])] =
-    edges.withDefaultValue(Set.empty)((q, a))
-  def transition(qs: Set[Q], w: List[A]): Set[(Q, Update[X, Update[Y, B]])] =
-    Monoid.transition(qs, w, (q: Q, a: A) => transOne(q, a))
-  def outputAt(q: Q, m: Update[X, Update[Y, B]]): Set[List[B]] =
-    outF(q).map {
-      case (alpha, beta) =>
-        val updateY = Monoid.fold(erase1(flatMap1(alpha, m(_))))
-        erase1(flatMap1(beta, updateY))
-    }
-  def transduce(w: List[A]): Set[List[B]] =
-    transition(Set(q0), w).flatMap { case (q, m) => outputAt(q, m) }
-}
-
-object MSST {
-  import Concepts._
-  import Monoid.fold
-  type Edges[Q, A, B, X, Y] = Map[(Q, A), Set[(Q, Update[X, Update[Y, B]])]]
-
-  def convertMsstToNsst[Q, A, B, X, Y](
-      msst: MSST[Q, A, B, X, Y]
-  )(implicit logger: CompositionLogger): NSST[(Q, Map[X, M1[Y]]), A, B, (X, Y, Boolean)] = {
-    type S = Map[X, M1[Y]]
-    type NQ = (Q, S)
-    type Z = (X, Y, Boolean)
-    val xs = msst.xs
-    val ys = msst.ys
-    val zs: Set[Z] = for (x <- xs; y <- ys; b <- List(true, false)) yield (x, y, b)
-    implicit val updateYMonoid: Monoid[Update[Y, Cop[Z, B]]] = ys
-
-    def iota(s: S)(x: X): Update[Y, Cop[Z, B]] = {
-      val prePost =
-        for (y <- ys; b <- List(false, true))
-          yield ((y, b) -> (if (b) List((x, y, b))
-                            else List((x, y, b))))
-      gamma(ys)(s(x), prePost.toMap).view
-        .mapValues(_.map { case Cop1(y) => Cop1(y); case Cop2(z) => Cop2(Cop1(z)) })
-        .toMap
-    }
-
-    def embedUpdate[X, A, B](m: Update[X, B]): Update[X, Cop[A, B]] = {
-      m.view
-        .mapValues(_.map {
-          case Cop1(x) => Cop1(x)
-          case Cop2(b) => Cop2(Cop2(b))
-        })
-        .toMap
-    }
-
-    def assignFold(s: S, alpha: Cupstar[X, Update[Y, B]]): Update[Y, Cop[Z, B]] = {
-      val iotaS = iota(s) _
-      val ms: List[Update[Y, Cop[Z, B]]] = alpha.map {
-        case Cop1(x) => iotaS(x)
-        case Cop2(m) => embedUpdate(m)
-      }
-      fold(ms)
-    }
-
-    def nextState(s: S, mu: Update[X, Update[Y, B]]): (S, Update[Z, B]) = {
-      val cache = xs.map(x => x -> proj(assignFold(s, mu(x)))).toMap
-      val nextS = cache.map { case (x, (perm, _)) => x -> perm }
-      val nextU: Update[Z, B] = zs.map { case (x, y, b) => (x, y, b) -> cache(x)._2(y, b) }.toMap
-      (
-        nextS,
-        nextU
-      )
-    }
-
-    def nextStates(q: NQ, a: A): Set[(NQ, Update[Z, B])] = q match {
-      case (q, s) =>
-        msst
-          .transOne(q, a)
-          .map {
-            case (nextQ, mu) => {
-              val (nextS, update) = nextState(s, mu)
-              ((nextQ, nextS), update)
-            }
-          }
-    }
-
-    val newQ0 = {
-      val id = ys.map(y => y -> List(y)).toMap
-      val const = xs.map(x => x -> id).toMap
-      (msst.q0, const)
-    }
-    var newStates: Set[NQ] = Set(newQ0)
-    var newEdges: List[(NQ, A, Update[Z, B], NQ)] = Nil
-    var stack = List(newQ0)
-    while (stack.nonEmpty) {
-      val q = stack.head
-      stack = stack.tail
-      for (a <- msst.in) {
-        val nexts = nextStates(q, a)
-        newEdges ++:= nexts.map { case (r, m) => (q, a, m, r) }
-        val newOnes = nexts.map(_._1) -- newStates
-        newStates ++= newOnes
-        stack = newOnes.toList ++ stack
-      }
-    }
-    val newOutF: Map[NQ, Set[Cupstar[Z, B]]] = {
-      for ((q, s) <- newStates) yield (q, s) -> msst.outF(q).map {
-        case (alpha, beta) =>
-          val m = assignFold(s, alpha)
-          val assigned = beta.flatMap {
-            case Cop1(y) => m(y)
-            case Cop2(b) => List(Cop2(Cop2(b)))
-          }
-          erase1(assigned)
-      }
-    }.toMap
-
-    NSST[NQ, A, B, Z](
-      newStates,
-      msst.in,
-      zs,
-      newEdges.toSet,
-      newQ0,
-      newOutF
-    )
   }
 }
 
