@@ -49,7 +49,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
     val (mx, ml) = m
     outF(q).flatMap {
       case (xbs, lv) =>
-        val lMap = PresburgerSST.applyIUpdate(ml, lv)
+        val lMap = mlMonoid.combine(ml, lv)
         if (evalFormula(lMap, n)) Some(Concepts.erase1(Concepts.flatMap1(xbs, mx)))
         else None
     }
@@ -64,10 +64,6 @@ case class PresburgerSST[Q, A, B, X, L, I](
     val lMap = (ls.zipWithIndex).toMap
     def renameXbs(xbs: XBS): Cupstar[Int, B] = xbs.map(_.map1(xMap))
     def renameLVal(lv: LVal): Map[Int, Int] = lv.map { case (l, n) => lMap(l) -> n }
-    def renameML(ml: UpdateL): PresburgerSST.IUpdate[Int] = ml.map {
-      case (l, (s, n)) =>
-        (lMap(l), (s.map(lMap), n))
-    }
     val newEdges =
       edges
         .flatMap {
@@ -77,7 +73,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
                 stateMap(q),
                 a,
                 mx.map { case (x, xbs) => xMap(x) -> renameXbs(xbs) },
-                renameML(ml),
+                renameLVal(ml),
                 stateMap(r)
               )
             )
@@ -99,57 +95,110 @@ case class PresburgerSST[Q, A, B, X, L, I](
     )
   }
 
-  // lazy val usedVarsAt: Map[Q, (Set[X], Set[L])] = {
-  //   import scala.collection.mutable.{Map => MMap, Set => MSet}
-  //   val res: MMap[Q, MSet[X]] = MMap
-  //     .from {
-  //       outF.view.mapValues { case s => MSet.from { s.flatMap(Concepts.varsIn) } }
-  //     }
-  //     .withDefault(_ => MSet.empty)
-  //   var updated = false
-  //   do {
-  //     updated = false
-  //     for ((q, _, m, r) <- edges) {
-  //       val addToQ = res(r).flatMap(x => varsIn(m(x)))
-  //       if (!(addToQ subsetOf res(q))) {
-  //         updated = true
-  //         val atQ = res(q)
-  //         res(q) = atQ ++ addToQ
-  //       }
-  //     }
-  //   } while (updated)
+  def endWith(bs: Set[B]): PresburgerSST[(Q, Option[X]), A, B, X, L, I] = {
+    val newOutGraph = outGraph.flatMap {
+      case (q, xbs, v) =>
+        xbs.zipWithIndex.flatMap {
+          case (Cop1(x), i)          => Some((q, Some(x)), xbs.take(i + 1), v)
+          case (Cop2(b), i) if bs(b) => Some((q, None), xbs.take(i + 1), v)
+          case _                     => None
+        }
+    }
+    type NQ = (Q, Option[X])
+    val backTrans = NSST.graphToMap(edges) { case (q, a, mx, mh, r) => (r, a) -> (q, mx, mh) }
+    def prevStates(nq: NQ, a: A): Iterable[(NQ, Update[X, B], PresburgerSST.IUpdate[L])] = {
+      // q -[a / (mx, mh)]-> r
+      val (r, x) = nq
+      x match {
+        case Some(x) => {
+          // If q -[a / (mx, mh)]-> r and mx(x) = u y v, then
+          // (q, y) -[a / (m[x mapsto u y], mh)]-> (r, x)
+          val assignY =
+            for {
+              (q, mx, mh) <- backTrans((r, a))
+              (y, uy) <- {
+                val mxx = mx(x)
+                mxx.zipWithIndex.flatMap {
+                  case (Cop1(y), i) => Some((y, mxx.take(i + 1)))
+                  case _            => None
+                }
+              }
+            } yield ((q, Some(y)), mx + (x -> uy), mh)
+          // Also, if q -[a / (mx, mh)]-> r and mx(x) = u b v and b is in bs,
+          // then (q, _) -[a / (m[x mapsto u b], mh)]-> (r, x)
+          val assignB =
+            for {
+              (q, mx, mh) <- backTrans(r, a)
+              ub <- {
+                val mxx = mx(x)
+                mxx.zipWithIndex.flatMap {
+                  case (Cop2(b), i) if bs(b) => Some(mxx.take(i + 1))
+                  case _                     => None
+                }
+              }
+            } yield ((q, None), mx + (x -> ub), mh)
+          assignY ++ assignB
+        }
+        case None => backTrans((r, a)).map { case (q, mx, mh) => ((q, None), mx, mh) }
+      }
+    }
+    val newStates = collection.mutable.Set.from(newOutGraph.map(_._1))
+    var newEdges: List[(NQ, A, Update[X, B], PresburgerSST.IUpdate[L], NQ)] = Nil
+    var stack = newStates.toList
+    while (stack.nonEmpty) {
+      val h = stack.head
+      stack = stack.tail
+      for {
+        a <- inSet
+        (q, mx, mh) <- prevStates(h, a)
+      } {
+        newEdges ::= (q, a, mx, mh, h)
+        if (newStates.add(q)) {
+          stack ::= q
+        }
+      }
+    }
+    PresburgerSST(newStates.toSet, inSet, xs, ls, is, newEdges.toSet, (q0, None), newOutGraph, acceptFormulas)
+  }
 
-  //   Map.from { res.map { case (q, s) => q -> Set.from(s) } }.withDefaultValue(Set.empty)
-  // }
-  // TODO
-  // def getNonEmpty(): Map[T, Set[S]]
-  lazy val nonEmptyVarsAt: Map[Q, (Set[X], Set[L])] = {
+  // ParikhAutomaton shares inSet (input alphabet), ls (log variables), is (integer variables),
+  // and acceptFormulas with PSST.
+  // This ParikhAutomaton has non-standard semantics specialized to decide whether a PSST is functional.
+  case class ParikhAutomaton[Q](
+      states: Set[Q],
+      edges: Set[(Q, A, Int, Map[L, Int], Q)],
+      q0: Q,
+      finalStates: Set[Q]
+  ) {
+    val trans = graphToMap(edges) { case (q, a, n, lv, r) => (q, a) -> (n, lv, r) }
+
+    def diff[R](that: ParikhAutomaton[R]): ParikhAutomaton[(Q, R)] = {
+      val newQ0 = (q0, that.q0)
+      ???
+    }
+  }
+
+  lazy val nonEmptyVarsAt: Map[Q, Set[X]] = {
     import scala.collection.mutable.{Map => MMap, Set => MSet}
-    val res: MMap[Q, (MSet[X], MSet[L])] = MMap.empty.withDefault(_ => (MSet.empty, MSet.empty))
+    val res: MMap[Q, MSet[X]] = MMap.empty.withDefault(_ => MSet.empty)
     def charExistsIn(xbs: XBS): Boolean = xbs.exists(_.is2)
     var updated = false
     do {
       updated = false
       for ((q, _, mx, ml, r) <- edges) {
         val charAssignedX = xs.filter(x => charExistsIn(mx(x)))
-        val nonZeroAssignedL = ls.filter(l => ml(l)._2 != 0)
-        val nonEmptyXAssigned = xs.filter(x => Concepts.varsIn(mx(x)).exists(res(q)._1.contains))
-        val nonEmptyLAssigned = ls.filter(l => ml(l)._1.exists(res(q)._2.contains))
+        val nonEmptyXAssigned = xs.filter(x => Concepts.varsIn(mx(x)).exists(res(q).contains))
         val addX = charAssignedX ++ nonEmptyXAssigned
-        val addL = nonZeroAssignedL ++ nonEmptyLAssigned
-        val (resX, resL) = res(r)
-        if (!(addX subsetOf resX) || !(addL subsetOf resL)) {
+        val resX = res(r)
+        if (!(addX subsetOf resX)) {
           updated = true
           resX.addAll(addX)
-          resL.addAll(addL)
-          res(r) = (resX, resL)
+          res(r) = resX
         }
       }
     } while (updated)
 
-    Map
-      .from { res.map { case (q, (x, l)) => q -> (x.toSet, l.toSet) } }
-      .withDefaultValue((Set.empty, Set.empty))
+    Map.from { res.map { case (q, s) => q -> s.toSet } }.withDefaultValue(Set.empty)
   }
 
   def composeNsstsToMsst[R, C, Y, K](
@@ -250,7 +299,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
             kt.map {
               case (x, (k, t)) =>
                 // Variables always empty at state q can be ignored
-                val (nonEmptyAtQ, _) = n1.nonEmptyVarsAt(q)
+                val nonEmptyAtQ = n1.nonEmptyVarsAt(q)
                 val filtered: Cupstar[X, B] = mx(x).filter {
                   case Cop1(x) => nonEmptyAtQ(x)
                   case _       => true
@@ -277,7 +326,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
         (q1, xbs, lv) <- n1.outGraph
         (q2, s2) <- outF2
         (kt, xms) <- {
-          val (nonEmptyAtQ1, _) = n1.nonEmptyVarsAt(q1)
+          val nonEmptyAtQ1 = n1.nonEmptyVarsAt(q1)
           val filtered = xbs.filter { case Cop1(x) => nonEmptyAtQ1(x); case _ => true }
           possiblePreviousOf(n2.q0, q2, invTransB, invTransX(q1), filtered)
         }
@@ -374,6 +423,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
       ],
       acceptFormulas: Seq[Presburger.Formula[Either[I, Cop[L, K]]]]
   ) {
+    type YCS = Cupstar[Y, C]
     type UpdateY = Update[Y, C]
     type UpdateK = PresburgerSST.IUpdate[K]
     type UpdateYK = (UpdateY, UpdateK)
@@ -401,8 +451,8 @@ case class PresburgerSST[Q, A, B, X, L, I](
         case (xmms, ycs, lv, kv) =>
           val mxys = Concepts.erase1(Concepts.flatMap1(xmms, mx))
           val (my, mk) = Monoid.fold(mxys)(mykMonoid)
-          val klMap = PresburgerSST.applyIUpdate(ml, lv).map { case (l, n) => Cop1(l) -> n } ++
-            PresburgerSST.applyIUpdate(mk, kv).map { case (k, n)           => Cop2(k) -> n }
+          val klMap = mlMonoid.combine(ml, lv).map { case (l, n) => Cop1(l) -> n } ++
+            mkMonoid.combine(mk, kv).map { case (k, n)           => Cop2(k) -> n }
           if (evalFormula(klMap.toMap, n)) Some(Concepts.erase1(Concepts.flatMap1(ycs, my)))
           else None
       }
@@ -410,58 +460,27 @@ case class PresburgerSST[Q, A, B, X, L, I](
     def transduce(w: Seq[A], n: Map[I, Int]): Set[Seq[C]] = transition(Set(q0), w).flatMap {
       case (q, m) => outputAt(q, m, n)
     }
-    def toPresburgerSST
-        : PresburgerSST[(Q, Map[X, (Map[Y, List[Y]], Map[K, Set[K]])]), A, C, (X, Y, Boolean), Either[
-          L,
-          (X, K)
-        ], I] = {
+    def toPresburgerSST: PresburgerSST[(Q, Map[X, Map[Y, List[Y]]]), A, C, (X, Y, Boolean), Cop[L, K], I] = {
       import Concepts.{erase1, erase2, updateMonoid}
+      import MSST.{gamma, proj}
       type Edges =
         Set[(Q, A, Update[X, (Update[Y, C], PresburgerSST.IUpdate[K])], PresburgerSST.IUpdate[L], Q)]
       type M1Y = Map[Y, List[Y]]
-      type M1K = Map[K, Set[K]]
-      type M1 = (M1Y, M1K)
       type M2Y = Map[(Y, Boolean), List[C]]
-      type S = Map[X, M1]
+      type S = Map[X, M1Y]
       type NQ = (Q, S)
       type Z = (X, Y, Boolean)
-      type J = Either[L, (X, K)]
+      type J = Cop[L, K]
+
+      type ZCS = Cupstar[Z, C]
+      type UpdateZ = Update[Z, C]
+      type JVal = Map[J, Int]
+      type UpdateJ = PresburgerSST.IUpdate[J]
       // Construct PresburgerSST[NQ, A, C, Z, J, I].
       val zs: Set[Z] = for (x <- xs; y <- ys; b <- List(true, false)) yield (x, y, b)
-      val js: Set[J] = ls.map(Left.apply) ++ (for (x <- xs; k <- ks) yield Right(x, k))
+      val js: Set[J] = ls.map(Cop1.apply) ++ ks.map(Cop2.apply)
 
-      def gamma(
-          permutation: M1Y,
-          prePost: M2Y
-      ): Update[Y, A] = {
-        val (front, back) = ys
-          .map(x =>
-            (
-              x -> prePost((x, false)).map(Cop2(_)).appended(Cop1(x)),
-              x -> (Cop1(x) :: prePost((x, true)).map(Cop2(_)))
-            )
-          )
-          .unzip
-        val mid: Update[X, A] = permutation.map { case (x, ys) => x -> ys.map(Cop1(_)) }
-        Monoid.fold(List(front.toMap, mid, back.toMap))(ys)
-      }
-
-      def proj[X, A](m: Update[X, A]): (M1[X], M2[X, A]) = {
-        def aux(x: X, l: List[Cop[X, A]]): M2[X, A] = {
-          l.foldRight(List((x, true) -> List[A]())) {
-              case (Cop1(x), acc)             => ((x, false) -> Nil) :: acc
-              case (Cop2(a), (xb, as) :: acc) => (xb -> (a :: as)) :: acc
-              case _                          => throw new Exception("This must not happen")
-            }
-            .toMap
-        }
-
-        (
-          m.map { case (x, xas)     => x -> erase2(xas) }.withDefaultValue(Nil),
-          m.flatMap { case (x, xas) => aux(x, xas) }.withDefaultValue(Nil)
-        )
-      }
-      def iota(s: S)(x: X): Update[Y, Cop[Z, B]] = {
+      def iota(s: S)(x: X): Update[Y, Cop[Z, C]] = {
         val prePost =
           for (y <- ys; b <- List(false, true))
             yield ((y, b) -> (if (b) List((x, y, b))
@@ -471,7 +490,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
           .toMap
       }
 
-      def embedUpdate[X, A, B](m: Update[X, B]): Update[X, Cop[A, B]] = {
+      def embedUpdate[X, A, C](m: Update[X, C]): Update[X, Cop[A, C]] = {
         m.view
           .mapValues(_.map {
             case Cop1(x) => Cop1(x)
@@ -480,33 +499,41 @@ case class PresburgerSST[Q, A, B, X, L, I](
           .toMap
       }
 
-      def assignFold(s: S, alpha: Cupstar[X, Update[Y, B]]): Update[Y, Cop[Z, B]] = {
+      val mykMonoidEmbed: Monoid[(Update[Y, Cop[Z, C]], UpdateK)] =
+        Monoid.productMonoid(Concepts.updateMonoid(ys), mkMonoid)
+      def assignFold(s: S, alpha: Cupstar[X, UpdateYK]): (Update[Y, Cop[Z, C]], UpdateK) = {
         val iotaS = iota(s) _
-        val ms: List[Update[Y, Cop[Z, B]]] = alpha.map {
-          case Cop1(x) => iotaS(x)
-          case Cop2(m) => embedUpdate(m)
+        val ms: List[(Update[Y, Cop[Z, C]], UpdateK)] = alpha.map {
+          case Cop1(x)        => (iotaS(x), mkMonoid.unit)
+          case Cop2((my, mk)) => (embedUpdate(my), mk)
         }
-        Monoid.fold(ms)
+        Monoid.fold(ms)(mykMonoidEmbed)
       }
 
-      def nextState(s: S, mu: Update[X, Update[Y, B]]): (S, Update[Z, B]) = {
-        val cache = xs.map(x => x -> proj(assignFold(s, mu(x)))).toMap
-        val nextS = cache.map { case (x, (perm, _)) => x -> perm }
-        val nextU: Update[Z, B] = zs.map { case (x, y, b) => (x, y, b) -> cache(x)._2(y, b) }.toMap
-        (
-          nextS,
-          nextU
-        )
+      def nextState(s: S, mu: UpdateX, ml: UpdateL): (S, Update[Z, C], UpdateJ) = {
+        val cache = xs
+          .map(x =>
+            x -> {
+              val (my, mk) = assignFold(s, mu(x))
+              val (p1, p2) = proj(my)
+              (p1, p2, mk)
+            }
+          )
+          .toMap
+        val nextS = cache.map { case (x, (perm, _, _)) => x -> perm }
+        val mz = zs.map { case (x, y, b) => (x, y, b) -> cache(x)._2(y, b) }.toMap
+        val mj = ??? //  <-- This cannot be defined.
+        (nextS, mz, mj)
       }
 
-      def nextStates(q: NQ, a: A): Set[(NQ, Update[Z, C])] = q match {
+      def nextStates(q: NQ, a: A): Set[(NQ, UpdateZ, UpdateJ)] = q match {
         case (q, s) =>
-          msst
-            .transOne(q, a)
+          this
+            .trans(q, a)
             .map {
-              case (nextQ, mu) => {
-                val (nextS, update) = nextState(s, mu)
-                ((nextQ, nextS), update)
+              case (nextQ, (mx, ml)) => {
+                val (nextS, mz, mj) = nextState(s, mx, ml)
+                ((nextQ, nextS), mz, mj)
               }
             }
       }
@@ -514,33 +541,40 @@ case class PresburgerSST[Q, A, B, X, L, I](
       val newQ0 = {
         val id = ys.map(y => y -> List(y)).toMap
         val const = xs.map(x => x -> id).toMap
-        (msst.q0, const)
+        (q0, const)
       }
       var newStates: Set[NQ] = Set(newQ0)
-      var newEdges: List[(NQ, A, Update[Z, B], NQ)] = Nil
+      var newEdges: List[(NQ, A, UpdateZ, UpdateJ, NQ)] = Nil
       var stack = List(newQ0)
       while (stack.nonEmpty) {
         val q = stack.head
         stack = stack.tail
-        for (a <- msst.in) {
+        for (a <- inSet) {
           val nexts = nextStates(q, a)
-          newEdges ++:= nexts.map { case (r, m) => (q, a, m, r) }
+          newEdges ++:= nexts.map { case (r, mz, mj) => (q, a, mz, mj, r) }
           val newOnes = nexts.map(_._1) -- newStates
           newStates ++= newOnes
           stack ++:= newOnes.toList
         }
       }
-      val newOutF: Map[NQ, Set[Cupstar[Z, B]]] = {
-        for ((q, s) <- newStates) yield (q, s) -> msst.outF(q).map {
-          case (alpha, beta) =>
-            val m = assignFold(s, alpha)
-            val assigned = beta.flatMap {
-              case Cop1(y) => m(y)
-              case Cop2(b) => List(Cop2(Cop2(b)))
+      val newOutGraph: Set[(NQ, ZCS, JVal)] = {
+        for {
+          nq @ (q, s) <- newStates.toSet
+          (xmms, ycs, lv, kv) <- outF(q)
+        } yield {
+          val (my, mk) = assignFold(s, xmms)
+          val assigned = ycs.flatMap {
+            case Cop1(y) => my(y)
+            case Cop2(b) => List(Cop2(Cop2(b)))
+          }
+          val v: Iterable[(Cop[L, K], Int)] = lv.map { case (l, n) => Cop1(l) -> n } ++ mkMonoid
+            .combine(mk, kv)
+            .map {
+              case (k, n) => Cop2(k) -> n
             }
-            erase1(assigned)
+          (nq, erase1(assigned), v.toMap)
         }
-      }.toMap
+      }
 
       PresburgerSST[NQ, A, C, Z, J, I](
         newStates,
@@ -550,94 +584,15 @@ case class PresburgerSST[Q, A, B, X, L, I](
         is,
         newEdges.toSet,
         newQ0,
-        newOutF,
-        ??? // <--- This can not be defined.
+        newOutGraph,
+        acceptFormulas
       )
     }
   }
-  // def endWith(bs: Set[B]): PresburgerSST[(Q, Option[X]), A, B, X, H, I] = {
-  //   val newOutGraph = outGraph.flatMap {
-  //     case (q, xbs, v) =>
-  //       xbs.zipWithIndex.flatMap {
-  //         case (Cop1(x), i)          => Some((q, Some(x)), xbs.take(i + 1), v)
-  //         case (Cop2(b), i) if bs(b) => Some((q, None), xbs.take(i + 1), v)
-  //         case _                     => None
-  //       }
-  //   }
-  //   type NQ = (Q, Option[X])
-  //   val backTrans = NSST.graphToMap(edges) { case (q, a, mx, mh, r) => (r, a) -> (q, mx, mh) }
-  //   def prevStates(nq: NQ, a: A): Iterable[(NQ, Update[X, B], Update[H, Int])] = {
-  //     // q -[a / (mx, mh)]-> r
-  //     val (r, x) = nq
-  //     x match {
-  //       case Some(x) => {
-  //         // If q -[a / (mx, mh)]-> r and mx(x) = u y v, then
-  //         // (q, y) -[a / (m[x mapsto u y], mh)]-> (r, x)
-  //         val assignY =
-  //           for {
-  //             (q, mx, mh) <- backTrans((r, a))
-  //             (y, uy) <- {
-  //               val mxx = mx(x)
-  //               mxx.zipWithIndex.flatMap {
-  //                 case (Cop1(y), i) => Some((y, mxx.take(i + 1)))
-  //                 case _            => None
-  //               }
-  //             }
-  //           } yield ((q, Some(y)), mx + (x -> uy), mh)
-  //         // Also, if q -[a / (mx, mh)]-> r and mx(x) = u b v and b is in bs,
-  //         // then (q, _) -[a / (m[x mapsto u b], mh)]-> (r, x)
-  //         val assignB =
-  //           for {
-  //             (q, mx, mh) <- backTrans(r, a)
-  //             ub <- {
-  //               val mxx = mx(x)
-  //               mxx.zipWithIndex.flatMap {
-  //                 case (Cop2(b), i) if bs(b) => Some(mxx.take(i + 1))
-  //                 case _                     => None
-  //               }
-  //             }
-  //           } yield ((q, None), mx + (x -> ub), mh)
-  //         assignY ++ assignB
-  //       }
-  //       case None => backTrans((r, a)).map { case (q, mx, mh) => ((q, None), mx, mh) }
-  //     }
-  //   }
-  //   val newStates = collection.mutable.Set.from(newOutGraph.map(_._1))
-  //   var newEdges: List[(NQ, A, Update[X, B], Update[H, Int], NQ)] = Nil
-  //   var stack = newStates.toList
-  //   while (stack.nonEmpty) {
-  //     val h = stack.head
-  //     stack = stack.tail
-  //     for {
-  //       a <- inSet
-  //       (q, mx, mh) <- prevStates(h, a)
-  //     } {
-  //       newEdges ::= (q, a, mx, mh, h)
-  //       if (newStates.add(q)) {
-  //         stack ::= q
-  //       }
-  //     }
-  //   }
-  //   PresburgerSST(newStates.toSet, inSet, xs, hs, is, newEdges.toSet, (q0, None), newOutGraph, acceptFormula)
-  // }
 
 }
 
 object PresburgerSST {
-  type IUpdate[L] = Map[L, (Set[L], Int)]
-  def iupdateMonoid[L](ls: Set[L]): Monoid[IUpdate[L]] = new Monoid[IUpdate[L]] {
-    val unitVal = ls.map(l => l -> (Set(l), 0)).toMap
-    val mon: Monoid[(Set[L], Int)] = Monoid.productMonoid(Monoid.setUnionMonoid, Monoid.intAdditiveMonoid)
-    def unit: IUpdate[L] = unitVal
-    def combine(m1: IUpdate[L], m2: IUpdate[L]): IUpdate[L] =
-      ls.map { l =>
-        l -> {
-          val (s, i) = m2(l)
-          s.foldLeft((Set.empty[L], i)) { case (acc, l) => mon.combine(acc, m1(l)) }
-
-        }
-      }.toMap
-  }
-  def applyIUpdate[L](m: IUpdate[L], li: Map[L, Int]): Map[L, Int] =
-    li.map { case (l, i) => l -> { val (_, j) = m(l); i + j } }
+  type IUpdate[L] = Map[L, Int]
+  def iupdateMonoid[L](ls: Set[L]): Monoid[IUpdate[L]] = Monoid.vectorMonoid(ls)(Monoid.intAdditiveMonoid)
 }

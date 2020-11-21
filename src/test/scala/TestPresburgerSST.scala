@@ -16,12 +16,12 @@ class TestPresburgerSST extends AnyFunSuite {
     val idxOutOrNegLen = Disj(Seq(Lt(i, zero), Ge(i, d), Le(l, zero)))
     val inSet = "ab".toSet
     val unit: (Concepts.Update[Int, Char], PresburgerSST.IUpdate[Int]) =
-      (Map(X -> List(Cop1(X))), (1 to 2).map(h => h -> (Set(h), 0)).toMap + (0 -> (Set(0), 1)))
+      (Map(X -> List(Cop1(X))), (1 to 2).map(h => h -> 0).toMap + (0 -> 1))
     val edges = inSet
       .flatMap { a =>
         val (unitX, unitH) = unit
-        val seek = (unitX, unitH + (2 -> (Set(2), 1)))
-        val take = (Map(X -> List(Cop1(X), Cop2(a))), unitH + (1 -> (Set(1), 1)))
+        val seek = (unitX, unitH + (2 -> 1))
+        val take = (Map(X -> List(Cop1(X), Cop2(a))), unitH + (1 -> 1))
         val ignore = unit
         Iterable(
           (0, a, seek, 0),
@@ -60,7 +60,8 @@ class TestPresburgerSST extends AnyFunSuite {
   }
   val substr2 = substr("j", "k")
   test("compose") {
-    val composed: PresburgerSST[Int, Char, Char, Int, Int, String] = substr1 compose substr2
+    // val composed: PresburgerSST[Int, Char, Char, Int, Int, String] = substr1 compose substr2
+    val composed = substr1.composeNsstsToMsst(substr1, substr2)(NopLogger)
     assert(composed.transduce("abab".toSeq, Map("i" -> 0, "l" -> 3, "j" -> 1, "k" -> 2)) == Set("ba".toSeq))
     assert(composed.transduce("abab".toSeq, Map("i" -> 2, "l" -> 3, "j" -> 1, "k" -> 2)) == Set("b".toSeq))
     assert(composed.transduce("abab".toSeq, Map("i" -> -2, "l" -> 3, "j" -> 1, "k" -> 2)) == Set("".toSeq))
