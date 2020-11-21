@@ -37,6 +37,30 @@ object Concepts {
     clos
   }
 
+  def searchStates[Q, A, C, E](
+      baseStates: Set[Q],
+      inSet: Set[A]
+  )(nextConfigs: (Q, A) => Iterable[C])(toState: C => Q, toEdge: (Q, A, C) => E): (Set[Q], Set[E]) = {
+    val states = collection.mutable.Set.from(baseStates)
+    var edges: List[E] = Nil
+    var stack: List[Q] = states.toList
+    while (stack.nonEmpty) {
+      val h = stack.head
+      stack = stack.tail
+      for {
+        a <- inSet
+        c <- nextConfigs(h, a)
+      } {
+        edges ::= toEdge(h, a, c)
+        val q = toState(c)
+        if (states.add(q)) {
+          stack ::= q
+        }
+      }
+    }
+    (states.toSet, edges.toSet)
+  }
+
   /** Breadth-first search for an input by which given system can transition to final state. */
   def transitionSystemBFS[Q, A](
       states: Set[Q],
@@ -333,30 +357,12 @@ case class NSST[Q, A, B, X](
         case None => backTrans((r, a)).map { case (q, m) => ((q, None), m) }
       }
     }
-    val newStates = collection.mutable.Set.from(newOutF.keySet)
-    var newEdges: List[(NQ, A, Update[X, B], NQ)] = Nil
-    var stack = newOutF.keySet.toList
-    while (stack.nonEmpty) {
-      val h = stack.head
-      stack = stack.tail
-      for {
-        a <- in
-        (q, m) <- prevStates(h, a)
-      } {
-        newEdges ::= (q, a, m, h)
-        if (newStates.add(q)) {
-          stack ::= q
-        }
-      }
-    }
-    NSST(
-      newStates.toSet,
-      in,
-      variables,
-      newEdges.toSet,
-      (q0, None),
-      newOutF
+
+    val (newStates, newEdges) = Concepts.searchStates(newOutF.keySet, in)(prevStates)(
+      { case (q, m)         => q },
+      { case (r, a, (q, m)) => (q, a, m, r) }
     )
+    NSST(newStates, in, variables, newEdges, (q0, None), newOutF)
   }
 
   /**
@@ -394,20 +400,11 @@ case class NSST[Q, A, B, X](
           )
       }
     }
-    val newStates = collection.mutable.Set.from(finalStates)
-    var newEdges: List[((Q, Set[X]), A, Int, (Q, Set[X]))] = Nil
-    var stack = List.from(finalStates)
-    while (stack.nonEmpty) {
-      val h = stack.head
-      stack = stack.tail
-      for {
-        a <- in
-        (q, n) <- prevStates(h, a)
-      } {
-        newEdges ::= (q, a, n, h)
-        if (newStates.add(q)) stack ::= q
-      }
-    }
+
+    val (newStates, newEdges) = Concepts.searchStates(finalStates, in)(prevStates)(
+      { case (q, _)         => q },
+      { case (r, a, (q, n)) => (q, a, n, r) }
+    )
     val newQ0s = newStates.filter { case (q, _) => q == q0 }
     type R = Option[(Q, Set[X])]
     CounterAutomaton(
@@ -624,23 +621,10 @@ object NSST {
       graphToMap(graph) { case (k, v) => k -> v }
     }
 
-    var states = outF.keySet
-    var edges: List[(NQ, A, Update[X, Update[Y, C]], NQ)] = Nil
-    var stack: List[NQ] = states.toList
-    while (stack.nonEmpty) {
-      val r = stack.head
-      stack = stack.tail
-      for {
-        a <- n1.in;
-        (q, m) <- previousStates(r, a)
-      } {
-        edges ::= ((q, a, m, r))
-        if (!states.contains(q)) {
-          states += q
-          stack ::= q
-        }
-      }
-    }
+    val (states, edges) = Concepts.searchStates(outF.keySet, n1.in)(previousStates)(
+      { case (q, m)         => q },
+      { case (r, a, (q, m)) => (q, a, m, r) }
+    )
 
     val initialStates =
       states.filter { case (q, kt) => q == n1.q0 && kt.forall { case (_, (k, t)) => k == t } }
@@ -710,21 +694,14 @@ object NSST {
     val outF: Map[NQ, Set[V]] = graphToMap {
       nsst.outGraph.map { case (q, alpha) => (q, varsIn(alpha)) -> charsVecOf(alpha) }
     }(identity)
-    var newStates = collection.mutable.Set.from(outF.keySet)
-    var newEdges: List[(NQ, A, V, NQ)] = Nil
-    var stack: List[NQ] = newStates.toList
-    while (stack.nonEmpty) {
-      val r = stack.head
-      stack = stack.tail
-      for (a <- nsst.in; (q, v) <- prevStates(r, a)) {
-        newEdges ::= (q, a, v, r)
-        if (newStates.add(q)) stack ::= q
-      }
-    }
+    val (newStates, newEdges) = Concepts.searchStates(outF.keySet, nsst.in)(prevStates)(
+      { case (q, _)         => q },
+      { case (r, a, (q, m)) => (q, a, m, r) }
+    )
     new MNFT[NQ, A, V](
-      newStates.toSet,
+      newStates,
       nsst.in,
-      newEdges.toSet,
+      newEdges,
       newStates.filter(_._1 == nsst.q0).toSet,
       outF
     )(vectorMonoid).optimized
@@ -890,20 +867,10 @@ object MSST {
       val const = xs.map(x => x -> id).toMap
       (msst.q0, const)
     }
-    var newStates: Set[NQ] = Set(newQ0)
-    var newEdges: List[(NQ, A, Update[Z, B], NQ)] = Nil
-    var stack = List(newQ0)
-    while (stack.nonEmpty) {
-      val q = stack.head
-      stack = stack.tail
-      for (a <- msst.in) {
-        val nexts = nextStates(q, a)
-        newEdges ++:= nexts.map { case (r, m) => (q, a, m, r) }
-        val newOnes = nexts.map(_._1) -- newStates
-        newStates ++= newOnes
-        stack ++:= newOnes.toList
-      }
-    }
+    val (newStates, newEdges) = Concepts.searchStates(Set(newQ0), msst.in)(nextStates)(
+      { case (r, _)         => r },
+      { case (q, a, (r, m)) => (q, a, m, r) }
+    )
     val newOutF: Map[NQ, Set[Cupstar[Z, B]]] = {
       for ((q, s) <- newStates) yield (q, s) -> msst.outF(q).map {
         case (alpha, beta) =>
@@ -947,22 +914,10 @@ case class CounterAutomaton[Q, A](
         (nextR, n2) <- that.trans((r, a))
       } yield ((nextQ, nextR), n1 - n2)
     }
-    val newStates = collection.mutable.Set.from(newQ0s)
-    var newEdges: List[((Q, R), A, Int, (Q, R))] = Nil
-    var stack = List.from(newQ0s)
-    while (stack.nonEmpty) {
-      val h = stack.head
-      stack = stack.tail
-      for {
-        a <- inSet
-        (qr, n) <- nexts(h, a)
-      } {
-        newEdges ::= (h, a, n, qr)
-        if (newStates.add(qr)) {
-          stack ::= qr
-        }
-      }
-    }
+    val (newStates, newEdges) = Concepts.searchStates(newQ0s, inSet)(nexts)(
+      { case (qr, _)         => qr },
+      { case (h, a, (qr, n)) => (h, a, n, qr) }
+    )
     CounterAutomaton(
       newStates.toSet,
       inSet,

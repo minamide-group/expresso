@@ -142,23 +142,11 @@ case class PresburgerSST[Q, A, B, X, L, I](
         case None => backTrans((r, a)).map { case (q, mx, mh) => ((q, None), mx, mh) }
       }
     }
-    val newStates = collection.mutable.Set.from(newOutGraph.map(_._1))
-    var newEdges: List[(NQ, A, Update[X, B], PresburgerSST.IUpdate[L], NQ)] = Nil
-    var stack = newStates.toList
-    while (stack.nonEmpty) {
-      val h = stack.head
-      stack = stack.tail
-      for {
-        a <- inSet
-        (q, mx, mh) <- prevStates(h, a)
-      } {
-        newEdges ::= (q, a, mx, mh, h)
-        if (newStates.add(q)) {
-          stack ::= q
-        }
-      }
-    }
-    PresburgerSST(newStates.toSet, inSet, xs, ls, is, newEdges.toSet, (q0, None), newOutGraph, acceptFormulas)
+    val (newStates, newEdges) = Concepts.searchStates(newOutGraph.map(_._1), inSet)(prevStates)(
+      { case (q, _, _)           => q },
+      { case (r, a, (q, mx, mh)) => (q, a, mx, mh, r) }
+    )
+    PresburgerSST(newStates, inSet, xs, ls, is, newEdges, (q0, None), newOutGraph, acceptFormulas)
   }
 
   // ParikhAutomaton shares inSet (input alphabet), ls (log variables), is (integer variables),
@@ -334,23 +322,10 @@ case class PresburgerSST[Q, A, B, X, L, I](
       } yield ((q1, kt), xms, ycs, lv, kv)
     }
 
-    var states = outGraph.map(_._1)
-    var edges: List[(NQ, A, NewUpdateX, UpdateL, NQ)] = Nil
-    var stack: List[NQ] = states.toList
-    while (stack.nonEmpty) {
-      val r = stack.head
-      stack = stack.tail
-      for {
-        a <- n1.inSet
-        (q, mx, ml) <- previousStates(r, a)
-      } {
-        edges ::= ((q, a, mx, ml, r))
-        if (!states.contains(q)) {
-          states += q
-          stack ::= q
-        }
-      }
-    }
+    val (states, edges) = Concepts.searchStates(outGraph.map(_._1), n1.inSet)(previousStates)(
+      { case (q, _, _)           => q },
+      { case (r, a, (q, mx, ml)) => (q, a, mx, ml, r) }
+    )
 
     val initialStates =
       states.filter { case (q, kt) => q == n1.q0 && kt.forall { case (_, (k, t)) => k == t } }
@@ -543,20 +518,10 @@ case class PresburgerSST[Q, A, B, X, L, I](
         val const = xs.map(x => x -> id).toMap
         (q0, const)
       }
-      var newStates: Set[NQ] = Set(newQ0)
-      var newEdges: List[(NQ, A, UpdateZ, UpdateJ, NQ)] = Nil
-      var stack = List(newQ0)
-      while (stack.nonEmpty) {
-        val q = stack.head
-        stack = stack.tail
-        for (a <- inSet) {
-          val nexts = nextStates(q, a)
-          newEdges ++:= nexts.map { case (r, mz, mj) => (q, a, mz, mj, r) }
-          val newOnes = nexts.map(_._1) -- newStates
-          newStates ++= newOnes
-          stack ++:= newOnes.toList
-        }
-      }
+      val (newStates, newEdges) = Concepts.searchStates(Set(newQ0), inSet)(nextStates)(
+        { case (r, _, _)           => r },
+        { case (q, a, (r, mz, mj)) => (q, a, mz, mj, r) }
+      )
       val newOutGraph: Set[(NQ, ZCS, JVal)] = {
         for {
           nq @ (q, s) <- newStates.toSet
@@ -582,7 +547,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
         zs,
         js,
         is,
-        newEdges.toSet,
+        newEdges,
         newQ0,
         newOutGraph,
         acceptFormulas
