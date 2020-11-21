@@ -16,6 +16,7 @@ object TestRandom {
     }
   }
   def randomUpdate[X, A](xs: Iterable[X], as: Set[A], maxRepeatA: Int): Update[X, A] = {
+    import MSST.{M1, M2, gamma}
     def randomM1X: M1[X] = {
       val xl = xs.toList
       R.shuffle(xl)

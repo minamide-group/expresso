@@ -6,12 +6,15 @@ import scala.collection.immutable.Queue
   * Types and functions relatively independent of concrete machines.
   */
 object Concepts {
+  type Cupstar[X, B] = List[Cop[X, B]]
+  type Update[X, B] = Map[X, Cupstar[X, B]]
   def flatMap1[A, B, C](abs: Cupstar[A, B], f: A => Cupstar[C, B]): Cupstar[C, B] =
     abs.flatMap { case Cop1(a) => f(a); case Cop2(b) => List(Cop2(b)) }
   def erase1[A, B](abs: Cupstar[A, B]): List[B] = abs.flatMap(Cop.erase1(_))
   def erase2[A, B](abs: Cupstar[A, B]): List[A] = abs.flatMap(Cop.erase2(_))
-  type Cupstar[X, B] = List[Cop[X, B]]
-  type Update[X, B] = Map[X, Cupstar[X, B]]
+  def varsIn[X, A](xas: Cupstar[X, A]): Set[X] = erase2(xas).toSet
+  def charsIn[X, A](xas: Cupstar[X, A]): Set[A] = erase1(xas).toSet
+  def charsIn[X, A](m: Update[X, A]): Set[A] = m.flatMap { case (_, xas) => charsIn(xas) }.toSet
   implicit def updateMonoid[X, B](xs: Iterable[X]): Monoid[Update[X, B]] =
     new Monoid[Update[X, B]] {
       def combine(m1: Update[X, B], m2: Update[X, B]): Update[X, B] = Map.from {
@@ -21,55 +24,6 @@ object Concepts {
       // so cannot use `Map.empty.withDefault(x => x -> List(Cop1(x)))` as `unit`.
       def unit: Update[X, B] = Map.from(xs.map(x => x -> List(Cop1(x))))
     }
-
-  def varsIn[X, A](alpha: Cupstar[X, A]): Set[X] = alpha.foldLeft[Set[X]](Set.empty) {
-    case (acc, xa) =>
-      xa match {
-        case Cop1(x) => acc + x
-        case Cop2(_) => acc
-      }
-  }
-
-  def charsIn[X, B](xbs: Cupstar[X, B]): Set[B] =
-    xbs.flatMap { case Cop1(x) => None; case Cop2(b) => Some(b) }.toSet
-
-  def charsIn[X, B](m: Update[X, B]): Set[B] = m.flatMap { case (_, xbs) => charsIn(xbs) }.toSet
-
-  type M1[X] = Map[X, List[X]]
-  type M2[X, A] = Map[(X, Boolean), List[A]]
-  def gamma[X, A](
-      xs: Set[X]
-  )(
-      permutation: M1[X],
-      prePost: M2[X, A]
-  ): Update[X, A] = {
-    val (front, back) = xs
-      .map(x =>
-        (
-          x -> prePost((x, false)).map(Cop2(_)).appended(Cop1(x)),
-          x -> (Cop1(x) :: prePost((x, true)).map(Cop2(_)))
-        )
-      )
-      .unzip
-    val mid: Update[X, A] = permutation.map { case (x, xs) => x -> xs.map(Cop1(_)) }
-    Monoid.fold(List(front.toMap, mid, back.toMap))(xs)
-  }
-
-  def proj[X, A](m: Update[X, A]): (M1[X], M2[X, A]) = {
-    def aux(x: X, l: List[Cop[X, A]]): M2[X, A] = {
-      l.foldRight(List((x, true) -> List[A]())) {
-          case (Cop1(x), acc)             => ((x, false) -> Nil) :: acc
-          case (Cop2(a), (xb, as) :: acc) => (xb -> (a :: as)) :: acc
-          case _                          => throw new Exception("This must not happen")
-        }
-        .toMap
-    }
-
-    (
-      m.map { case (x, xas)     => x -> erase2(xas) }.withDefaultValue(Nil),
-      m.flatMap { case (x, xas) => aux(x, xas) }.withDefaultValue(Nil)
-    )
-  }
 
   def closure[Q](start: Set[Q], edges: Q => Set[Q]): Set[Q] = {
     def trans(qs: Set[Q]): Set[Q] =
@@ -831,9 +785,44 @@ class MSST[Q, A, B, X, Y](
 }
 
 object MSST {
-  import Concepts._
-  import Monoid.fold
+  import Concepts.{Update, Cupstar, erase1, erase2, updateMonoid}
   type Edges[Q, A, B, X, Y] = Map[(Q, A), Set[(Q, Update[X, Update[Y, B]])]]
+
+  type M1[X] = Map[X, List[X]]
+  type M2[X, A] = Map[(X, Boolean), List[A]]
+  def gamma[X, A](
+      xs: Set[X]
+  )(
+      permutation: M1[X],
+      prePost: M2[X, A]
+  ): Update[X, A] = {
+    val (front, back) = xs
+      .map(x =>
+        (
+          x -> prePost((x, false)).map(Cop2(_)).appended(Cop1(x)),
+          x -> (Cop1(x) :: prePost((x, true)).map(Cop2(_)))
+        )
+      )
+      .unzip
+    val mid: Update[X, A] = permutation.map { case (x, xs) => x -> xs.map(Cop1(_)) }
+    Monoid.fold(List(front.toMap, mid, back.toMap))(xs)
+  }
+
+  def proj[X, A](m: Update[X, A]): (M1[X], M2[X, A]) = {
+    def aux(x: X, l: List[Cop[X, A]]): M2[X, A] = {
+      l.foldRight(List((x, true) -> List[A]())) {
+          case (Cop1(x), acc)             => ((x, false) -> Nil) :: acc
+          case (Cop2(a), (xb, as) :: acc) => (xb -> (a :: as)) :: acc
+          case _                          => throw new Exception("This must not happen")
+        }
+        .toMap
+    }
+
+    (
+      m.map { case (x, xas)     => x -> erase2(xas) }.withDefaultValue(Nil),
+      m.flatMap { case (x, xas) => aux(x, xas) }.withDefaultValue(Nil)
+    )
+  }
 
   def convertMsstToNsst[Q, A, B, X, Y](
       msst: MSST[Q, A, B, X, Y]
@@ -871,7 +860,7 @@ object MSST {
         case Cop1(x) => iotaS(x)
         case Cop2(m) => embedUpdate(m)
       }
-      fold(ms)
+      Monoid.fold(ms)
     }
 
     def nextState(s: S, mu: Update[X, Update[Y, B]]): (S, Update[Z, B]) = {

@@ -5,7 +5,15 @@ import com.microsoft.z3
 object Presburger {
 
   /** Types and constructers for Presburger formula */
-  sealed trait Term[X]
+  sealed trait Term[X] {
+    def eval(valuation: Map[X, Int]): Int = this match {
+      case Const(i)          => i
+      case Var(x)            => valuation(x)
+      case Add(ts)           => ts.map(_.eval(valuation)).sum
+      case Sub(t1, t2)       => t1.eval(valuation) - t2.eval(valuation)
+      case Mult(Const(i), t) => i * t.eval(valuation)
+    }
+  }
   case class Const[X](i: Int) extends Term[X]
   case class Var[X](x: X) extends Term[X]
   case class Add[X](ts: Seq[Term[X]]) extends Term[X]
@@ -13,6 +21,21 @@ object Presburger {
   case class Mult[X](c: Const[X], t: Term[X]) extends Term[X]
   sealed trait Formula[X] {
     def smtlib: String = Formula.formulaToSMTLIB(this)
+
+    def renameVars[Y](renamer: X => Y): Formula[Y] = Formula.renameVars(this)(renamer)
+
+    /** @throws UnsupportedOperationException if this contains Exists. */
+    def eval(valuation: Map[X, Int]): Boolean = this match {
+      case Top()        => true
+      case Bot()        => false
+      case Eq(t1, t2)   => t1.eval(valuation) == t2.eval(valuation)
+      case Lt(t1, t2)   => t1.eval(valuation) < t2.eval(valuation)
+      case Le(t1, t2)   => t1.eval(valuation) <= t2.eval(valuation)
+      case Conj(fs)     => fs.find(!_.eval(valuation)).isEmpty
+      case Disj(fs)     => fs.find(_.eval(valuation)).nonEmpty
+      case Not(f)       => !f.eval(valuation)
+      case Exists(_, _) => throw new UnsupportedOperationException("Cannot evaluate formula with quantifier.")
+    }
   }
   case class Top[X]() extends Formula[X]
   case class Bot[X]() extends Formula[X]

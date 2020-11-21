@@ -1,5 +1,4 @@
 /.idea
-/.bloop
 /.metals
 /.bsp/
 target/
@@ -8,3 +7,6 @@ target/
 /lib/
 project/metals.sbt
 /bin/
+/bench/
+.bloop/
+/project/project/

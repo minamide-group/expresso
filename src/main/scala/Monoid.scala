@@ -23,12 +23,22 @@ object Monoid {
     def unit = 0
     def combine(i1: Int, i2: Int) = i1 + i2
   }
+  implicit def setUnionMonoid[A]: Monoid[Set[A]] = new Monoid[Set[A]] {
+    def unit: Set[A] = Set.empty
+    def combine(m1: Set[A], m2: Set[A]): Set[A] = m1 union m2
+  }
+  implicit def productMonoid[M1: Monoid, M2: Monoid]: Monoid[(M1, M2)] = new Monoid[(M1, M2)] {
+    def unit: (M1, M2) = (Monoid[M1].unit, Monoid[M2].unit)
+    def combine(m1: (M1, M2), m2: (M1, M2)): (M1, M2) = (m1, m2) match {
+      case ((m11, m12), (m21, m22)) => (Monoid[M1].combine(m11, m21), Monoid[M2].combine(m12, m22))
+    }
+  }
 
   def apply[M: Monoid]: Monoid[M] = implicitly[Monoid[M]]
 
   def transition[Q, A, M](
       qs: Set[Q],
-      w: List[A],
+      w: Seq[A],
       delta: (Q, A) => Set[(Q, M)]
   )(
       implicit monoid: Monoid[M]

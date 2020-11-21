@@ -7,10 +7,10 @@ sealed trait Cop[+A, +B] {
   def is1: Boolean
   def is2: Boolean = !is1
 }
-case class Cop1[A, T <: A](a: T) extends Cop[A, Nothing] {
+case class Cop1[A, B](a: A) extends Cop[A, B] {
   def is1 = true
 }
-case class Cop2[B, T <: B](b: T) extends Cop[Nothing, B] {
+case class Cop2[A, B](b: B) extends Cop[A, B] {
   def is1 = false
 }
 object Cop {
