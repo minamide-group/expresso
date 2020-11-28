@@ -30,6 +30,17 @@ object MonadPlus {
   }
 }
 
+sealed trait Tree[A] {
+  def toSeq: Seq[A] = this match {
+    case Node(a, children @ _*) => a +: children.flatMap(_.toSeq)
+  }
+
+  def toSet: Set[A] = toSeq.toSet
+}
+case class Node[A](a: A, children: Tree[A]*) extends Tree[A]
+
+case class NonEmptyDistinctSeq[A](head: A, tail: Seq[A])
+
 object Replacer {
   sealed trait Paren[X]
   case class LPar[X](x: X) extends Paren[X]
@@ -48,6 +59,18 @@ object Replacer {
       case PCRE.GDeriv(e, _)         => e.usedChars
       case PCRE.Empty() | PCRE.Eps() => Set.empty
     }
+
+    def groupVarTrees: Seq[Tree[X]] = this match {
+      case PCRE.Empty() | PCRE.Eps() | PCRE.Chars(_) => Seq.empty
+      case PCRE.Cat(e1, e2)                          => e1.groupVarTrees ++ e2.groupVarTrees
+      case PCRE.Alt(e1, e2)                          => e1.groupVarTrees ++ e2.groupVarTrees
+      case PCRE.Greedy(e)                            => e.groupVarTrees
+      case PCRE.NonGreedy(e)                         => e.groupVarTrees
+      case PCRE.Group(e, x)                          => Seq(Node(x, e.groupVarTrees: _*))
+      case PCRE.GDeriv(e, x)                         => Seq(Node(x, e.groupVarTrees: _*))
+    }
+
+    def groupVars: Set[X] = groupVarTrees.flatMap(_.toSeq).toSet
 
     def derive[M[_]](a: A)(implicit mp: MonadPlus[M]): M[(Option[PCRE[A, X]], Parsed[A, X])] = this match {
       case PCRE.Empty()   => mp.empty
@@ -106,7 +129,6 @@ object Replacer {
       case PCRE.GDeriv(e, x)            => e.deriveEps.map(_ :+ Right(RPar(x)))
     }
 
-    case class NonEmptyDistinctSeq[A](head: A, tail: Seq[A])
     def toParser: NSST[NonEmptyDistinctSeq[PCRE[A, X]], A, ParsedChar[A, X], Unit] = {
       type Q = NonEmptyDistinctSeq[PCRE[A, X]]
       val q0 = NonEmptyDistinctSeq(this, Seq.empty)
@@ -170,6 +192,18 @@ object Replacer {
       case PCRE.Group(e, x)  => s"(?<$x>$e)"
       case PCRE.GDeriv(e, x) => s"<?<$x>$e>"
     }
+
+    def renameVars[Y](f: X => Y): PCRE[A, Y] = this match {
+      case PCRE.Group(e, x)  => PCRE.Group(e.renameVars(f), f(x))
+      case PCRE.GDeriv(e, x) => PCRE.GDeriv(e.renameVars(f), f(x))
+      case PCRE.Empty()      => PCRE.Empty()
+      case PCRE.Eps()        => PCRE.Eps()
+      case PCRE.Chars(as)    => PCRE.Chars(as)
+      case PCRE.Cat(e1, e2)  => PCRE.Cat(e1.renameVars(f), e2.renameVars(f))
+      case PCRE.Alt(e1, e2)  => PCRE.Alt(e1.renameVars(f), e2.renameVars(f))
+      case PCRE.Greedy(e)    => PCRE.Greedy(e.renameVars(f))
+      case PCRE.NonGreedy(e) => PCRE.NonGreedy(e.renameVars(f))
+    }
   }
 
   object PCRE {
@@ -183,5 +217,98 @@ object Replacer {
     case class Group[A, X](e: PCRE[A, X], x: X) extends PCRE[A, X]
     // Derivatives of group expressions.
     case class GDeriv[A, X](e: PCRE[A, X], x: X) extends PCRE[A, X]
+  }
+
+  case class Replacement[A, X](word: Seq[Either[A, Option[X]]]) {
+    def groupVars: Set[X] = word.collect { case Right(Some(x)) => x }.toSet
+    lazy val indexed: Seq[Either[A, (Option[X], Int)]] = word
+      .foldLeft((0, Seq.empty[Either[A, (Option[X], Int)]])) {
+        case ((cur, acc), Left(a))  => (cur, Left(a) +: acc)
+        case ((cur, acc), Right(x)) => (cur + 1, (Right(x, cur)) +: acc)
+      }
+      ._2
+      .reverse
+  }
+
+  def firstMatch[A, X](e: PCRE[A, X]): PCRE[A, Option[X]] = {
+    val renamed: PCRE[A, Option[X]] = e.renameVars(x => Some(x))
+    PCRE.Cat(
+      PCRE.Cat(PCRE.NonGreedy(PCRE.Chars(e.usedChars)), PCRE.Group(renamed, None)),
+      PCRE.Greedy(PCRE.Chars(e.usedChars))
+    )
+  }
+
+  def repetitiveMatch[A, X](e: PCRE[A, X]): PCRE[A, Option[X]] = {
+    val renamed: PCRE[A, Option[X]] = e.renameVars(x => Some(x))
+    PCRE.Greedy(PCRE.Alt(PCRE.Group(renamed, None), PCRE.Chars(e.usedChars)))
+  }
+
+  // def replaceSST[A, X](re: PCRE[A, X], rep: Replacement[A, X]): NSST[Set[X]] = {
+  //   ???
+  // }
+  def replaceAllSST[A, X](re: PCRE[A, X], rep: Replacement[A, X]): NSST[Int, A, A, Int] = {
+    require(rep.groupVars subsetOf re.groupVars)
+    type SSTQ = Set[Option[X]]
+    sealed trait SSTVar
+    case object Out extends SSTVar
+    case class Rep(x: Option[X], i: Int) extends SSTVar
+    type Update = Concepts.Update[SSTVar, A]
+    type Edge = (SSTQ, ParsedChar[A, Option[X]], Update, SSTQ)
+    val repXs = rep.indexed.collect { case Right((x, i)) => Rep(x, i) }
+    val sstVars: Set[SSTVar] = repXs.toSet + Out
+    val updates: Monoid[Update] = Concepts.updateMonoid(sstVars)
+    val alphabet: Set[A] = re.usedChars
+    def aux(parent: SSTQ, varsTree: Tree[Option[X]]): (Set[SSTQ], Set[Edge]) =
+      varsTree match {
+        case Node(x, children @ _*) =>
+          val cur = parent + x
+          val newEdges: Set[Edge] = {
+            val fromParen: Edge = {
+              val shouldClear = repXs.filter { case Rep(y, i) => y == x }
+              val update = updates.unit ++ shouldClear.map(x => x -> Nil)
+              (parent, Right(LPar(x)), update, cur)
+            }
+            val loops: Iterable[Edge] = {
+              val shouldUpdate = repXs.filter { case Rep(y, i) => cur(y) }
+              def update(a: A) = updates.unit ++ shouldUpdate.map(x => x -> List(Cop1(x), Cop2(a)))
+              alphabet.map(a => (cur, Left(a), update(a), cur))
+            }
+            val toParent: Edge = {
+              val zero: Update = sstVars.map(x => x -> Nil).toMap
+              val update: Update = if (x == None) zero + (Out -> (Cop1(Out) +: rep.indexed.map {
+                case Right((x, i)) => Cop1(Rep(x, i))
+                case Left(a)       => Cop2(a)
+              }).toList)
+              else updates.unit
+              (cur, Right(RPar(x)), update, parent)
+            }
+            loops.toSet + fromParen + toParent
+          }
+          val (childStates, childEdges) = children.foldLeft((Set.empty[SSTQ], Set.empty[Edge])) {
+            case ((accQ, accE), child) =>
+              val (qs, es) = aux(cur, child)
+              (accQ ++ qs, accE ++ es)
+          }
+          (childStates + cur, childEdges ++ newEdges)
+      }
+    val q0: SSTQ = Set.empty
+    val repetitiveRE = repetitiveMatch(re)
+    val varsTree = repetitiveRE.groupVarTrees.head
+    val repetitiveParser = repetitiveRE.toParser
+    val (states, edges) = aux(q0, varsTree)
+    val q0Loop: Iterable[Edge] = {
+      def update(a: A) = updates.unit + (Out -> List(Cop1(Out), Cop2(a)))
+      alphabet.map(a => (q0, Left(a), update(a), q0))
+    }
+    val replaceSST =
+      NSST[SSTQ, ParsedChar[A, Option[X]], A, SSTVar](
+        states + q0,
+        varsTree.toSet.flatMap(x => Set(Right(LPar(x)), Right(RPar(x)))) ++ alphabet.map(Left.apply),
+        sstVars,
+        edges ++ q0Loop,
+        q0,
+        Map(q0 -> Set(List[Cop[SSTVar, A]](Cop1(Out))))
+      )
+    repetitiveParser compose replaceSST
   }
 }

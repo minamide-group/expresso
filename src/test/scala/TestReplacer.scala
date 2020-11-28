@@ -15,6 +15,11 @@ class TestReplacer extends AnyFunSuite {
   def group(e: PCRE[Char, String], x: String): PCRE[Char, String] = Group(e, x)
   def gderiv(e: PCRE[Char, String], x: String): PCRE[Char, String] = GDeriv(e, x)
 
+  def firstMatch[A, X](e: PCRE[A, X]): PCRE[A, X] =
+    PCRE.Cat(PCRE.Cat(PCRE.NonGreedy(PCRE.Chars(e.usedChars)), e), PCRE.Greedy(PCRE.Chars(e.usedChars)))
+
+  def repetitiveMatch[A, X](e: PCRE[A, X]): PCRE[A, X] = PCRE.Greedy(PCRE.Alt(e, PCRE.Chars(e.usedChars)))
+
   def prettyParsedChar(c: ParsedChar[Char, String]): String = c match {
     case Left(a)        => a.toString()
     case Right(LPar(x)) => s"(<$x>"
@@ -30,11 +35,6 @@ class TestReplacer extends AnyFunSuite {
     info(s"""\"$w\" => $parseResult""")
   }
 
-  def firstMatch[A, X](e: PCRE[A, X]): PCRE[A, X] =
-    Cat(Cat(NonGreedy(Chars(e.usedChars)), e), Greedy(Chars(e.usedChars)))
-
-  def repetitiveMatch[A, X](e: PCRE[A, X]): PCRE[A, X] = Greedy(Alt(e, Chars(e.usedChars)))
-
   def execAll(e: PCRE[Char, String])(cases: Seq[Char]*) = test(s"$e") {
     cases.foreach(w => exec(e, w))
   }
@@ -44,4 +44,13 @@ class TestReplacer extends AnyFunSuite {
   execAll(group(cat(greedy("a"), group(greedy("b"), "y")), "x"))("aaabba", "", "bb")
   execAll(firstMatch(group(cat(greedy("a"), group(greedy("b"), "y")), "x")))("aaabba", "", "bb")
   execAll(repetitiveMatch(group(cat(greedy("a"), group(greedy("b"), "y")), "x")))("aaabba", "", "bb")
+
+  test("replace") {
+    val s = replaceAllSST(
+      cat("a", greedy(alt("b", "c"))),
+      Replacement[Char, String](Seq(Left('a'), Right(None), Left('a')))
+    )
+    assert(s.transduce("abc") == Set("aabca".toList))
+    assert(s.transduce("abca") == Set("aabcaaaa".toList))
+  }
 }
