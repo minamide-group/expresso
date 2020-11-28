@@ -121,8 +121,8 @@ case class NSST[Q, A, B, X](
     Monoid.transition(qs, w, (q: Q, a: A) => transOne(q, a))
   def outputAt(q: Q, m: Update[X, B]): Set[List[B]] =
     outF(q).map { flatMap1(_, m) }.map(erase1)
-  def transduce(w: List[A]): Set[List[B]] =
-    transition(Set(q0), w).flatMap { case (q, m) => outputAt(q, m) }
+  def transduce(w: Seq[A]): Set[List[B]] =
+    transition(Set(q0), w.toList).flatMap { case (q, m) => outputAt(q, m) }
 
   def isCopyless: Boolean = {
     val e = edges.forall { case (_, _, m, _) => isCopylessUpdate(m) }
