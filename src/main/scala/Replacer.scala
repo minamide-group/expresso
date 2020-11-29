@@ -118,18 +118,19 @@ object Replacer {
         case (m, a) => m >>= { case (e, w) => e.matchOne(a) map { case (e, u) => (e, w ++ u) } }
       }
 
-    def deriveEps: Option[Parsed[A, X]] = this match {
-      case PCRE.Empty() | PCRE.Chars(_) => None
-      case PCRE.Eps()                   => Some(Seq.empty)
+    def deriveEps[M[_]](implicit mp: MonadPlus[M]): M[Parsed[A, X]] = this match {
+      case PCRE.Empty() | PCRE.Chars(_) => mp.empty
+      case PCRE.Eps()                   => mp(Seq.empty)
       case PCRE.Cat(e1, e2)             => for (w <- e1.deriveEps; u <- e2.deriveEps) yield w ++ u
-      case PCRE.Alt(e1, e2)             => e1.deriveEps.orElse(e2.deriveEps)
-      case PCRE.Greedy(e)               => e.deriveEps.orElse(Some(Seq.empty))
-      case PCRE.NonGreedy(e)            => Some(Seq.empty)
+      case PCRE.Alt(e1, e2)             => e1.deriveEps ++ e2.deriveEps
+      case PCRE.Greedy(e)               => e.deriveEps ++ mp(Seq.empty)
+      case PCRE.NonGreedy(e)            => mp(Seq.empty)
       case PCRE.Group(e, x)             => e.deriveEps.map(Right(LPar(x)) +: _ :+ Right(RPar(x)))
       case PCRE.GDeriv(e, x)            => e.deriveEps.map(_ :+ Right(RPar(x)))
     }
 
-    def toParser: NSST[NonEmptyDistinctSeq[PCRE[A, X]], A, ParsedChar[A, X], Unit] = {
+    def toParser(alphabet: Set[A]): NSST[NonEmptyDistinctSeq[PCRE[A, X]], A, ParsedChar[A, X], Unit] = {
+      require(usedChars subsetOf alphabet)
       type Q = NonEmptyDistinctSeq[PCRE[A, X]]
       val q0 = NonEmptyDistinctSeq(this, Seq.empty)
       def nextStates(q: Q, a: A): Set[(Q, Parsed[A, X])] = {
@@ -150,17 +151,17 @@ object Replacer {
           }
         aux(Set.empty, lowest.matchOne(a).distinctBy(_._1).reverse)
       }
-      val (states, edges) = Concepts.searchStates(Set(q0), this.usedChars)(nextStates)(
+      val (states, edges) = Concepts.searchStates(Set(q0), alphabet)(nextStates)(
         { case (r, _)         => r },
         { case (q, a, (r, w)) => (q, a, w, r) }
       )
       val outGraph = for {
         q @ NonEmptyDistinctSeq(lowest, highers) <- states if highers.forall(_.deriveEps.isEmpty)
-        w <- lowest.deriveEps
+        w <- lowest.deriveEps.headOption
       } yield q -> w
       NSST(
         states,
-        usedChars,
+        alphabet,
         Set(()),
         edges.map { case (q, a, w, r) => (q, a, Map(() -> (Cop1(()) +: w.map(Cop2.apply)).toList), r) },
         q0,
@@ -230,23 +231,24 @@ object Replacer {
       .reverse
   }
 
-  def firstMatch[A, X](e: PCRE[A, X]): PCRE[A, Option[X]] = {
+  def firstMatch[A, X](e: PCRE[A, X], alphabet: Set[A]): PCRE[A, Option[X]] = {
     val renamed: PCRE[A, Option[X]] = e.renameVars(x => Some(x))
     PCRE.Cat(
-      PCRE.Cat(PCRE.NonGreedy(PCRE.Chars(e.usedChars)), PCRE.Group(renamed, None)),
-      PCRE.Greedy(PCRE.Chars(e.usedChars))
+      PCRE.Cat(PCRE.NonGreedy(PCRE.Chars(alphabet)), PCRE.Group(renamed, None)),
+      PCRE.Greedy(PCRE.Chars(alphabet))
     )
   }
 
-  def repetitiveMatch[A, X](e: PCRE[A, X]): PCRE[A, Option[X]] = {
+  def repetitiveMatch[A, X](e: PCRE[A, X], alphabet: Set[A]): PCRE[A, Option[X]] = {
     val renamed: PCRE[A, Option[X]] = e.renameVars(x => Some(x))
-    PCRE.Greedy(PCRE.Alt(PCRE.Group(renamed, None), PCRE.Chars(e.usedChars)))
+    // (?:(e)|.)*
+    PCRE.Greedy(PCRE.Alt(PCRE.Group(renamed, None), PCRE.Chars(alphabet)))
   }
 
   // def replaceSST[A, X](re: PCRE[A, X], rep: Replacement[A, X]): NSST[Set[X]] = {
   //   ???
   // }
-  def replaceAllSST[A, X](re: PCRE[A, X], rep: Replacement[A, X]): NSST[Int, A, A, Int] = {
+  def replaceAllSST[A, X](re: PCRE[A, X], rep: Replacement[A, X], alphabet: Set[A]): NSST[Int, A, A, Int] = {
     require(rep.groupVars subsetOf re.groupVars)
     type SSTQ = Set[Option[X]]
     sealed trait SSTVar
@@ -257,7 +259,6 @@ object Replacer {
     val repXs = rep.indexed.collect { case Right((x, i)) => Rep(x, i) }
     val sstVars: Set[SSTVar] = repXs.toSet + Out
     val updates: Monoid[Update] = Concepts.updateMonoid(sstVars)
-    val alphabet: Set[A] = re.usedChars
     def aux(parent: SSTQ, varsTree: Tree[Option[X]]): (Set[SSTQ], Set[Edge]) =
       varsTree match {
         case Node(x, children @ _*) =>
@@ -292,9 +293,9 @@ object Replacer {
           (childStates + cur, childEdges ++ newEdges)
       }
     val q0: SSTQ = Set.empty
-    val repetitiveRE = repetitiveMatch(re)
+    val repetitiveRE = repetitiveMatch(re, alphabet)
     val varsTree = repetitiveRE.groupVarTrees.head
-    val repetitiveParser = repetitiveRE.toParser
+    val repetitiveParser = repetitiveRE.toParser(alphabet)
     val (states, edges) = aux(q0, varsTree)
     val q0Loop: Iterable[Edge] = {
       def update(a: A) = updates.unit + (Out -> List(Cop1(Out), Cop2(a)))
