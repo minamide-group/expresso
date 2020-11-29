@@ -92,7 +92,7 @@ object Replacer {
       case PCRE.NonGreedy(e) =>
         val derived =
           e.derive(a) >>= [(Option[PCRE[A, X]], Parsed[A, X])] {
-            case (Some(f), w) => mp((Some(PCRE.Cat(f, PCRE.Greedy(e))), w))
+            case (Some(f), w) => mp((Some(PCRE.Cat(f, PCRE.NonGreedy(e))), w))
             case (None, w)    => mp((None, w))
           }
         mp[(Option[PCRE[A, X]], Parsed[A, X])]((None, Seq.empty)) ++ derived
@@ -187,7 +187,7 @@ object Replacer {
         else s"($e)*"
       case PCRE.NonGreedy(e) =>
         val s = e.toString()
-        if (s.length == 1) s"$e*"
+        if (s.length == 1) s"$e*?"
         else s"($e)*?"
       case PCRE.Group(e, x)  => s"(?<$x>$e)"
       case PCRE.GDeriv(e, x) => s"<?<$x>$e>"
