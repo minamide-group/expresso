@@ -62,6 +62,34 @@ object Presburger {
   }
 
   object Formula {
+    def substitute[X](f: Formula[X])(subst: X => Term[X]): Formula[X] = {
+      def tm(t: Term[X]): Term[X] = {
+        def aux(t: Term[X]): Term[X] = t match {
+          case Const(i)          => Const(i)
+          case Var(x)            => subst(x)
+          case Add(ts)           => Add(ts.map(aux))
+          case Sub(t1, t2)       => Sub(aux(t1), aux(t2))
+          case Mult(Const(i), t) => Mult(Const(i), aux(t))
+        }
+        aux(t)
+      }
+      def aux(f: Formula[X]): Formula[X] = f match {
+        case Top() | Bot() => f
+        case Eq(t1, t2)    => Eq(tm(t1), tm(t2))
+        case Lt(t1, t2)    => Lt(tm(t1), tm(t2))
+        case Le(t1, t2)    => Le(tm(t1), tm(t2))
+        case Conj(fs)      => Conj(fs.map(aux))
+        case Disj(fs)      => Disj(fs.map(aux))
+        case Not(f)        => Not(aux(f))
+        case Exists(xs, f) =>
+          substitute(f) {
+            val bounded = xs.map { case Var(x) => x }.toSet
+            x => if (bounded(x)) Var(x) else subst(x)
+          }
+      }
+      aux(f)
+    }
+    // NOTE renamer should be injective
     def renameVars[X, Y](f: Formula[X])(renamer: X => Y): Formula[Y] = {
       def tm(t: Term[X]): Term[Y] = {
         def aux(t: Term[X]): Term[Y] = t match {
