@@ -7,13 +7,13 @@ trait StringIntTransducer[A, B, I] {
   def transduce(w: Seq[A], n: Map[I, Int]): Set[Seq[B]]
 }
 
-case class PresburgerSST[Q, A, B, X, L, I](
+case class ParikhSST[Q, A, B, X, L, I](
     states: Set[Q],
     inSet: Set[A],
     xs: Set[X],
     ls: Set[L],
     is: Set[I],
-    edges: Set[(Q, A, Concepts.Update[X, B], PresburgerSST.ParikhUpdate[L], Q)],
+    edges: Set[(Q, A, Concepts.Update[X, B], ParikhSST.ParikhUpdate[L], Q)],
     q0: Q,
     outGraph: Set[(Q, Concepts.Cupstar[X, B], Map[L, Int])],
     acceptFormulas: Seq[Presburger.Formula[Either[I, L]]]
@@ -21,7 +21,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
   type XBS = Cupstar[X, B]
   type LVal = Map[L, Int]
   type UpdateX = Update[X, B]
-  type UpdateL = PresburgerSST.ParikhUpdate[L]
+  type UpdateL = ParikhSST.ParikhUpdate[L]
   type UpdateXL = (UpdateX, UpdateL)
   val trans: Map[(Q, A), Set[(Q, UpdateXL)]] = graphToMap(edges) {
     case (q, a, mx, ml, r) => (q, a) -> (r, (mx, ml))
@@ -43,7 +43,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
     NSST.graphToMap(outGraph) { case (q, xbs, _) => q -> xbs }
   )
   val mxMonoid: Monoid[UpdateX] = Concepts.updateMonoid(xs)
-  val mlMonoid: Monoid[UpdateL] = PresburgerSST.parikhMonoid(ls)
+  val mlMonoid: Monoid[UpdateL] = ParikhSST.parikhMonoid(ls)
   val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
 
   def transduce(w: Seq[A]): Set[List[B]] = sst.transduce(w.toList)
@@ -62,7 +62,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
     case (q, m) => outputAt(q, m, n)
   }
 
-  def renamed: PresburgerSST[Int, A, B, Int, Int, I] = {
+  def renamed: ParikhSST[Int, A, B, Int, Int, I] = {
     val stateMap = (states.zipWithIndex).toMap
     val xMap = (xs.zipWithIndex).toMap
     val lMap = (ls.zipWithIndex).toMap
@@ -86,7 +86,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
     val newF = outGraph.withFilter { case (q, _, _) => states(q) }.map {
       case (q, xbs, lv) => (stateMap(q), renameXbs(xbs), renameLVal(lv))
     }
-    PresburgerSST(
+    ParikhSST(
       stateMap.map(_._2).toSet,
       inSet,
       xMap.values.toSet,
@@ -99,7 +99,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
     )
   }
 
-  def endWith(bs: Set[B]): PresburgerSST[(Q, Option[X]), A, B, X, L, I] = {
+  def endWith(bs: Set[B]): ParikhSST[(Q, Option[X]), A, B, X, L, I] = {
     val newOutGraph = outGraph.flatMap {
       case (q, xbs, v) =>
         xbs.zipWithIndex.flatMap {
@@ -110,7 +110,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
     }
     type NQ = (Q, Option[X])
     val backTrans = NSST.graphToMap(edges) { case (q, a, mx, mh, r) => (r, a) -> (q, mx, mh) }
-    def prevStates(nq: NQ, a: A): Iterable[(NQ, Update[X, B], PresburgerSST.ParikhUpdate[L])] = {
+    def prevStates(nq: NQ, a: A): Iterable[(NQ, Update[X, B], ParikhSST.ParikhUpdate[L])] = {
       // q -[a / (mx, mh)]-> r
       val (r, x) = nq
       x match {
@@ -150,7 +150,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
       { case (q, _, _)           => q },
       { case (r, a, (q, mx, mh)) => (q, a, mx, mh, r) }
     )
-    PresburgerSST(newStates, inSet, xs, ls, is, newEdges, (q0, None), newOutGraph, acceptFormulas)
+    ParikhSST(newStates, inSet, xs, ls, is, newEdges, (q0, None), newOutGraph, acceptFormulas)
   }
 
   // ParikhAutomaton shares inSet (input alphabet), ls (log variables), is (integer variables),
@@ -194,13 +194,13 @@ case class PresburgerSST[Q, A, B, X, L, I](
   }
 
   def composeNsstsToMsst[R, C, Y, K](
-      n1: PresburgerSST[Q, A, B, X, L, I],
-      n2: PresburgerSST[R, B, C, Y, K, I]
+      n1: ParikhSST[Q, A, B, X, L, I],
+      n2: ParikhSST[R, B, C, Y, K, I]
   )(implicit logger: CompositionLogger): MonoidSST[Option[(Q, Map[X, (R, R)])], C, Y, K] = {
     // logger.start(n1, n2)
 
     type UpdateY = Update[Y, C]
-    type UpdateK = PresburgerSST.ParikhUpdate[K]
+    type UpdateK = ParikhSST.ParikhUpdate[K]
     type UpdateXL = (UpdateX, UpdateL)
     type UpdateYK = (UpdateY, UpdateK)
     type NQ = (Q, Map[X, (R, R)])
@@ -378,11 +378,11 @@ case class PresburgerSST[Q, A, B, X, L, I](
     res
   }
 
-  def compose[R, C, Y, K](that: PresburgerSST[R, B, C, Y, K, I]): PresburgerSST[Int, A, C, Int, Int, I] = {
+  def compose[R, C, Y, K](that: ParikhSST[R, B, C, Y, K, I]): ParikhSST[Int, A, C, Int, Int, I] = {
 
     // End of composeNsstsToMsst
 
-    composeNsstsToMsst(this, that)(NopLogger).toLocallyConstrainedAffineParikhSST.toAffineParikhSST.toPresburgerSST.renamed
+    composeNsstsToMsst(this, that)(NopLogger).toLocallyConstrainedAffineParikhSST.toAffineParikhSST.toParikhSST.renamed
   }
 
   case class MonoidSST[Q, C, Y, K](
@@ -394,13 +394,13 @@ case class PresburgerSST[Q, A, B, X, L, I](
       ks: Set[K],
       is: Set[I],
       edges: Set[
-        (Q, A, Update[X, (Update[Y, C], PresburgerSST.ParikhUpdate[K])], PresburgerSST.ParikhUpdate[L], Q)
+        (Q, A, Update[X, (Update[Y, C], ParikhSST.ParikhUpdate[K])], ParikhSST.ParikhUpdate[L], Q)
       ],
       q0: Q,
       outGraph: Set[
         (
             Q,
-            Cupstar[X, (Update[Y, C], PresburgerSST.ParikhUpdate[K])],
+            Cupstar[X, (Update[Y, C], ParikhSST.ParikhUpdate[K])],
             Cupstar[Y, C],
             Map[L, Int],
             Map[K, Int]
@@ -410,12 +410,12 @@ case class PresburgerSST[Q, A, B, X, L, I](
   ) extends StringIntTransducer[A, C, I] {
     type YCS = Cupstar[Y, C]
     type UpdateY = Update[Y, C]
-    type UpdateK = PresburgerSST.ParikhUpdate[K]
+    type UpdateK = ParikhSST.ParikhUpdate[K]
     type UpdateYK = (UpdateY, UpdateK)
     type UpdateX = Update[X, UpdateYK]
     type UpdateXL = (UpdateX, UpdateL)
     val myMonoid: Monoid[UpdateY] = Concepts.updateMonoid(ys)
-    val mkMonoid: Monoid[UpdateK] = PresburgerSST.parikhMonoid(ks)
+    val mkMonoid: Monoid[UpdateK] = ParikhSST.parikhMonoid(ks)
     val mykMonoid: Monoid[UpdateYK] = Monoid.productMonoid(myMonoid, mkMonoid)
     val mxMonoid: Monoid[UpdateX] = Concepts.updateMonoid(xs)
     val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
@@ -455,7 +455,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
       import MSST.{gamma, proj}
       type Edges =
         Set[
-          (Q, A, Update[X, (Update[Y, C], PresburgerSST.ParikhUpdate[K])], PresburgerSST.ParikhUpdate[L], Q)
+          (Q, A, Update[X, (Update[Y, C], ParikhSST.ParikhUpdate[K])], ParikhSST.ParikhUpdate[L], Q)
         ]
       type M1Y = Map[Y, List[Y]]
       type M2Y = Map[(Y, Boolean), List[C]]
@@ -467,7 +467,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
       type ZCS = Cupstar[Z, C]
       type UpdateZ = Update[Z, C]
       type JVal = Map[J, Int]
-      type UpdateJ = PresburgerSST.AffineUpdate[J]
+      type UpdateJ = ParikhSST.AffineUpdate[J]
       // Construct PresburgerSST[NQ, A, C, Z, J, I].
       val zs: Set[Z] = for (x <- xs; y <- ys; b <- List(true, false)) yield (x, y, b)
       val js: Set[J] = ls.map(Cop1.apply) ++ (for (x <- xs; k <- ks) yield (x, k)).map(Cop2.apply)
@@ -590,15 +590,15 @@ case class PresburgerSST[Q, A, B, X, L, I](
       xs: Set[X],
       ls: Set[L],
       is: Set[I],
-      edges: Set[(Q, A, Concepts.Update[X, B], PresburgerSST.AffineUpdate[L], Q)],
+      edges: Set[(Q, A, Concepts.Update[X, B], ParikhSST.AffineUpdate[L], Q)],
       q0: Q,
       outGraph: Set[(Q, Concepts.Cupstar[X, B], Map[L, Int], Presburger.Formula[Either[I, L]])]
   ) extends StringIntTransducer[A, B, I] {
     type UpdateX = Update[X, B]
-    type UpdateL = PresburgerSST.AffineUpdate[L]
+    type UpdateL = ParikhSST.AffineUpdate[L]
     type UpdateXL = (UpdateX, UpdateL)
     val mxMonoid: Monoid[UpdateX] = Concepts.updateMonoid(xs)
-    val mlMonoid: Monoid[UpdateL] = PresburgerSST.affineMonoid(ls)
+    val mlMonoid: Monoid[UpdateL] = ParikhSST.affineMonoid(ls)
     val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
     val trans = graphToMap(edges) { case (q, a, mx, ml, r) => (q, a) -> (r, (mx, ml)) }
     val outF = graphToMap(outGraph) { case (q, xbs, lv, f) => q -> (xbs, lv, f) }
@@ -609,7 +609,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
       outF(q).flatMap {
         case (xbs, lv, f) =>
           if (f.eval {
-                val lMap = PresburgerSST.applyAffine(ml, lv)
+                val lMap = ParikhSST.applyAffine(ml, lv)
                 val l = lMap.map { case (l, n) => Right(l) -> n }
                 val i = n.map { case (i, n)    => Left(i) -> n }
                 (l ++ i).toMap
@@ -623,7 +623,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
     def toAffineParikhSST: AffineParikhSST[Q, A, B, X, Option[L], I] = {
       def embedLv(lv: Map[L, Int], forNone: Int): Map[Option[L], Int] =
         lv.map { case (l, n) => Option(l) -> n } + (None -> forNone)
-      def embedMl(ml: PresburgerSST.AffineUpdate[L]): PresburgerSST.AffineUpdate[Option[L]] =
+      def embedMl(ml: ParikhSST.AffineUpdate[L]): ParikhSST.AffineUpdate[Option[L]] =
         ml.map {
           case (l, (n, s)) => Option(l) -> (n, s.map(Option.apply))
         } + (None -> (0, Set()))
@@ -658,7 +658,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
       xs: Set[X],
       ls: Set[L],
       is: Set[I],
-      edges: Set[(Q, A, Concepts.Update[X, B], PresburgerSST.AffineUpdate[L], Q)],
+      edges: Set[(Q, A, Concepts.Update[X, B], ParikhSST.AffineUpdate[L], Q)],
       q0: Q,
       outGraph: Set[(Q, Concepts.Cupstar[X, B], Map[L, Int])],
       acceptFormula: Presburger.Formula[Either[I, L]]
@@ -666,7 +666,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
     type XBS = Cupstar[X, B]
     type LVal = Map[L, Int]
     type UpdateX = Update[X, B]
-    type UpdateL = PresburgerSST.AffineUpdate[L]
+    type UpdateL = ParikhSST.AffineUpdate[L]
     type UpdateXL = (UpdateX, UpdateL)
     val trans: Map[(Q, A), Set[(Q, UpdateXL)]] = graphToMap(edges) {
       case (q, a, mx, ml, r) => (q, a) -> (r, (mx, ml))
@@ -679,7 +679,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
     }
 
     val mxMonoid: Monoid[UpdateX] = Concepts.updateMonoid(xs)
-    val mlMonoid: Monoid[UpdateL] = PresburgerSST.affineMonoid(ls)
+    val mlMonoid: Monoid[UpdateL] = ParikhSST.affineMonoid(ls)
     val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
 
     def transition(qs: Set[Q], w: Seq[A]): Set[(Q, UpdateXL)] =
@@ -688,7 +688,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
       val (mx, ml) = m
       outF(q).flatMap {
         case (xbs, lv) =>
-          val lMap = PresburgerSST.applyAffine(ml, lv)
+          val lMap = ParikhSST.applyAffine(ml, lv)
           if (evalFormula(lMap, n)) Some(Concepts.erase1(Concepts.flatMap1(xbs, mx)))
           else None
       }
@@ -696,7 +696,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
     def transduce(w: Seq[A], n: Map[I, Int]): Set[Seq[B]] = transition(Set(q0), w).flatMap {
       case (q, m) => outputAt(q, m, n)
     }
-    def toPresburgerSST: PresburgerSST[Option[(Q, Map[L, L])], A, B, X, L, I] = {
+    def toParikhSST: ParikhSST[Option[(Q, Map[L, L])], A, B, X, L, I] = {
       type NQ = (Q, Map[L, L])
       type NewUpdateL = Map[L, Int]
       val newOutGraph = {
@@ -705,7 +705,7 @@ case class PresburgerSST[Q, A, B, X, L, I](
       }
       val backTrans = NSST.graphToMap(edges) { case (q, a, mx, ml, r) => (r, a) -> (q, mx, ml) }
       // ll means Map[L, L], i.e. for each l, where it's going to?
-      def llOf(ml: PresburgerSST.AffineUpdate[L]): Map[L, L] =
+      def llOf(ml: ParikhSST.AffineUpdate[L]): Map[L, L] =
         for ((l2, (_, s)) <- ml; l1 <- s) yield l1 -> l2
       def prevStates(nq: NQ, a: A): Set[(NQ, (UpdateX, NewUpdateL))] = {
         val (r, ll) = nq
@@ -747,13 +747,13 @@ case class PresburgerSST[Q, A, B, X, L, I](
         val none = for ((q, mx, ml) <- newOutGraph if newQ0(q)) yield (None, mx, ml)
         some ++ none
       }
-      PresburgerSST(oStates, inSet, xs, ls, is, oEdges, None, oOutGraph, Seq(acceptFormula))
+      ParikhSST(oStates, inSet, xs, ls, is, oEdges, None, oOutGraph, Seq(acceptFormula))
     }
   }
 
 }
 
-object PresburgerSST {
+object ParikhSST {
   type ParikhUpdate[L] = Map[L, Int]
   def parikhMonoid[L](ls: Set[L]): Monoid[ParikhUpdate[L]] = Monoid.vectorMonoid(ls)
   type AffineUpdate[L] = Map[L, (Int, Set[L])]
@@ -771,7 +771,7 @@ object PresburgerSST {
       l -> (s.map(v).sum + i)
   }
 
-  def substr[A, I](alphabet: Set[A])(iName: I, lName: I): PresburgerSST[Int, A, A, Int, Int, I] = {
+  def substr[A, I](alphabet: Set[A])(iName: I, lName: I): ParikhSST[Int, A, A, Int, Int, I] = {
     import Presburger._
     val X = 0
     type T = Term[Either[I, Int]]
@@ -782,7 +782,7 @@ object PresburgerSST {
     val r1: T = Var(Right(2))
     val zero: T = Const(0)
     val idxOutOrNegLen = Disj(Seq(Lt(i, zero), Ge(i, d), Le(l, zero)))
-    val unit: (Concepts.Update[Int, A], PresburgerSST.ParikhUpdate[Int]) =
+    val unit: (Concepts.Update[Int, A], ParikhSST.ParikhUpdate[Int]) =
       (Map(X -> List(Cop1(X))), (1 to 2).map(h => h -> 0).toMap + (0 -> 1))
     val edges = alphabet
       .flatMap { a =>
@@ -799,7 +799,7 @@ object PresburgerSST {
         )
       }
       .map { case (q, a, (mx, mh), r) => (q, a, mx, mh, r) }
-    PresburgerSST[Int, A, A, Int, Int, I](
+    ParikhSST[Int, A, A, Int, Int, I](
       Set(0, 1, 2),
       alphabet,
       Set(X),
@@ -816,7 +816,7 @@ object PresburgerSST {
     )
   }
 
-  def indexOf[A, I](alphabet: Set[A])(iName: I): PresburgerSST[Int, A, A, Int, Int, I] = {
+  def indexOf[A, I](alphabet: Set[A])(iName: I): ParikhSST[Int, A, A, Int, Int, I] = {
     ???
   }
 }

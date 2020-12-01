@@ -4,7 +4,7 @@ import org.scalatest.funsuite.AnyFunSuite
 
 import com.github.kmn4.sst.Presburger._
 
-class TestPresburgerSST extends AnyFunSuite {
+class TestParikhSST extends AnyFunSuite {
   def testEquiv[A, B, I](t1: StringIntTransducer[A, B, I], t2: StringIntTransducer[A, B, I])(
       cases: (Seq[A], Map[I, Int])*
   ) = cases.foreach {
@@ -24,7 +24,7 @@ class TestPresburgerSST extends AnyFunSuite {
         else succeed
     }
 
-  def substr(i: String, l: String) = PresburgerSST.substr("abcd".toSet)(i, l)
+  def substr(i: String, l: String) = ParikhSST.substr("abcd".toSet)(i, l)
   val substr1 = substr("i", "l")
   test("substr transduction") {
     assert(substr1.transduce("abab".toSeq, Map("i" -> 0, "l" -> 2)) == Set("ab".toSeq))
@@ -59,7 +59,7 @@ class TestPresburgerSST extends AnyFunSuite {
     testEquiv(lc, doubled)(equivCases: _*)
     val ap = lc.toAffineParikhSST
     testEquiv(ap, lc)(equivCases: _*)
-    val p = ap.toPresburgerSST
+    val p = ap.toParikhSST
     testEquiv(p, ap)(equivCases: _*)
     val direct = substr1 compose substr2
     testExamples(direct)(cases: _*)
