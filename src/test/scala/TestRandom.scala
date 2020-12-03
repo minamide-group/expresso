@@ -3,7 +3,6 @@ package com.github.kmn4.sst
 import org.scalatest.flatspec._
 
 object TestRandom {
-  import Concepts._
   import scala.util.{Random => R}
   def nextAs[A](as: Seq[A], maxRepeat: Int): List[A] =
     List.fill(R.nextInt(maxRepeat + 1))(as(R.nextInt(as.size)))

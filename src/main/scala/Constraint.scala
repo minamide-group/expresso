@@ -48,22 +48,22 @@ object Constraint {
       case class XJ(x: Int) extends X
       type Q = (Int, Int)
       type A = Option[C]
-      type Update = Concepts.Update[X, A]
-      type Edges = Iterable[(Q, A, Update, Q)]
+      type UpdateX = Update[X, A]
+      type Edges = Iterable[(Q, A, UpdateX, Q)]
       val jsst = this.toPairValuedSST(alphabet)
       val xjs: Set[X] = jsst.variables.map(XJ.apply)
       val xj = xjs.head
       val base = solverNsstTemplate[C, X](i, alphabet, XIn, xjs, List(Cop1(XIn), Cop1(xj), Cop2(None)))
       val xs = base.variables
-      val updates: Monoid[Update] = Concepts.updateMonoid(xs)
+      val updates: Monoid[UpdateX] = updateMonoid(xs)
       val states: Set[Q] = base.states - ((j, 0)) ++ jsst.states.map((j, _))
       val edges: Edges = {
         val baseNoJ = base.edges.filter { case (q, a, m, r) => (q._1 != j) && (r._1 != j) }
-        def unit(a: A): Update = updates.unit + (XIn -> List(Cop1(XIn), Cop2(a)))
-        def reset(a: A): Update = xs.map(_ -> Nil).toMap + (XIn -> List(Cop1(XIn), Cop2(a)))
+        def unit(a: A): UpdateX = updates.unit + (XIn -> List(Cop1(XIn), Cop2(a)))
+        def reset(a: A): UpdateX = xs.map(_ -> Nil).toMap + (XIn -> List(Cop1(XIn), Cop2(a)))
         val toJ = ((j - 1, 0), None, unit(None), (j, jsst.q0))
-        def embedList(l: Concepts.Cupstar[Int, A]): Concepts.Cupstar[X, A] = l.map(_.map1(XJ.apply))
-        def embedUpdate(m: Concepts.Update[Int, A]): Concepts.Update[X, A] =
+        def embedList(l: Cupstar[Int, A]): Cupstar[X, A] = l.map(_.map1(XJ.apply))
+        def embedUpdate(m: Update[Int, A]): Update[X, A] =
           m.map { case (x, l) => XJ(x) -> embedList(l) }
         val withinJ: Edges = jsst.edges.map {
           case (q, a, m, r) =>
@@ -123,7 +123,7 @@ object Constraint {
 
     def toPairValuedSST(alphabet: Set[C]): NSST[Int, C, Option[C], Int] = {
       val xs = Set(0, 1)
-      val unit: Concepts.Update[Int, Option[C]] = Concepts.updateMonoid(xs).unit
+      val unit: Update[Int, Option[C]] = updateMonoid(xs).unit
       val edges = alphabet.flatMap { a =>
         Iterable(
           (0, a, unit + (1 -> List(Cop1(1), Cop2(Some(a)))), 0),
@@ -180,8 +180,8 @@ object Constraint {
     def outputStringNum: Int = 1
     def defineStringNum: Int = 1
     def toPairValuedSST(alphabet: Set[C]): NSST[Int, C, Option[C], Int] = {
-      def embedList(l: Concepts.Cupstar[Int, C]): Concepts.Cupstar[Int, Option[C]] = l.map(_.map2(Some.apply))
-      def embedUpdate(m: Concepts.Update[Int, C]): Concepts.Update[Int, Option[C]] =
+      def embedList(l: Cupstar[Int, C]): Cupstar[Int, Option[C]] = l.map(_.map2(Some.apply))
+      def embedUpdate(m: Update[Int, C]): Update[Int, Option[C]] =
         m.map { case (x, l) => x -> embedList(l) }
       val s = toSST(alphabet)
       s.copy(
@@ -205,8 +205,8 @@ object Constraint {
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
       type Q = Int
       type X = Int
-      type Update = Concepts.Update[X, C]
-      type Edges = Iterable[(Q, C, Update, Q)]
+      type UpdateX = Update[X, C]
+      type Edges = Iterable[(Q, C, UpdateX, Q)]
       val x = 0
       val dfa = postfixDFA(target, alphabet)
       val states = dfa.states -- dfa.finalStates
@@ -226,7 +226,7 @@ object Constraint {
             (q, a, m, r)
           }
       }
-      val outF: Map[Q, Set[Concepts.Cupstar[X, C]]] = NSST.graphToMap {
+      val outF: Map[Q, Set[Cupstar[X, C]]] = NSST.graphToMap {
         // On each state q, DFA has partially matched prefix of target string.
         states.toList.map(q => {
           val stored = target.take(q)
@@ -244,8 +244,8 @@ object Constraint {
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
       type Q = Int
       type X = Int
-      type Update = Concepts.Update[X, C]
-      type Edges = Iterable[(Q, C, Update, Q)]
+      type UpdateX = Update[X, C]
+      type Edges = Iterable[(Q, C, UpdateX, Q)]
       val x = 0
       val dfa = postfixDFA(target, alphabet)
       val states = dfa.states -- dfa.finalStates
@@ -269,7 +269,7 @@ object Constraint {
           }
         }
       }
-      val outF: Map[Q, Set[Concepts.Cupstar[X, C]]] = NSST.graphToMap {
+      val outF: Map[Q, Set[Cupstar[X, C]]] = NSST.graphToMap {
         // On each state q, DFA has partially matched prefix of target string.
         states.toList.map(q => {
           val stored = target.take(q)
@@ -289,8 +289,8 @@ object Constraint {
       type Q = Int
       type A = C
       type B = C
-      type Update = Concepts.Update[X, B]
-      type Edge = (Q, A, Update, Q)
+      type UpdateX = Update[X, B]
+      type Edge = (Q, A, UpdateX, Q)
       val states = (0 to pos + 1).toSet
       val edges = states.flatMap { l =>
         if (l < pos) alphabet.map[Edge](a => (l, a, Map(x -> List(Cop1(x), Cop2(a))), l + 1))
@@ -401,8 +401,8 @@ object Constraint {
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
       type Q = Int
       type X = Int
-      type Update = Concepts.Update[X, C]
-      type Edges = Iterable[(Q, C, Update, Q)]
+      type UpdateX = Update[X, C]
+      type Edges = Iterable[(Q, C, UpdateX, Q)]
       val x = 0
       val dfa = postfixDFA(target, alphabet)
       val states = dfa.states
@@ -423,7 +423,7 @@ object Constraint {
               (q, a, Map(x -> List[Cop[Int, C]](Cop1(x))), q)
             }
       }
-      val outF: Map[Q, Set[Concepts.Cupstar[X, C]]] =
+      val outF: Map[Q, Set[Cupstar[X, C]]] =
         // On each state q, DFA has partially matched prefix of target string.
         states
           .map(q =>

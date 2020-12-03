@@ -15,12 +15,12 @@ class TestSolving extends AnyFlatSpec {
       expected: String*
   ) = assert(sst.transduce(toOptionList(w)) == expected.map(toOptionList).toSet)
 
-  def cupstarOf(xs: Set[Char], s: String): Concepts.Cupstar[Char, Char] =
+  def cupstarOf(xs: Set[Char], s: String): Cupstar[Char, Char] =
     s.map(c => if (xs contains c) Cop1(c) else Cop2(c)).toList
   def updateOf(
       xs: Set[Char],
       m: Map[Char, String]
-  ): Concepts.Update[Char, Char] =
+  ): Update[Char, Char] =
     xs.map(x => x -> cupstarOf(xs, m.getOrElse(x, x.toString()))).toMap
   def createNSST(
       states: Set[Int],

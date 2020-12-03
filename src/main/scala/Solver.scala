@@ -4,7 +4,6 @@ import smtlib.trees._
 import smtlib.theories.experimental.Strings
 import Commands._
 import Terms._
-
 import Constraint._
 import Solver._
 
@@ -320,7 +319,7 @@ object Solver {
 
   type SolverOption = Unit
   // Returns update which appends `w` to variable `x`, and is identity on other variables in `xs`.
-  def appendWordTo[X, A](x: X, xs: Set[X], w: List[A]): Concepts.Update[X, A] =
+  def appendWordTo[X, A](x: X, xs: Set[X], w: List[A]): Update[X, A] =
     xs.map(y => y -> (List(Cop1(y)) ++ (if (y == x) w.map(Cop2(_)) else Nil))).toMap
 
   // Returns NSST whose states `q`s are embedded to Cop2(q).
@@ -353,9 +352,9 @@ object Solver {
     val states = Set.from(for (i <- 0 to n) yield (i, 0))
     val inSet = (alphabet.map[Option[C]](Some(_))) + None
     val xs = otherVariables + inputVariable
-    val outF: Map[Q, Set[Concepts.Cupstar[X, B]]] = Map((n, 0) -> Set(output))
-    val updates = Concepts.updateMonoid(xs)
-    type Edges = Set[(Q, A, Concepts.Update[X, B], Q)]
+    val outF: Map[Q, Set[Cupstar[X, B]]] = Map((n, 0) -> Set(output))
+    val updates = updateMonoid(xs)
+    type Edges = Set[(Q, A, Update[X, B], Q)]
     val edges: Edges =
       for ((i, _) <- states; a <- inSet if i != n)
         yield (
@@ -448,17 +447,17 @@ object Solver {
     type NQ = (Int, Q) // Represents DFA number by Int.
     type NA = Option[A]
     type X = Unit
-    type Update = Concepts.Update[X, NA]
-    type VarString = Concepts.Cupstar[X, NA]
+    type UpdateX = Update[X, NA]
+    type VarString = Cupstar[X, NA]
     val newAlphabet = alphabet.map[NA](Some.apply) + None
     // Any update in the resulting NSST is one that just appends input character to variable ().
-    val update: Map[NA, Update] =
+    val update: Map[NA, UpdateX] =
       (newAlphabet).map(a => a -> Map(() -> List(Cop1(()), Cop2(a)))).toMap
     val (hd, tl) = (dfas.head, dfas.tail)
     val initialState = (0, hd.q0)
     var states: Set[NQ] = hd.states.map((0, _))
-    var edges: List[(NQ, NA, Update, NQ)] = hd.transition
-      .map[(NQ, NA, Update, NQ)] {
+    var edges: List[(NQ, NA, UpdateX, NQ)] = hd.transition
+      .map[(NQ, NA, UpdateX, NQ)] {
         case ((q, a), r) => ((0, q), Some(a), update(Some(a)), (0, r))
       }
       .toList
@@ -467,7 +466,7 @@ object Solver {
       states ++= dfa.states.map((i, _))
       edges ++:= finalStates.map(q => (q, None, update(None), (i, dfa.q0)))
       edges ++:= dfa.transition
-        .map[(NQ, NA, Update, NQ)] {
+        .map[(NQ, NA, UpdateX, NQ)] {
           case ((q, a), r) => ((i, q), Some(a), update(Some(a)), (i, r))
         }
         .toList
@@ -493,7 +492,7 @@ object Solver {
     * Note that output does not contain delimiter '#'. */
   def parikhNSST[C](n: Int, alpha: Set[C]): NSST[Int, Option[C], Int, Int] = {
     val states = Set.from(0 to n)
-    type Edge = (Int, Option[C], Concepts.Update[Int, Int], Int)
+    type Edge = (Int, Option[C], Update[Int, Int], Int)
     val edges: Iterable[Edge] = {
       val loop: Iterable[Edge] =
         for (q <- 0 until n; a <- alpha)

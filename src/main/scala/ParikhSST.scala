@@ -1,7 +1,6 @@
 package com.github.kmn4.sst
 
 import NSST.graphToMap
-import Concepts.{Cupstar, Update}
 
 trait StringIntTransducer[A, B, I] {
   def transduce(w: Seq[A], n: Map[I, Int]): Set[Seq[B]]
@@ -13,9 +12,9 @@ case class ParikhSST[Q, A, B, X, L, I](
     xs: Set[X],
     ls: Set[L],
     is: Set[I],
-    edges: Set[(Q, A, Concepts.Update[X, B], ParikhSST.ParikhUpdate[L], Q)],
+    edges: Set[(Q, A, Update[X, B], ParikhSST.ParikhUpdate[L], Q)],
     q0: Q,
-    outGraph: Set[(Q, Concepts.Cupstar[X, B], Map[L, Int])],
+    outGraph: Set[(Q, Cupstar[X, B], Map[L, Int])],
     acceptFormulas: Seq[Presburger.Formula[Either[I, L]]]
 ) extends StringIntTransducer[A, B, I] {
   type XBS = Cupstar[X, B]
@@ -42,7 +41,7 @@ case class ParikhSST[Q, A, B, X, L, I](
     q0,
     NSST.graphToMap(outGraph) { case (q, xbs, _) => q -> xbs }
   )
-  val mxMonoid: Monoid[UpdateX] = Concepts.updateMonoid(xs)
+  val mxMonoid: Monoid[UpdateX] = updateMonoid(xs)
   val mlMonoid: Monoid[UpdateL] = ParikhSST.parikhMonoid(ls)
   val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
 
@@ -54,7 +53,7 @@ case class ParikhSST[Q, A, B, X, L, I](
     outF(q).flatMap {
       case (xbs, lv) =>
         val lMap = mlMonoid.combine(ml, lv)
-        if (evalFormula(lMap, n)) Some(Concepts.erase1(Concepts.flatMap1(xbs, mx)))
+        if (evalFormula(lMap, n)) Some(erase1(flatMap1(xbs, mx)))
         else None
     }
   }
@@ -146,7 +145,7 @@ case class ParikhSST[Q, A, B, X, L, I](
         case None => backTrans((r, a)).map { case (q, mx, mh) => ((q, None), mx, mh) }
       }
     }
-    val (newStates, newEdges) = Concepts.searchStates(newOutGraph.map(_._1), inSet)(prevStates)(
+    val (newStates, newEdges) = searchStates(newOutGraph.map(_._1), inSet)(prevStates)(
       { case (q, _, _)           => q },
       { case (r, a, (q, mx, mh)) => (q, a, mx, mh, r) }
     )
@@ -179,7 +178,7 @@ case class ParikhSST[Q, A, B, X, L, I](
       updated = false
       for ((q, _, mx, ml, r) <- edges) {
         val charAssignedX = xs.filter(x => charExistsIn(mx(x)))
-        val nonEmptyXAssigned = xs.filter(x => Concepts.varsIn(mx(x)).exists(res(q).contains))
+        val nonEmptyXAssigned = xs.filter(x => varsIn(mx(x)).exists(res(q).contains))
         val addX = charAssignedX ++ nonEmptyXAssigned
         val resX = res(r)
         if (!(addX subsetOf resX)) {
@@ -337,7 +336,7 @@ case class ParikhSST[Q, A, B, X, L, I](
       } yield ((q1, kt), xms, ycs, lv, kv)
     }
 
-    val (states, edges) = Concepts.searchStates(outGraph.map(_._1), n1.inSet)(previousStates)(
+    val (states, edges) = searchStates(outGraph.map(_._1), n1.inSet)(previousStates)(
       { case (q, _, _)           => q },
       { case (r, a, (q, mx, ml)) => (q, a, mx, ml, r) }
     )
@@ -348,7 +347,7 @@ case class ParikhSST[Q, A, B, X, L, I](
     println("backward")
 
     // Remove all unreachable states.
-    val reachables = Concepts.closure[NQ](initialStates, graphToMap(edges) {
+    val reachables = closure[NQ](initialStates, graphToMap(edges) {
       case (q, _, _, _, r) => q -> r
     })
     // logger.unreachablesRemoved(reachables)
@@ -423,10 +422,10 @@ case class ParikhSST[Q, A, B, X, L, I](
     type UpdateYK = (UpdateY, UpdateK)
     type UpdateX = Update[X, UpdateYK]
     type UpdateXL = (UpdateX, UpdateL)
-    val myMonoid: Monoid[UpdateY] = Concepts.updateMonoid(ys)
+    val myMonoid: Monoid[UpdateY] = updateMonoid(ys)
     val mkMonoid: Monoid[UpdateK] = ParikhSST.parikhMonoid(ks)
     val mykMonoid: Monoid[UpdateYK] = Monoid.productMonoid(myMonoid, mkMonoid)
-    val mxMonoid: Monoid[UpdateX] = Concepts.updateMonoid(xs)
+    val mxMonoid: Monoid[UpdateX] = updateMonoid(xs)
     val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
     val trans = graphToMap(edges) { case (q, a, mx, ml, r)        => (q, a) -> (r, (mx, ml)) }
     val outF = graphToMap(outGraph) { case (q, xmms, ycs, lv, kv) => q -> (xmms, ycs, lv, kv) }
@@ -443,11 +442,11 @@ case class ParikhSST[Q, A, B, X, L, I](
       val (mx, ml) = m
       outF(q).flatMap {
         case (xmms, ycs, lv, kv) =>
-          val mxys = Concepts.erase1(Concepts.flatMap1(xmms, mx))
+          val mxys = erase1(flatMap1(xmms, mx))
           val (my, mk) = Monoid.fold(mxys)(mykMonoid)
           val klMap = mlMonoid.combine(ml, lv).map { case (l, n) => Cop1(l) -> n } ++
             mkMonoid.combine(mk, kv).map { case (k, n)           => Cop2(k) -> n }
-          if (evalFormula(klMap.toMap, n)) Some(Concepts.erase1(Concepts.flatMap1(ycs, my)))
+          if (evalFormula(klMap.toMap, n)) Some(erase1(flatMap1(ycs, my)))
           else None
       }
     }
@@ -460,7 +459,6 @@ case class ParikhSST[Q, A, B, X, L, I](
           (X, K)
         ], I] = {
       require(xs.nonEmpty) // For a technical reason
-      import Concepts.{erase1, erase2, updateMonoid}
       import MSST.{gamma, proj}
       type Edges =
         Set[(Q, A, Update[X, (Update[Y, C], ParikhSST.ParikhUpdate[K])], ParikhSST.ParikhUpdate[L], Q)]
@@ -501,7 +499,7 @@ case class ParikhSST[Q, A, B, X, L, I](
       type UpdateK2 = Map[K, (Int, Set[(X, K)])]
       val mk2Monoid: Monoid[UpdateK2] = Monoid.vectorMonoid(ks) // product of (Int, +) and (Set, union)
       val mykMonoidEmbed: Monoid[(Update[Y, Cop[Z, C]], UpdateK2)] =
-        Monoid.productMonoid(Concepts.updateMonoid(ys), mk2Monoid)
+        Monoid.productMonoid(updateMonoid(ys), mk2Monoid)
       // (S, List[X, Update]) has information for construct update of composed machine.
       def assignFold(s: S, alpha: Cupstar[X, UpdateYK]): (Update[Y, Cop[Z, C]], UpdateK2) = {
         val iotaS = iota(s) _
@@ -547,7 +545,7 @@ case class ParikhSST[Q, A, B, X, L, I](
         val const = xs.map(x => x -> id).toMap
         (q0, const)
       }
-      val (newStates, newEdges) = Concepts.searchStates(Set(newQ0), inSet)(nextStates)(
+      val (newStates, newEdges) = searchStates(Set(newQ0), inSet)(nextStates)(
         { case (r, _, _)           => r },
         { case (q, a, (r, mz, mj)) => (q, a, mz, mj, r) }
       )
@@ -597,14 +595,14 @@ case class ParikhSST[Q, A, B, X, L, I](
       xs: Set[X],
       ls: Set[L],
       is: Set[I],
-      edges: Set[(Q, A, Concepts.Update[X, B], ParikhSST.AffineUpdate[L], Q)],
+      edges: Set[(Q, A, Update[X, B], ParikhSST.AffineUpdate[L], Q)],
       q0: Q,
-      outGraph: Set[(Q, Concepts.Cupstar[X, B], Map[L, Int], Presburger.Formula[Either[I, L]])]
+      outGraph: Set[(Q, Cupstar[X, B], Map[L, Int], Presburger.Formula[Either[I, L]])]
   ) extends StringIntTransducer[A, B, I] {
     type UpdateX = Update[X, B]
     type UpdateL = ParikhSST.AffineUpdate[L]
     type UpdateXL = (UpdateX, UpdateL)
-    val mxMonoid: Monoid[UpdateX] = Concepts.updateMonoid(xs)
+    val mxMonoid: Monoid[UpdateX] = updateMonoid(xs)
     val mlMonoid: Monoid[UpdateL] = ParikhSST.affineMonoid(ls)
     val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
     val trans = graphToMap(edges) { case (q, a, mx, ml, r) => (q, a) -> (r, (mx, ml)) }
@@ -620,7 +618,7 @@ case class ParikhSST[Q, A, B, X, L, I](
                 val l = lMap.map { case (l, n) => Right(l) -> n }
                 val i = n.map { case (i, n)    => Left(i) -> n }
                 (l ++ i).toMap
-              }) Some(Concepts.erase1(Concepts.flatMap1(xbs, mx)))
+              }) Some(erase1(flatMap1(xbs, mx)))
           else None
       }
     }
@@ -665,9 +663,9 @@ case class ParikhSST[Q, A, B, X, L, I](
       xs: Set[X],
       ls: Set[L],
       is: Set[I],
-      edges: Set[(Q, A, Concepts.Update[X, B], ParikhSST.AffineUpdate[L], Q)],
+      edges: Set[(Q, A, Update[X, B], ParikhSST.AffineUpdate[L], Q)],
       q0: Q,
-      outGraph: Set[(Q, Concepts.Cupstar[X, B], Map[L, Int])],
+      outGraph: Set[(Q, Cupstar[X, B], Map[L, Int])],
       acceptFormula: Presburger.Formula[Either[I, L]]
   ) extends StringIntTransducer[A, B, I] {
     type XBS = Cupstar[X, B]
@@ -685,7 +683,7 @@ case class ParikhSST[Q, A, B, X, L, I](
       (l ++ i).toMap
     }
 
-    val mxMonoid: Monoid[UpdateX] = Concepts.updateMonoid(xs)
+    val mxMonoid: Monoid[UpdateX] = updateMonoid(xs)
     val mlMonoid: Monoid[UpdateL] = ParikhSST.affineMonoid(ls)
     val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
 
@@ -696,7 +694,7 @@ case class ParikhSST[Q, A, B, X, L, I](
       outF(q).flatMap {
         case (xbs, lv) =>
           val lMap = ParikhSST.applyAffine(ml, lv)
-          if (evalFormula(lMap, n)) Some(Concepts.erase1(Concepts.flatMap1(xbs, mx)))
+          if (evalFormula(lMap, n)) Some(erase1(flatMap1(xbs, mx)))
           else None
       }
     }
@@ -738,7 +736,7 @@ case class ParikhSST[Q, A, B, X, L, I](
         }
       }
       val (newStates, newEdges) =
-        Concepts.searchStates(newOutGraph.map { case (q, _, _) => q }, inSet)(prevStates)(
+        searchStates(newOutGraph.map { case (q, _, _) => q }, inSet)(prevStates)(
           { case (q, _)                => q },
           { case (r, a, (q, (mx, ml))) => (q, a, mx, ml, r) }
         )
@@ -788,7 +786,7 @@ object ParikhSST {
     val input: T = Var(Right(0))
     val taken: T = Var(Right(1))
     val sought: T = Var(Right(2))
-    val unit: (Concepts.Update[Int, A], ParikhSST.ParikhUpdate[Int]) =
+    val unit: (Update[Int, A], ParikhSST.ParikhUpdate[Int]) =
       (Map(X -> List(Cop1(X))), Map(0 -> 1, 1 -> 0, 2 -> 0))
     val edges = alphabet
       .flatMap { a =>
@@ -832,7 +830,7 @@ object ParikhSST {
     type Q = Int
     type X = Int
     type L = Int
-    type UpdateX = Concepts.Update[X, A]
+    type UpdateX = Update[X, A]
     type UpdateL = ParikhUpdate[L]
     type Edges = Iterable[(Q, A, UpdateX, UpdateL, Q)]
     val x = 0

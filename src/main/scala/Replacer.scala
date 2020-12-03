@@ -151,7 +151,7 @@ object Replacer {
           }
         aux(Set.empty, lowest.matchOne(a).distinctBy(_._1).reverse)
       }
-      val (states, edges) = Concepts.searchStates(Set(q0), alphabet)(nextStates)(
+      val (states, edges) = searchStates(Set(q0), alphabet)(nextStates)(
         { case (r, _)         => r },
         { case (q, a, (r, w)) => (q, a, w, r) }
       )
@@ -254,11 +254,11 @@ object Replacer {
     sealed trait SSTVar
     case object Out extends SSTVar
     case class Rep(x: Option[X], i: Int) extends SSTVar
-    type Update = Concepts.Update[SSTVar, A]
-    type Edge = (SSTQ, ParsedChar[A, Option[X]], Update, SSTQ)
+    type UpdateVar = Update[SSTVar, A]
+    type Edge = (SSTQ, ParsedChar[A, Option[X]], UpdateVar, SSTQ)
     val repXs = rep.indexed.collect { case Right((x, i)) => Rep(x, i) }
     val sstVars: Set[SSTVar] = repXs.toSet + Out
-    val updates: Monoid[Update] = Concepts.updateMonoid(sstVars)
+    val updates: Monoid[UpdateVar] = updateMonoid(sstVars)
     def aux(parent: SSTQ, varsTree: Tree[Option[X]]): (Set[SSTQ], Set[Edge]) =
       varsTree match {
         case Node(x, children @ _*) =>
@@ -275,8 +275,8 @@ object Replacer {
               alphabet.map(a => (cur, Left(a), update(a), cur))
             }
             val toParent: Edge = {
-              val zero: Update = sstVars.map(x => x -> Nil).toMap
-              val update: Update = if (x == None) zero + (Out -> (Cop1(Out) +: rep.indexed.map {
+              val zero: UpdateVar = sstVars.map(x => x -> Nil).toMap
+              val update: UpdateVar = if (x == None) zero + (Out -> (Cop1(Out) +: rep.indexed.map {
                 case Right((x, i)) => Cop1(Rep(x, i))
                 case Left(a)       => Cop2(a)
               }).toList)
