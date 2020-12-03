@@ -1,6 +1,6 @@
 package com.github.kmn4.sst
 
-sealed trait Cop[+A, +B] {
+sealed trait Cop[+A, +B] extends Product with Serializable {
   def map1[C](f: A => C): Cop[C, B] = Cop.map1(this, f)
   def map2[C](f: B => C): Cop[A, C] = Cop.map2(this, f)
   def commute: Cop[B, A] = Cop.commute(this)

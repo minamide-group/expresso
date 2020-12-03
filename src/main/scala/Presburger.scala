@@ -175,4 +175,23 @@ object Presburger {
     }
   }
 
+  object Suger {
+    implicit def const[X](i: Int): Term[X] = Const(i)
+    implicit class TermOps[X](t: Term[X]) {
+      def +(s: Term[X]): Term[X] = Add(Seq(t, s))
+      def -(s: Term[X]): Term[X] = Sub(t, s)
+      def *(i: Int): Term[X] = Mult(Const(i), t)
+      def ===(s: Term[X]): Formula[X] = Eq(t, s)
+      def <(s: Term[X]): Formula[X] = Lt(t, s)
+      def <=(s: Term[X]): Formula[X] = Le(t, s)
+      def >(s: Term[X]): Formula[X] = Gt(t, s)
+      def >=(s: Term[X]): Formula[X] = Ge(t, s)
+    }
+    implicit class FormulaOps[X](f: Formula[X]) {
+      def unary_! : Formula[X] = Not(f)
+      def &&(g: Formula[X]): Formula[X] = Conj(Seq(f, g))
+      def ||(g: Formula[X]): Formula[X] = Disj(Seq(f, g))
+      def ==>(g: Formula[X]): Formula[X] = Implies(f, g)
+    }
+  }
 }

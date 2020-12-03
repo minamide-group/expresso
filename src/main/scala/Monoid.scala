@@ -15,7 +15,7 @@ object Monoid {
     def combine(u1: Unit, u2: Unit) = ()
   }
   implicit def vectorMonoid[K, V: Monoid](ks: Iterable[K]): Monoid[Map[K, V]] = new Monoid[Map[K, V]] {
-    def unit = Map.empty.withDefaultValue(Monoid[V].unit)
+    val unit = ks.map(_ -> Monoid[V].unit).toMap
     def combine(v1: Map[K, V], v2: Map[K, V]) =
       ks.map(k => k -> Monoid[V].combine(v1(k), v2(k))).toMap
   }
@@ -36,6 +36,7 @@ object Monoid {
 
   def apply[M: Monoid]: Monoid[M] = implicitly[Monoid[M]]
 
+  // TODO Set can be arbitrary monad. This is a special case of WriterT.
   def transition[Q, A, M](
       qs: Set[Q],
       w: Seq[A],

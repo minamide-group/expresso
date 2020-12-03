@@ -449,6 +449,18 @@ case class NSST[Q, A, B, X](
     }
     true
   }
+
+  def toParikhSST[L, I]: ParikhSST[Q, A, B, X, L, I] = ParikhSST(
+    states,
+    in,
+    variables,
+    Set.empty,
+    Set.empty,
+    edges.map { case (q, a, m, r) => (q, a, m, Map.empty, r) },
+    q0,
+    outGraph.map { case (q, xbs) => (q, xbs, Map.empty[L, Int]) }.toSet,
+    Seq.empty
+  )
 }
 
 object NSST {

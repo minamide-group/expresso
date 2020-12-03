@@ -15,7 +15,7 @@
 (assert (= s (str.substr x l n)))
 (assert (= (str.len x) (+ l n)))
 (assert (= z (str.++ p y s)))
-(assert (<= (str.len y) 6))
+(assert (and (< 0 (str.len y)) (<= (str.len y) 6)))
 (assert (str.in.re z (str.to.re "<script>")))
 
 (check-sat)

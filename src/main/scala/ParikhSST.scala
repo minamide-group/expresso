@@ -193,6 +193,19 @@ case class ParikhSST[Q, A, B, X, L, I](
     Map.from { res.map { case (q, s) => q -> s.toSet } }.withDefaultValue(Set.empty)
   }
 
+  /** Returns a NSST with redundant variables removed. */
+  def removeRedundantVars: ParikhSST[Q, A, B, X, L, I] = {
+    val newVars = states.flatMap(nonEmptyVarsAt)
+    def deleteNotUsed(alpha: XBS): XBS =
+      alpha.filter { case Cop1(x) => newVars contains x; case _ => true }
+    def newUpdate(m: Update[X, B]): Update[X, B] =
+      newVars.map(x => x -> deleteNotUsed(m(x))).toMap
+    val newEdges =
+      edges.map { case (q, a, mx, ml, r)               => (q, a, newUpdate(mx), ml, r) }
+    val newOutGraph = outGraph.map { case (q, xbs, lv) => (q, deleteNotUsed(xbs), lv) }
+    this.copy(xs = newVars, edges = newEdges, outGraph = newOutGraph)
+  }
+
   def composeNsstsToMsst[R, C, Y, K](
       n1: ParikhSST[Q, A, B, X, L, I],
       n2: ParikhSST[R, B, C, Y, K, I]
@@ -378,12 +391,8 @@ case class ParikhSST[Q, A, B, X, L, I](
     res
   }
 
-  def compose[R, C, Y, K](that: ParikhSST[R, B, C, Y, K, I]): ParikhSST[Int, A, C, Int, Int, I] = {
-
-    // End of composeNsstsToMsst
-
-    composeNsstsToMsst(this, that)(NopLogger).toLocallyConstrainedAffineParikhSST.toAffineParikhSST.toParikhSST.renamed
-  }
+  def compose[R, C, Y, K](that: ParikhSST[R, B, C, Y, K, I]): ParikhSST[Int, A, C, Int, Int, I] =
+    composeNsstsToMsst(this, that)(NopLogger).toLocallyConstrainedAffineParikhSST.toAffineParikhSST.toParikhSST.renamed.removeRedundantVars
 
   case class MonoidSST[Q, C, Y, K](
       states: Set[Q],
@@ -454,9 +463,7 @@ case class ParikhSST[Q, A, B, X, L, I](
       import Concepts.{erase1, erase2, updateMonoid}
       import MSST.{gamma, proj}
       type Edges =
-        Set[
-          (Q, A, Update[X, (Update[Y, C], ParikhSST.ParikhUpdate[K])], ParikhSST.ParikhUpdate[L], Q)
-        ]
+        Set[(Q, A, Update[X, (Update[Y, C], ParikhSST.ParikhUpdate[K])], ParikhSST.ParikhUpdate[L], Q)]
       type M1Y = Map[Y, List[Y]]
       type M2Y = Map[(Y, Boolean), List[C]]
       type S = Map[X, M1Y]
@@ -551,12 +558,12 @@ case class ParikhSST[Q, A, B, X, L, I](
         } yield {
           val (my, mk) = assignFold(s, xmms)
           val assigned = ycs.flatMap {
-            case Cop1(y) => my(y)
-            case Cop2(b) => List(Cop2(Cop2(b)))
+            case Cop1(y) => erase1(my(y))
+            case Cop2(b) => List(Cop2(b))
           }
           val v: Iterable[(J, Int)] = js.map {
             case j @ Cop1(l)      => j -> lv(l)
-            case j @ Cop2((x, k)) => j -> 0 // mk(k)._1
+            case j @ Cop2((x, k)) => j -> 0
           }
           val formula = {
             type FormulaVar = Either[I, Cop[L, (X, K)]]
@@ -576,7 +583,7 @@ case class ParikhSST[Q, A, B, X, L, I](
                 })
             }
           }
-          (nq, erase1(assigned), v.toMap, formula)
+          (nq, assigned, v.toMap, formula)
         }
       }
 
@@ -771,19 +778,18 @@ object ParikhSST {
       l -> (s.map(v).sum + i)
   }
 
-  def substr[A, I](alphabet: Set[A])(iName: I, lName: I): ParikhSST[Int, A, A, Int, Int, I] = {
+  def substr[A, I](alphabet: Set[A])(idxName: I, lenName: I): ParikhSST[Int, A, A, Int, Int, I] = {
     import Presburger._
+    import Suger._
     val X = 0
     type T = Term[Either[I, Int]]
-    val i: T = Var(Left(iName))
-    val l: T = Var(Left(lName))
-    val d: T = Var(Right(0))
-    val r0: T = Var(Right(1))
-    val r1: T = Var(Right(2))
-    val zero: T = Const(0)
-    val idxOutOrNegLen = Disj(Seq(Lt(i, zero), Ge(i, d), Le(l, zero)))
+    val idx: T = Var(Left(idxName))
+    val len: T = Var(Left(lenName))
+    val input: T = Var(Right(0))
+    val taken: T = Var(Right(1))
+    val sought: T = Var(Right(2))
     val unit: (Concepts.Update[Int, A], ParikhSST.ParikhUpdate[Int]) =
-      (Map(X -> List(Cop1(X))), (1 to 2).map(h => h -> 0).toMap + (0 -> 1))
+      (Map(X -> List(Cop1(X))), Map(0 -> 1, 1 -> 0, 2 -> 0))
     val edges = alphabet
       .flatMap { a =>
         val (unitX, unitH) = unit
@@ -799,24 +805,81 @@ object ParikhSST {
         )
       }
       .map { case (q, a, (mx, mh), r) => (q, a, mx, mh, r) }
+    val acceptFormulas = {
+      val idxOutOrNegLen = idx < 0 || idx >= input || len <= 0
+      Seq(
+        idxOutOrNegLen ==> (taken === 0),
+        (!idxOutOrNegLen && len <= input - idx) ==> (sought === idx && taken === len),
+        (!idxOutOrNegLen && len > input - idx) ==> (sought === idx && taken === input - idx)
+      )
+    }
     ParikhSST[Int, A, A, Int, Int, I](
       Set(0, 1, 2),
       alphabet,
       Set(X),
       Set(0, 1, 2),
-      Set(iName, lName),
+      Set(idxName, lenName),
       edges,
       0,
       (0 to 2).map((_, List(Cop1(X)), (0 to 2).map(h => h -> 0).toMap)).toSet,
-      Seq(
-        Implies(idxOutOrNegLen, Eq(r0, zero)),
-        Implies(Conj(Seq(Not(idxOutOrNegLen), Le(l, Sub(d, i)))), Conj(Seq(Eq(r1, i), Eq(r0, l)))),
-        Implies(Conj(Seq(Not(idxOutOrNegLen), Gt(l, Sub(d, i)))), Conj(Seq(Eq(r1, i), Eq(r0, Sub(d, i)))))
-      )
+      acceptFormulas
     )
   }
 
-  def indexOf[A, I](alphabet: Set[A])(iName: I): ParikhSST[Int, A, A, Int, Int, I] = {
-    ???
+  def indexOf[A, I](alphabet: Set[A])(word: Seq[A], iName: I): ParikhSST[Int, A, A, Int, Int, I] = {
+    import Presburger._
+    import Suger._
+    type Q = Int
+    type X = Int
+    type L = Int
+    type UpdateX = Concepts.Update[X, A]
+    type UpdateL = ParikhUpdate[L]
+    type Edges = Iterable[(Q, A, UpdateX, UpdateL, Q)]
+    val x = 0
+    type T = Term[Either[I, Int]]
+    val i: T = Var(Left(iName))
+    val input: T = Var(Right(0))
+    val output: T = Var(Right(1))
+    val dfa = Solver.postfixDFA(word, alphabet)
+    val states = dfa.states
+    val edges: Edges = {
+      for (q <- states; a <- alphabet)
+        yield
+          if (!dfa.finalStates(q)) {
+            val r = dfa.transition((q, a))
+            val append =
+              if (dfa.finalStates(r)) Seq.empty
+              else {
+                val stored = word.take(q) ++ List(a)
+                stored.take(stored.length - r)
+              }
+            val m = Map(x -> (Cop1(x) :: append.map(Cop2.apply).toList))
+            val v = Map(0 -> 1, 1 -> append.length)
+            (q, a, m, v, r)
+          } else (q, a, Map(x -> List(Cop1(x))), Map(0 -> 1, 1 -> 0), q)
+    }
+    val outGraph =
+      // On each state q, DFA has partially matched prefix of target string.
+      states
+        .map { q =>
+          // Need to append to variable the prefix of target string stored in DFA.
+          val stored = word.take(q % word.length)
+          (q, List(Cop1(x)) ++ stored.toList.map(Cop2.apply), Map(0 -> 0, 1 -> stored.length))
+        }
+    val acceptFormulas = Seq(
+      output >= input ==> (i === -1),
+      output < input ==> (i === output)
+    )
+    ParikhSST[Q, A, A, X, L, I](
+      states,
+      alphabet,
+      Set(x),
+      Set(0, 1),
+      Set(iName),
+      edges.toSet,
+      dfa.q0,
+      outGraph,
+      acceptFormulas
+    )
   }
 }
