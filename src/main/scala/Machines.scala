@@ -464,24 +464,22 @@ class ENFT[Q, A, M: Monoid](
     * If configuration has `m` of `M` and `prune(m)` is `true`,
     * then that search branch is teminated. */
   def takeInputFor(wanted: M, prune: M => Boolean): List[A] = {
-    val inO = List.from(in.map[Option[A]](Some.apply) + None)
-    val monoid = implicitly[Monoid[M]]
-    var queue: Queue[(Q, List[A], M)] = Queue((initial, Nil, monoid.unit))
+    val inSetEps = List.from(in.map(Option.apply) + None)
+    val queue = collection.mutable.Queue[(Q, List[A], M)]((initial, Nil, Monoid[M].unit))
     var visited: Set[(Q, M)] = queue.view.map { case (q, _, m) => (q, m) }.toSet
     def terminate(q: Q, m: M): Boolean = prune(m) || visited((q, m))
     while (queue.nonEmpty) {
-      val (q, as1, m1) = queue.head
-      queue = queue.tail
+      val (q, as1, m1) = queue.dequeue()
       if (q == finalState && m1 == wanted) return as1.reverse
       val added = {
-        inO.flatMap(o =>
+        inSetEps.flatMap(o =>
           trans((q, o)).flatMap {
             case (q, m2) => {
               val as = o match {
                 case None    => as1
                 case Some(a) => a :: as1
               }
-              val m = monoid.combine(m1, m2)
+              val m = Monoid[M].combine(m1, m2)
               if (terminate(q, m)) Set.empty
               else Set((q, as, m))
             }
