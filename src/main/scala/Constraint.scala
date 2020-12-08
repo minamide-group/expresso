@@ -226,7 +226,7 @@ object Constraint {
             (q, a, m, r)
           }
       }
-      val outF: Map[Q, Set[Cupstar[X, C]]] = NSST.graphToMap {
+      val outF: Map[Q, Set[Cupstar[X, C]]] = graphToMap {
         // On each state q, DFA has partially matched prefix of target string.
         states.toList.map(q => {
           val stored = target.take(q)
@@ -269,7 +269,7 @@ object Constraint {
           }
         }
       }
-      val outF: Map[Q, Set[Cupstar[X, C]]] = NSST.graphToMap {
+      val outF: Map[Q, Set[Cupstar[X, C]]] = graphToMap {
         // On each state q, DFA has partially matched prefix of target string.
         states.toList.map(q => {
           val stored = target.take(q)

@@ -168,7 +168,7 @@ case class CounterAutomaton[Q, A](
     q0s: Set[Q],
     finalStates: Set[Q]
 ) {
-  val trans = NSST.graphToMap(edges) { case (q, a, n, r) => (q, a) -> (r, n) }
+  val trans = graphToMap(edges) { case (q, a, n, r) => (q, a) -> (r, n) }
   def transduce(w: List[A]): Set[Int] =
     Monoid.transition(q0s, w, (q: Q, a: A) => trans((q, a))).withFilter(qn => finalStates(qn._1)).map(_._2)
   def diffCA[R](that: CounterAutomaton[R, A]): CounterAutomaton[(Q, R), A] = {
@@ -205,7 +205,7 @@ case class CounterMachine[Q](
     q0s: Set[Q],
     finalStates: Set[Q]
 ) {
-  val trans = NSST.graphToMap(edges) { case (q, n, r) => q -> (r, n) }
+  val trans = graphToMap(edges) { case (q, n, r) => q -> (r, n) }
   def renamed: CounterMachine[Int] = {
     val stateMap = states.zipWithIndex.toMap
     CounterMachine(
@@ -271,7 +271,7 @@ case class CounterMachine[Q](
     case class NFA[R](states: Set[R], edges: Set[(R, G, R)], finals: Set[R])
     // NFA accepting initial configurations of this PDS i.e. {(q, Z) | q is a initial state}
     type R = Option[Q]
-    val initCfg = NFA[R](NSST.addNone(this.states), q0s.map(q => (Some(q), Z, None)), Set(None))
+    val initCfg = NFA[R](addNone(this.states), q0s.map(q => (Some(q), Z, None)), Set(None))
 
     // NQ: states of new P-automaton that accepts post configurations of initCfg.
     type NQ = Either[R, (Q, List[G], Q)]
@@ -288,15 +288,15 @@ case class CounterMachine[Q](
         }.map(gs => (q, gs, r))
     }
 
-    val pdsEdges0: Map[(Q, G), Set[Q]] = NSST.graphToMap(pdsEdges.flatMap {
+    val pdsEdges0: Map[(Q, G), Set[Q]] = graphToMap(pdsEdges.flatMap {
       case (q, List(g), r) => Some((q, g) -> r)
       case _               => None
     })(identity)
-    val pdsEdges1: Map[(Q, G), Set[(Q, G)]] = NSST.graphToMap(pdsEdges.flatMap {
+    val pdsEdges1: Map[(Q, G), Set[(Q, G)]] = graphToMap(pdsEdges.flatMap {
       case (q, List(g, g1), r) => Some((q, g) -> (r, g1))
       case _                   => None
     })(identity)
-    val pdsEdges2: Map[(Q, G), Set[(Q, G, G)]] = NSST.graphToMap(pdsEdges.flatMap {
+    val pdsEdges2: Map[(Q, G), Set[(Q, G, G)]] = graphToMap(pdsEdges.flatMap {
       case (q, List(g, g1, g2), r) => Some((q, g) -> (r, g1, g2))
       case _                       => None
     })(identity)
@@ -326,7 +326,7 @@ case class CounterMachine[Q](
       }
     }
 
-    val postMap = NSST.graphToMap(postEdges) { case (q, a, r) => (q, Option(a)) -> r }
+    val postMap = graphToMap(postEdges) { case (q, a, r) => (q, Option(a)) -> r }
     finalStates.exists { qf =>
       val nfa = new com.github.kmn4.sst.NFA[NQ, G](
         postStates,
@@ -384,7 +384,7 @@ case class MNFT[Q, A, M: Monoid](
     initials: Set[Q],
     partialF: Map[Q, Set[M]]
 ) {
-  val trans = NSST.graphToMap(edges) { case (q, a, m, r) => (q, a) -> (r, m) }
+  val trans = graphToMap(edges) { case (q, a, m, r) => (q, a) -> (r, m) }
   val acceptF = partialF.withDefaultValue(Set.empty)
   def transOne(q: Q, a: A): Set[(Q, M)] = trans((q, a))
   def outputAt(q: Q, m: M): Set[M] = acceptF(q).map(mf => implicitly[Monoid[M]].combine(m, mf))
@@ -401,10 +401,10 @@ case class MNFT[Q, A, M: Monoid](
     val reachable =
       closure(
         initials,
-        NSST.graphToMap(edges) { case (q, _, _, r) => q -> r }
+        graphToMap(edges) { case (q, _, _, r) => q -> r }
       )
     val invReachable =
-      closure(partialF.filter { case (q, s) => s.nonEmpty }.keySet, NSST.graphToMap(edges) {
+      closure(partialF.filter { case (q, s) => s.nonEmpty }.keySet, graphToMap(edges) {
         case (q, a, m, r) => r -> q
       })
     val needed = reachable intersect invReachable
@@ -447,7 +447,7 @@ class ENFT[Q, A, M: Monoid](
     val initial: Q,
     val finalState: Q
 ) {
-  val trans = NSST.graphToMap(edges) { case (q, a, m, r) => (q, a) -> (r, m) }
+  val trans = graphToMap(edges) { case (q, a, m, r) => (q, a) -> (r, m) }
   def renamed: ENFT[Int, A, M] = {
     val stateMap = (states zip LazyList.from(0)).toMap
     val newEdges = edges.map { case (q, a, m, r) => (stateMap(q), a, m, stateMap(r)) }

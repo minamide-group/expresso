@@ -81,4 +81,19 @@ package object sst {
     throw new Exception("Given system is empty.")
   }
 
+  def wrapSome[T](s: Set[T]): Set[Option[T]] = s.map[Option[T]](Some.apply)
+  def addNone[T](s: Set[T]): Set[Option[T]] = wrapSome(s) + None
+
+  def graphToMap[E, K, V](graph: Iterable[E])(f: E => (K, V)): Map[K, Set[V]] =
+    graph.view
+      .map(f)
+      .groupBy(_._1)
+      .view
+      .mapValues(_.map { case (k, v) => v }.toSet)
+      .toMap
+      .withDefaultValue(Set.empty)
+
+  def mapToGraph[E, K, V](map: Map[K, Set[V]])(f: ((K, V)) => E): Iterable[E] =
+    for ((k, vs) <- map; v <- vs) yield f(k, v)
+
 }

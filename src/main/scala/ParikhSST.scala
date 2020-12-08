@@ -1,7 +1,5 @@
 package com.github.kmn4.sst
 
-import NSST.graphToMap
-
 trait StringIntTransducer[A, B, I] {
   def transduce(w: Seq[A], n: Map[I, Int]): Set[Seq[B]]
 }
@@ -39,7 +37,7 @@ case class ParikhSST[Q, A, B, X, L, I](
     xs,
     edges.map { case (q, a, mx, ml, r) => (q, a, mx, r) },
     q0,
-    NSST.graphToMap(outGraph) { case (q, xbs, _) => q -> xbs }
+    graphToMap(outGraph) { case (q, xbs, _) => q -> xbs }
   )
   val mxMonoid: Monoid[UpdateX] = updateMonoid(xs)
   val mlMonoid: Monoid[UpdateL] = ParikhSST.parikhMonoid(ls)
@@ -108,7 +106,7 @@ case class ParikhSST[Q, A, B, X, L, I](
         }
     }
     type NQ = (Q, Option[X])
-    val backTrans = NSST.graphToMap(edges) { case (q, a, mx, mh, r) => (r, a) -> (q, mx, mh) }
+    val backTrans = graphToMap(edges) { case (q, a, mx, mh, r) => (r, a) -> (q, mx, mh) }
     def prevStates(nq: NQ, a: A): Iterable[(NQ, Update[X, B], ParikhSST.ParikhUpdate[L])] = {
       // q -[a / (mx, mh)]-> r
       val (r, x) = nq
@@ -708,7 +706,7 @@ case class ParikhSST[Q, A, B, X, L, I](
         val id = ls.map(l => l -> l).toMap
         outGraph.map { case (q, xbs, lv) => ((q, id), xbs, lv) }
       }
-      val backTrans = NSST.graphToMap(edges) { case (q, a, mx, ml, r) => (r, a) -> (q, mx, ml) }
+      val backTrans = graphToMap(edges) { case (q, a, mx, ml, r) => (r, a) -> (q, mx, ml) }
       // ll means Map[L, L], i.e. for each l, where it's going to?
       def llOf(ml: ParikhSST.AffineUpdate[L]): Map[L, L] =
         for ((l2, (_, s)) <- ml; l1 <- s) yield l1 -> l2

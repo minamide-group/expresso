@@ -165,7 +165,7 @@ object Replacer {
         Set(()),
         edges.map { case (q, a, w, r) => (q, a, Map(() -> (Cop1(()) +: w.map(Cop2.apply)).toList), r) },
         q0,
-        NSST.graphToMap(outGraph.map {
+        graphToMap(outGraph.map {
           case (q, w) => q -> (Cop1(()) +: w.map(Cop2.apply)).toList
         })(identity)
       )
