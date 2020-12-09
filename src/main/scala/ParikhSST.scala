@@ -1,5 +1,8 @@
 package com.github.kmn4.sst
 
+import com.microsoft.z3
+import ParikhSST.Implicits._
+
 trait StringIntTransducer[A, B, I] {
   def transduce(w: Seq[A], n: Map[I, Int]): Set[Seq[B]]
 }
@@ -43,7 +46,6 @@ case class ParikhSST[Q, A, B, X, L, I](
   val mlMonoid: Monoid[UpdateL] = ParikhSST.parikhMonoid(ls)
   val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
 
-  def transduce(w: Seq[A]): Set[List[B]] = sst.transduce(w.toList)
   def transition(qs: Set[Q], w: Seq[A]): Set[(Q, UpdateXL)] =
     Monoid.transition(qs, w.toList, (q: Q, a: A) => trans(q, a))(mxlMonoid)
   def outputAt(q: Q, m: UpdateXL, n: Map[I, Int]): Set[List[B]] = {
@@ -57,6 +59,9 @@ case class ParikhSST[Q, A, B, X, L, I](
   }
   def transduce(w: Seq[A], n: Map[I, Int]): Set[Seq[B]] = transition(Set(q0), w).flatMap {
     case (q, m) => outputAt(q, m, n)
+  }
+  def transduce(w: Seq[A]): Set[(List[B], Map[L, Int])] = transition(Set(q0), w).flatMap {
+    case (q, (mx, ml)) => outF(q).map { case (xbs, lv) => (mx.update(emptyEnv).eval(xbs), ml(lv)) }
   }
 
   def renamed: ParikhSST[Int, A, B, Int, Int, I] = {
@@ -754,6 +759,78 @@ case class ParikhSST[Q, A, B, X, L, I](
     }
   }
 
+  def toLogVectorEpsNFT: ENFT[Option[Q], A, Map[L, Int]] = {
+    implicit val mon: Monoid[ParikhSST.ParikhUpdate[L]] = Monoid.vectorMonoid(ls)
+    ENFT(
+      addNone(states),
+      inSet,
+      edges.map { case (q, a, m, v, r) => (Option(q), Option(a), v, Option(r)) } ++ outGraph.map {
+        case (q, _, v)                 => (Option(q), None, v, None)
+      },
+      Some(q0),
+      None
+    )
+  }
+
+  /** Returns a formula that captures the Parikh image of log variables of this PSST. */
+  def parikhImageFormula: Presburger.Formula[Either[Int, L]] = {
+    val formula = Parikh.parikhEnftToPresburgerFormula(toLogVectorEpsNFT)
+
+    var i = 0
+    val eMap = collection.mutable.Map.empty[(Option[Q], Map[L, Int], Option[Q]), Int]
+    val qMap = collection.mutable.Map.empty[Option[Q], Int]
+    def newVar = {
+      i += 1
+      i
+    }
+    formula.renameVars {
+      case Parikh.BNum(l)     => Right(l)
+      case Parikh.EdgeNum(e)  => Left(eMap.getOrElseUpdate(e, newVar))
+      case Parikh.Distance(q) => Left(qMap.getOrElseUpdate(q, newVar))
+    }
+  }
+
+  /** Returns a pair (n, v) of I vector and L vector that meets the following if exists:
+    * there exists w and w' such that this transduces w to (w', v) and formula(n, v) == true. */
+  def ilVectorOption: Option[(Map[I, Int], Map[L, Int])] = {
+    val formulas = {
+      acceptFormulas.map(_.renameVars {
+        case Left(i)  => s"int_$i"
+        case Right(l) => s"log_$l"
+      }) :+ parikhImageFormula.renameVars {
+        case Left(i)  => s"bound_$i"
+        case Right(l) => s"log_$l"
+      }
+    }
+    withZ3Context { (ctx) =>
+      val solver = ctx.mkSolver()
+      val z3Exprs = formulas.map(Presburger.Formula.formulaToZ3Expr(ctx, Map.empty[String, z3.IntExpr], _))
+      solver.add(z3Exprs: _*)
+      if (solver.check() == z3.Status.SATISFIABLE) {
+        val model = solver.getModel()
+        val n = is.map(i => i -> model.eval(ctx.mkIntConst(s"int_$i"), false).toString.toInt)
+        val v = ls.map(l => l -> model.eval(ctx.mkIntConst(s"log_$l"), false).toString.toInt)
+        Some((n.toMap, v.toMap))
+      } else None
+    }
+  }
+
+  /** Returns w if there exists w' such that this transduces w to (w', v) and formula(n, v) == true. */
+  def inputOutputFor(v: Map[L, Int]): (Seq[A], Seq[B]) = {
+    val enft = toLogVectorEpsNFT
+    val in = enft.takeInputFor(v, u => u.exists { case (l, i) => i > v(l) })
+    val (out, _) = transduce(in).find { case (out, u) => v.forall { case (l, i) => i == u(l) } }.get
+    (in, out)
+  }
+
+  /** Returns an input string, vector and an output string of this PSST if exists. */
+  def outputOption: Option[(Seq[A], Map[I, Int], Seq[B])] = {
+    ilVectorOption.map {
+      case (n, v) =>
+        val (in, out) = inputOutputFor(v)
+        (in, n, out)
+    }
+  }
 }
 
 object ParikhSST {
@@ -772,6 +849,12 @@ object ParikhSST {
   def applyAffine[L](m: AffineUpdate[L], v: Map[L, Int]): Map[L, Int] = m.map {
     case (l, (i, s)) =>
       l -> (s.map(v).sum + i)
+  }
+
+  object Implicits {
+    implicit class ParikhUpdateOps[L](ml: ParikhUpdate[L]) {
+      def apply(lv: Map[L, Int]) = ml.map { case (l, i) => l -> (i + lv(l)) }
+    }
   }
 
   def substr[A, I](alphabet: Set[A])(idxName: I, lenName: I): ParikhSST[Int, A, A, Int, Int, I] = {
