@@ -231,7 +231,7 @@ class TestSolving extends AnyFlatSpec {
     val freeVars = (0 until 3).map(i => s"y$i").map(y => y -> ctx.mkIntConst(y))
     val zero = ctx.mkInt(0)
     val positives = freeVars.map { case (_, v) => ctx.mkGe(v, zero) }
-    val expr = Presburger.Formula.formulaToExpr(ctx, freeVars.toMap, formula)
+    val expr = Presburger.Formula.formulaToZ3Expr(ctx, freeVars.toMap, formula)
     val growsOne = ctx.mkEq(ctx.mkSub(freeVars(2)._2, freeVars(0)._2), ctx.mkInt(1))
     val leThree = ctx.mkLe(freeVars(0)._2, ctx.mkInt(3))
     val solver = ctx.mkSolver()

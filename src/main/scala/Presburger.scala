@@ -136,7 +136,7 @@ object Presburger {
     }
 
     /** Convert a given formula to z3.BoolExpr. */
-    def formulaToExpr[X](
+    def formulaToZ3Expr[X](
         ctx: z3.Context,
         freeVars: Map[X, z3.IntExpr],
         f: Formula[X]
@@ -167,7 +167,7 @@ object Presburger {
         case Not(f)     => ctx.mkNot(fromFormula(f))
         case Exists(vs, f) => {
           val xs = vs.map { case Var(x) => newVar(x) }
-          val body = formulaToExpr(ctx, varMap, f)
+          val body = formulaToZ3Expr(ctx, varMap, f)
           ctx.mkExists(xs.toArray, body, 0, null, null, null, null)
         }
       }

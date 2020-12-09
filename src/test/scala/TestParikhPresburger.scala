@@ -66,7 +66,7 @@ class TestParikhPresburger extends AnyFlatSpec {
     val freeVars = Seq(a, b).map(a => s"y$a").map(y => y -> ctx.mkIntConst(y))
     val zero = ctx.mkInt(0)
     val positives = freeVars.map { case (_, v) => ctx.mkGe(v, zero) }
-    val expr = Presburger.Formula.formulaToExpr(ctx, freeVars.toMap, f)
+    val expr = Presburger.Formula.formulaToZ3Expr(ctx, freeVars.toMap, f)
     val solver = ctx.mkSolver()
     solver.add(expr +: positives: _*)
     assert(solver.check() == z3.Status.SATISFIABLE)

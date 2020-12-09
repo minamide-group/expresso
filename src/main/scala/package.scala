@@ -4,8 +4,28 @@ import scala.collection.immutable.Queue
 
 package object sst {
 
+  type SeqEnv[X, B] = Map[X, Seq[B]]
   type Cupstar[X, B] = List[Cop[X, B]]
   type Update[X, B] = Map[X, Cupstar[X, B]]
+
+  def emptyEnv[X, B]: SeqEnv[X, B] = Map.empty[X, Seq[B]].withDefaultValue(Seq.empty)
+
+  implicit class SeqEnvOps[X, B](env: SeqEnv[X, B]) {
+    def eval(xbs: Cupstar[X, B]): List[B] =
+      xbs.flatMap {
+        case Cop1(x) => env(x)
+        case Cop2(b) => Seq(b)
+      }.toList
+  }
+
+  implicit class UpdateOps[X, B](m: Update[X, B]) {
+    def subst(xbs: List[Cop[X, B]]): List[Cop[X, B]] = xbs.flatMap {
+      case Cop1(x) => m(x)
+      case Cop2(b) => List(Cop2(b))
+    }
+    def update(env: SeqEnv[X, B]): SeqEnv[X, B] = m.map { case (x, xbs) => x -> env.eval(xbs) }
+  }
+
   def flatMap1[A, B, C](abs: Cupstar[A, B], f: A => Cupstar[C, B]): Cupstar[C, B] =
     abs.flatMap { case Cop1(a) => f(a); case Cop2(b) => List(Cop2(b)) }
   def erase1[A, B](abs: Cupstar[A, B]): List[B] = abs.flatMap(Cop.erase1(_))
@@ -95,5 +115,18 @@ package object sst {
 
   def mapToGraph[E, K, V](map: Map[K, Set[V]])(f: ((K, V)) => E): Iterable[E] =
     for ((k, vs) <- map; v <- vs) yield f(k, v)
+
+  def makeZ3Context() = {
+    val cfg = new java.util.HashMap[String, String]()
+    cfg.put("model", "true")
+    new com.microsoft.z3.Context(cfg)
+  }
+
+  def withZ3Context[T](body: com.microsoft.z3.Context => T): T = {
+    val ctx = makeZ3Context()
+    val res = body(ctx)
+    ctx.close()
+    res
+  }
 
 }

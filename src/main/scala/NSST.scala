@@ -178,9 +178,9 @@ case class NSST[Q, A, B, X](
       var eMap: Map[E, String] = Map.empty
       var qMap: Map[Int, String] = Map.empty
       def renamer(x: X): String = x match {
-        case Parikh.BNum(b) => s"y${b}"
-        case Parikh.ENum(e) => eMap.getOrElse(e, { val s = s"x${newVar()}"; eMap += e -> s; s })
-        case Parikh.Dist(q) => qMap.getOrElse(q, { val s = s"x${newVar()}"; qMap += q -> s; s })
+        case Parikh.BNum(b)     => s"y${b}"
+        case Parikh.EdgeNum(e)  => eMap.getOrElse(e, { val s = s"x${newVar()}"; eMap += e -> s; s })
+        case Parikh.Distance(q) => qMap.getOrElse(q, { val s = s"x${newVar()}"; qMap += q -> s; s })
       }
     }
     Presburger.Formula.renameVars(formula)(new Renamer().renamer _)

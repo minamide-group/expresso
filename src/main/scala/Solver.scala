@@ -734,9 +734,9 @@ object Solver {
             var eMap: Map[E, String] = Map.empty
             var qMap: Map[Int, String] = Map.empty
             def renamer(x: X): String = x match {
-              case BNum(b) => s"y${b}"
-              case ENum(e) => eMap.getOrElse(e, { val s = s"x${newVar()}"; eMap += e -> s; s })
-              case Dist(q) => qMap.getOrElse(q, { val s = s"x${newVar()}"; qMap += q -> s; s })
+              case BNum(b)     => s"y${b}"
+              case EdgeNum(e)  => eMap.getOrElse(e, { val s = s"x${newVar()}"; eMap += e -> s; s })
+              case Distance(q) => qMap.getOrElse(q, { val s = s"x${newVar()}"; qMap += q -> s; s })
             }
           }
           Presburger.Formula.renameVars(parikhEnftToPresburgerFormula(nft))(new Renamer().renamer _)
@@ -744,14 +744,12 @@ object Solver {
         val stringVars = stringVarsSL(c)
         // Parikh formula and positiveness of free variables are already added to solver.
         val (ctx, solver, stringVarsIntExpr) = {
-          val cfg = new java.util.HashMap[String, String]()
-          cfg.put("model", "true")
-          val ctx = new z3.Context(cfg)
+          val ctx = makeZ3Context()
           val freeVars = (0 until stringVars.length).map(i => s"y$i").map(y => y -> ctx.mkIntConst(y))
           val stringVarsIntExpr = (stringVars zip freeVars).map { case (v, (_, e)) => v -> e }.toMap
           val zero = ctx.mkInt(0)
           val positives = freeVars.map { case (_, v) => ctx.mkGe(v, zero) }
-          val expr = Presburger.Formula.formulaToExpr(ctx, freeVars.toMap, parikhFormula)
+          val expr = Presburger.Formula.formulaToZ3Expr(ctx, freeVars.toMap, parikhFormula)
           val solver = ctx.mkSolver()
           solver.add(expr +: positives: _*)
           (ctx, solver, stringVarsIntExpr)
@@ -761,7 +759,7 @@ object Solver {
         val intVarIntExpr: Map[IntVar, z3.IntExpr] =
           intVars.map(v => v -> ctx.mkIntConst(s"z${v.name}")).toMap
         val freeVars: Map[Constraint.Var, z3.IntExpr] = (stringVarsIntExpr ++ intVarIntExpr).toMap
-        val intConstraints: Seq[z3.BoolExpr] = c.is.map(Presburger.Formula.formulaToExpr(ctx, freeVars, _))
+        val intConstraints: Seq[z3.BoolExpr] = c.is.map(Presburger.Formula.formulaToZ3Expr(ctx, freeVars, _))
         solver.add(intConstraints: _*)
         val res =
           if (solver.check() == z3.Status.SATISFIABLE) {

@@ -7,8 +7,8 @@ object Parikh {
   type Image[A] = Map[A, Int]
   sealed trait EnftVar[Q, B, E]
   case class BNum[Q, B, E](b: B) extends EnftVar[Q, B, E] // number of occurrence of output symbol b
-  case class ENum[Q, B, E](e: E) extends EnftVar[Q, B, E] // number of occurrence of edge e
-  case class Dist[Q, B, E](q: Q) extends EnftVar[Q, B, E] // distance from initial state to q
+  case class EdgeNum[Q, B, E](e: E) extends EnftVar[Q, B, E] // number of occurrence of edge e
+  case class Distance[Q, B, E](q: Q) extends EnftVar[Q, B, E] // distance from initial state to q
   def parikhEnftToPresburgerFormula[Q, A, B](
       enft: ENFT[Q, A, Image[B]]
   ): Formula[EnftVar[Q, B, (Q, Image[B], Q)]] = {
@@ -23,7 +23,7 @@ object Parikh {
         q ->
           Add[X](
             edgesTo(q)
-              .map[Term[X]](e => Var(ENum(e)))
+              .map[Term[X]](e => Var(EdgeNum(e)))
               .appended(
                 if (q == enft.initial) Const(1) else Const(0)
               )
@@ -35,7 +35,7 @@ object Parikh {
         q ->
           Add[X](
             edgesFrom(q)
-              .map[Term[X]](e => Var(ENum(e)))
+              .map[Term[X]](e => Var(EdgeNum(e)))
               .appended(
                 if (q == enft.finalState) Const(1) else Const(0)
               )
@@ -50,16 +50,16 @@ object Parikh {
     val connectivity: Formula[X] = {
       val clauses =
         states.map(q => {
-          val unreachable = Conj[X](Seq(Eq(Var(Dist(q)), Const(-1)), Eq(output(q), Const(0))))
+          val unreachable = Conj[X](Seq(Eq(Var(Distance(q)), Const(-1)), Eq(output(q), Const(0))))
           val reachable = {
-            val isInit: Formula[X] = if (q == enft.initial) Eq(Var(Dist(q)), Const(0)) else Bot()
+            val isInit: Formula[X] = if (q == enft.initial) Eq(Var(Distance(q)), Const(0)) else Bot()
             val reachedFromSomewhere = edgesTo(q).map {
               case e @ (p, v, _) => {
                 Conj(
                   Seq[Formula[X]](
-                    Eq(Var(Dist(q)), Add(Seq(Var(Dist(p)), Const(1)))),
-                    Gt(Var(ENum(e)), Const(0)),
-                    Ge(Var(Dist(p)), Const(0))
+                    Eq(Var(Distance(q)), Add(Seq(Var(Distance(p)), Const(1)))),
+                    Gt(Var(EdgeNum(e)), Const(0)),
+                    Ge(Var(Distance(p)), Const(0))
                   )
                 )
               }
@@ -73,19 +73,21 @@ object Parikh {
     val bs = edges.foldLeft[Set[B]](Set.empty) { case (acc, (_, v, _)) => acc union v.keySet }
     val parikh: Formula[X] = {
       val clauses = bs.toSeq.map[Formula[X]](b => {
-        val bNums = edges.map[Term[X]] { case e @ (q, v, r) => Mult(Const(v.getOrElse(b, 0)), Var(ENum(e))) }
+        val bNums = edges.map[Term[X]] {
+          case e @ (q, v, r) => Mult(Const(v.getOrElse(b, 0)), Var(EdgeNum(e)))
+        }
         val sum: Term[X] = Add(bNums)
         Eq(Var(BNum(b)), sum)
       })
       Conj(clauses)
     }
-    val boundedVars: Seq[X] = states.map[X](q => Dist(q)) ++ edges.map(e => ENum(e))
+    val boundedVars: Seq[X] = states.map[X](q => Distance(q)) ++ edges.map(e => EdgeNum(e))
     val vars: Seq[X] = boundedVars ++ bs.map(BNum.apply)
     val positive: Formula[X] = Conj(
       vars.map[Formula[X]] {
-        case BNum(b) => Ge(Var(BNum(b)), Const(0))
-        case ENum(e) => Ge(Var(ENum(e)), Const(0))
-        case Dist(q) => Ge(Var(Dist(q)), Const(-1))
+        case BNum(b)     => Ge(Var(BNum(b)), Const(0))
+        case EdgeNum(e)  => Ge(Var(EdgeNum(e)), Const(0))
+        case Distance(q) => Ge(Var(Distance(q)), Const(-1))
       }
     )
     val conj: Formula[X] = Conj(Seq(euler, connectivity, parikh, positive))

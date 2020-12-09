@@ -440,7 +440,7 @@ case class MNFT[Q, A, M: Monoid](
 /** Monoid NFT with epsilon transition.
   * Inital state and final state of this class Must be singleton.
   */
-class ENFT[Q, A, M: Monoid](
+case class ENFT[Q, A, M: Monoid](
     val states: Set[Q],
     val in: Set[A],
     val edges: Set[(Q, Option[A], M, Q)],
