@@ -658,6 +658,33 @@ class NFA[Q, A](
   }
 }
 
+case class ParikhAutomaton[Q, A, L, I](
+    states: Set[Q],
+    inSet: Set[A],
+    ls: Set[L],
+    is: Set[I],
+    edges: Set[(Q, A, ParikhSST.ParikhUpdate[L], Q)],
+    q0: Q,
+    acceptRelation: Set[(Q, Map[L, Int])],
+    acceptFormulas: Seq[Presburger.Formula[Either[I, L]]]
+) {
+  def toParikhSST: ParikhSST[Q, A, A, Unit, L, I] = {
+    val x = List[Cop[Unit, A]](Cop1(()))
+    val update = inSet.map(a => a -> Map(() -> List(Cop1(()), Cop2(a)))).toMap
+    ParikhSST(
+      states,
+      inSet,
+      Set(()),
+      ls,
+      is,
+      edges.map { case (q, a, v, r) => (q, a, update(a), v, r) },
+      q0,
+      acceptRelation.map { case (q, v) => (q, x, v) },
+      acceptFormulas
+    )
+  }
+}
+
 class RegExp2NFA[A](re: RegExp[A], alphabet: Set[A]) {
   private var state = -1
 

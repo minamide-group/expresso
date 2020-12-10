@@ -32,7 +32,8 @@ class TestParikhSST extends AnyFunSuite {
     info(s"F:\t${p.outGraph.size}")
   }
 
-  def substr(i: String, l: String) = ParikhSST.substr("abcd".toSet)(i, l)
+  def substr(i: String, l: String) =
+    Constraint.ParikhTransduction.Substr().toParikhSST("abcd".toSet, Seq(i, l))
   val substr1 = substr("i", "l")
   test("substr transduction") {
     implicit def conv(t: (Int, Int)): Map[String, Int] = t match {
@@ -108,24 +109,25 @@ class TestParikhSST extends AnyFunSuite {
     testExamples(composed)(cases)
   }
 
-  def indexOf(word: String, i: String) = ParikhSST.indexOf("abcd".toSet)(word, i)
+  def indexOf(word: String, i: String) =
+    Constraint.ParikhAssertion.IndexOfFromZero(word).toParikhAutomaton("abcd".toSet, Seq(i)).toParikhSST
 
   test("Compose replaceAll and indexOf") {
     val replaceAll = Constraint.ReplaceAll("aab", "abc").toSST("abcd".toSet).toParikhSST[String, String]
     val indexOfAB = indexOf("ab", "i")
     testExamples(indexOfAB)(
       Seq(
-        ("aab", Map("i" -> 1), "a")
+        ("aab", Map("i" -> 1), "aab")
       )
     )
     val composed = replaceAll compose indexOfAB
     sizes(composed)
     Seq(
-      ("aab", 0, Some("")),
+      ("aab", 0, Some("abc")),
       ("aab", 1, None),
       ("aab", 2, None),
       ("aab", -1, None),
-      ("aaaab", 2, Some("aa"))
+      ("aaaab", 2, Some("aaabc"))
     ).foreach {
       case (in, i, out) =>
         val got = composed.transduce(in, Map("i" -> i))
