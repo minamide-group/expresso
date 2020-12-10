@@ -24,6 +24,14 @@ class TestParikhSST extends AnyFunSuite {
         else succeed
     }
 
+  def sizes[Q, A, B, X, L, I](p: ParikhSST[Q, A, B, X, L, I]) = {
+    info(s"Q:\t${p.states.size}")
+    info(s"X:\t${p.xs.size}")
+    info(s"L:\t${p.ls.size}")
+    info(s"Δ:\t${p.edges.size}")
+    info(s"F:\t${p.outGraph.size}")
+  }
+
   def substr(i: String, l: String) = ParikhSST.substr("abcd".toSet)(i, l)
   val substr1 = substr("i", "l")
   test("substr transduction") {
@@ -61,12 +69,13 @@ class TestParikhSST extends AnyFunSuite {
     )
     val lc = doubled.toLocallyConstrainedAffineParikhSST
     val equivCases = cases.map { case (w, i, _) => (w, i) }
-    testEquiv(lc, doubled)(equivCases)
+    testEquiv(doubled, lc)(equivCases)
     val ap = lc.toAffineParikhSST
-    testEquiv(ap, lc)(equivCases)
+    testEquiv(lc, ap)(equivCases)
     val p = ap.toParikhSST
-    testEquiv(p, ap)(equivCases)
+    testEquiv(ap, p)(equivCases)
     val direct = substr1 compose substr2
+    sizes(direct)
     testExamples(direct)(cases)
   }
 
@@ -80,6 +89,7 @@ class TestParikhSST extends AnyFunSuite {
       ("abcd", (0, 4, 0, 4, 0, 4), "abcd")
     )
     val composed = substr1 compose substr2 compose substr3
+    sizes(composed)
     testExamples(composed)(cases)
   }
 
@@ -109,6 +119,7 @@ class TestParikhSST extends AnyFunSuite {
       )
     )
     val composed = replaceAll compose indexOfAB
+    sizes(composed)
     Seq(
       ("aab", 0, Some("")),
       ("aab", 1, None),
