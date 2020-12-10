@@ -7,6 +7,10 @@ trait StringIntTransducer[A, B, I] {
   def transduce(w: Seq[A], n: Map[I, Int]): Set[Seq[B]]
 }
 
+/**
+  * Parikh SST.
+  * `ls` should not appear as bound variables in acceptFormulas.
+  */
 case class ParikhSST[Q, A, B, X, L, I](
     states: Set[Q],
     inSet: Set[A],
@@ -195,7 +199,7 @@ case class ParikhSST[Q, A, B, X, L, I](
     Map.from { res.map { case (q, s) => q -> s.toSet } }.withDefaultValue(Set.empty)
   }
 
-  /** Returns a NSST with redundant variables removed. */
+  /** Returns a PSST with redundant variables removed. */
   def removeRedundantVars: ParikhSST[Q, A, B, X, L, I] = {
     val newVars = states.flatMap(nonEmptyVarsAt)
     def deleteNotUsed(alpha: XBS): XBS =
@@ -206,6 +210,22 @@ case class ParikhSST[Q, A, B, X, L, I](
       edges.map { case (q, a, mx, ml, r)               => (q, a, newUpdate(mx), ml, r) }
     val newOutGraph = outGraph.map { case (q, xbs, lv) => (q, deleteNotUsed(xbs), lv) }
     this.copy(xs = newVars, edges = newEdges, outGraph = newOutGraph)
+  }
+
+  def removeRedundantLogVars: ParikhSST[Q, A, B, X, L, I] = {
+    val zeroVars = ls.filter(l =>
+      edges.forall { case (q, a, m, v, r) => v(l) == 0 } && outGraph.forall { case (q, m, v) => v(l) == 0 }
+    )
+    copy(
+      ls = ls -- zeroVars,
+      edges = edges.map { case e @ (_, _, _, v, _) => e.copy(_4 = v.removedAll(zeroVars)) },
+      outGraph = outGraph.map { case r @ (_, _, v) => r.copy(_3 = v.removedAll(zeroVars)) },
+      acceptFormulas = acceptFormulas.map(Presburger.Formula.substitute(_) {
+        case Left(i)                 => Presburger.Var(Left(i))
+        case Right(l) if zeroVars(l) => Presburger.Const(0)
+        case Right(l)                => Presburger.Var(Right(l))
+      })
+    )
   }
 
   def composeNsstsToMsst[R, C, Y, K](
@@ -393,7 +413,7 @@ case class ParikhSST[Q, A, B, X, L, I](
   }
 
   def compose[R, C, Y, K](that: ParikhSST[R, B, C, Y, K, I]): ParikhSST[Int, A, C, Int, Int, I] =
-    composeNsstsToMsst(this, that)(NopLogger).toLocallyConstrainedAffineParikhSST.toAffineParikhSST.toParikhSST.renamed.removeRedundantVars
+    composeNsstsToMsst(this, that)(NopLogger).toLocallyConstrainedAffineParikhSST.toAffineParikhSST.toParikhSST.renamed.removeRedundantVars.removeRedundantLogVars
 
   case class MonoidSST[Q, C, Y, K](
       states: Set[Q],
