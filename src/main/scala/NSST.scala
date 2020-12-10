@@ -45,14 +45,6 @@ case class NSST[Q, A, B, X](
     e && f
   }
 
-  def asMonoidNFT: NFT[Q, A, Update[X, B]] = new NFT(
-    states,
-    in,
-    delta.view.mapValues { _.map { case (r, m) => (r, List(m)) } }.toMap,
-    q0,
-    outF.filter { case (q, s) => s.nonEmpty }.keySet
-  )
-
   def isEmpty: Boolean = {
     val reachables = closure(
       Set(q0),

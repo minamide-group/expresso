@@ -340,42 +340,6 @@ case class CounterMachine[Q](
   }
 }
 
-/** 1-way nondeterministic ε-free transducers a.k.a. NGSM. */
-class NFT[Q, A, B](
-    val states: Set[Q],
-    val in: Set[A],
-    val edges: Map[(Q, A), Set[(Q, List[B])]],
-    val q0: Q,
-    val finals: Set[Q]
-) {
-  def transOne(q: Q, a: A): Set[(Q, List[B])] = edges.withDefaultValue(Set.empty)((q, a))
-  def outputAt(q: Q, bs: List[B]): Set[List[B]] = if (finals contains q) Set(bs) else Set.empty
-  def transition(qs: Set[Q], w: List[A]): Set[(Q, List[B])] = Monoid.transition(qs, w, transOne)
-  def transduce(w: List[A]): Set[List[B]] =
-    transition(Set(q0), w).flatMap { case (q, m) => outputAt(q, m) }
-}
-
-object NFT {
-  def apply(
-      states: Iterable[Int],
-      edges: Iterable[(Int, Char, Int, String)],
-      q0: Int,
-      finals: Set[Int]
-  ): NFT[Int, Char, Char] = {
-    new NFT(
-      states.toSet,
-      edges.map(_._2).toSet,
-      edges
-        .map { case (p, a, q, s) => (p, a) -> (q, s.toList) }
-        .groupBy(_._1)
-        .map { case (k, v) => k -> v.map(_._2).toSet }
-        .toMap,
-      q0,
-      finals
-    )
-  }
-}
-
 /** Monoid NFT */
 case class MNFT[Q, A, M: Monoid](
     states: Set[Q],

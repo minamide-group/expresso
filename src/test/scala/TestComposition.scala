@@ -17,13 +17,6 @@ class TestComposition extends AnyFlatSpec {
     0,
     List((1, "XaY"))
   )
-  val nft = NFT(
-    Set(0, 1),
-    List((0, 'a', 1, ""), (0, 'b', 0, "bb"), (1, 'a', 1, "aa"), (1, 'b', 0, "")),
-    0,
-    Set(1)
-  )
-
   def maxTransition[Q, A, B, X](nsst: NSST[Q, A, B, X]): Int = {
     nsst.delta.foldLeft(0) { case (acc, (k, v)) => max(acc, v.size) }
   }
@@ -65,30 +58,6 @@ class TestComposition extends AnyFlatSpec {
 
   // Doubles 'a's in a given string if it has even number of them,
   // and do nothing otherwise.
-  val doubleAsIfEven = NFT(
-    Set(0, 11, 10, 21, 20),
-    List(
-      (0, 'a', 11, "a"),
-      (0, 'a', 21, "aa"),
-      (0, 'b', 10, "b"),
-      (0, 'b', 20, "b"),
-      (11, 'a', 10, "a"),
-      (10, 'a', 11, "a"),
-      (21, 'a', 20, "aa"),
-      (20, 'a', 21, "aa"),
-      (11, 'b', 11, "b"),
-      (10, 'b', 10, "b"),
-      (21, 'b', 21, "b"),
-      (20, 'b', 20, "b"),
-      (11, '#', 11, "#"),
-      (10, '#', 10, "#"),
-      (21, '#', 21, "#"),
-      (20, '#', 20, "#")
-    ),
-    0,
-    Set(11, 20)
-  )
-  // Same transducer implemented by NSST
   val doubleAsIfEvenSST = NSST(
     Set(0, 11, 10, 21, 20),
     List('X'),
@@ -116,8 +85,6 @@ class TestComposition extends AnyFlatSpec {
 
   "Transducers" should "transduce correctly" in {
     assert(alur21.transduce("aaaaa".toList).size == List.fill(5)(2).product)
-    assert(doubleAsIfEven.transduce("ababab".toList) == Set("ababab".toList))
-    assert(doubleAsIfEven.transduce("baab".toList) == Set("baaaab".toList))
   }
 
   // {a, b}^* \ {ε} ∋ w ↦ {u | #u = #w or #u = 2#w} ⊂ {a, b}^*
