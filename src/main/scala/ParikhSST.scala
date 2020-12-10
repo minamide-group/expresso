@@ -384,9 +384,8 @@ case class ParikhSST[Q, A, B, X, L, I](
       newEdges.toSet,
       None,
       newOutGraph,
-      n1.acceptFormulas.map(_.renameVars(_.map[Cop[L, K]](Cop1.apply))) ++ n2.acceptFormulas.map(
-        _.renameVars(_.map[Cop[L, K]](Cop2.apply))
-      )
+      n1.acceptFormulas,
+      n2.acceptFormulas
     )
     // logger.msstConstructed(res)
     println("msst")
@@ -398,10 +397,7 @@ case class ParikhSST[Q, A, B, X, L, I](
 
   case class MonoidSST[Q, C, Y, K](
       states: Set[Q],
-      // inSet: Set[A],
-      // xs: Set[X],
       ys: Set[Y],
-      // ls: Set[L],
       ks: Set[K],
       is: Set[I],
       edges: Set[
@@ -417,7 +413,8 @@ case class ParikhSST[Q, A, B, X, L, I](
             Map[K, Int]
         )
       ],
-      acceptFormulas: Seq[Presburger.Formula[Either[I, Cop[L, K]]]]
+      acceptFormulasL: Seq[Presburger.Formula[Either[I, L]]],
+      acceptFormulasK: Seq[Presburger.Formula[Either[I, K]]]
   ) extends StringIntTransducer[A, C, I] {
     type YCS = Cupstar[Y, C]
     type UpdateY = Update[Y, C]
@@ -432,8 +429,11 @@ case class ParikhSST[Q, A, B, X, L, I](
     val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
     val trans = graphToMap(edges) { case (q, a, mx, ml, r)        => (q, a) -> (r, (mx, ml)) }
     val outF = graphToMap(outGraph) { case (q, xmms, ycs, lv, kv) => q -> (xmms, ycs, lv, kv) }
-    val acceptFormula: Presburger.Formula[Either[I, Cop[L, K]]] =
-      Presburger.Conj(acceptFormulas.distinct)
+    val acceptFormula: Presburger.Formula[Either[I, Cop[L, K]]] = {
+      val l = acceptFormulasL.map(_.renameVars(_.map[Cop[L, K]](Cop1.apply)))
+      val k = acceptFormulasK.map(_.renameVars(_.map[Cop[L, K]](Cop2.apply)))
+      Presburger.Conj(l ++ k)
+    }
     def evalFormula(lkVal: Map[Cop[L, K], Int], iVal: Map[I, Int]): Boolean = acceptFormula.eval {
       val lk = lkVal.map { case (l, n) => Right(l) -> n }
       val i = iVal.map { case (i, n)   => Left(i) -> n }
@@ -569,7 +569,8 @@ case class ParikhSST[Q, A, B, X, L, I](
           val formula = {
             type FormulaVar = Either[I, Cop[L, (X, K)]]
             val x = xs.head // Here xs should not be empty
-            val renamed: Presburger.Formula[FormulaVar] = acceptFormula.renameVars(_.map {
+            val formulaK = Presburger.Conj(acceptFormulasK.map(_.renameVars(_.map[Cop[L, K]](Cop2.apply))))
+            val renamed: Presburger.Formula[FormulaVar] = formulaK.renameVars(_.map {
               case Cop1(l) => Cop1(l)
               case Cop2(k) => Cop2((x, k))
             })
@@ -588,7 +589,17 @@ case class ParikhSST[Q, A, B, X, L, I](
         }
       }
 
-      LocallyConstrainedAffineParikhSST(newStates, inSet, zs, js, is, newEdges, newQ0, newOutGraph)
+      LocallyConstrainedAffineParikhSST(
+        newStates,
+        inSet,
+        zs,
+        js,
+        is,
+        newEdges,
+        newQ0,
+        acceptFormulasL.map(_.renameVars(_.map[Cop[L, (X, K)]](Cop1.apply))),
+        newOutGraph
+      )
     }
   }
 
@@ -600,6 +611,7 @@ case class ParikhSST[Q, A, B, X, L, I](
       is: Set[I],
       edges: Set[(Q, A, Update[X, B], ParikhSST.AffineUpdate[L], Q)],
       q0: Q,
+      globalAcceptFormulas: Seq[Presburger.Formula[Either[I, L]]],
       outGraph: Set[(Q, Cupstar[X, B], Map[L, Int], Presburger.Formula[Either[I, L]])]
   ) extends StringIntTransducer[A, B, I] {
     type UpdateX = Update[X, B]
@@ -616,12 +628,13 @@ case class ParikhSST[Q, A, B, X, L, I](
       val (mx, ml) = m
       outF(q).flatMap {
         case (xbs, lv, f) =>
-          if (f.eval {
-                val lMap = ParikhSST.applyAffine(ml, lv)
-                val l = lMap.map { case (l, n) => Right(l) -> n }
-                val i = n.map { case (i, n)    => Left(i) -> n }
-                (l ++ i).toMap
-              }) Some(erase1(flatMap1(xbs, mx)))
+          val env = {
+            val lMap = ParikhSST.applyAffine(ml, lv)
+            val l = lMap.map { case (l, n) => Right(l) -> n }
+            val i = n.map { case (i, n)    => Left(i) -> n }
+            (l ++ i).toMap
+          }
+          if (Presburger.Conj(globalAcceptFormulas :+ f).eval(env)) Some(erase1(flatMap1(xbs, mx)))
           else None
       }
     }
@@ -637,7 +650,7 @@ case class ParikhSST[Q, A, B, X, L, I](
         } + (None -> (0, Set()))
       val formulaMap = (for ((_, _, _, f) <- outGraph) yield f).zipWithIndex.toMap
       val newOutGraph = (for ((q, xbs, lv, f) <- outGraph) yield (q, xbs, embedLv(lv, formulaMap(f))))
-      val newFormula = Presburger.Disj(formulaMap.map {
+      val localFormulaDisj = Presburger.Disj(formulaMap.map {
         case (f, n) =>
           type NewVar = Either[I, Option[L]]
           val renamed = f.renameVars(_.map(Option.apply))
@@ -645,6 +658,10 @@ case class ParikhSST[Q, A, B, X, L, I](
             Seq(Presburger.Eq(Presburger.Var[NewVar](Right(None)), Presburger.Const(n)), renamed)
           )
       }.toSeq)
+      val newFormulas = {
+        val global = globalAcceptFormulas.map(_.renameVars(_.map(Option.apply)))
+        global :+ localFormulaDisj
+      }
       val newEdges = edges.map { case (q, a, mx, ml, r) => (q, a, mx, embedMl(ml), r) }
       AffineParikhSST[Q, A, B, X, Option[L], I](
         states,
@@ -655,7 +672,7 @@ case class ParikhSST[Q, A, B, X, L, I](
         newEdges,
         q0,
         newOutGraph,
-        newFormula
+        newFormulas
       )
     }
   }
@@ -669,7 +686,7 @@ case class ParikhSST[Q, A, B, X, L, I](
       edges: Set[(Q, A, Update[X, B], ParikhSST.AffineUpdate[L], Q)],
       q0: Q,
       outGraph: Set[(Q, Cupstar[X, B], Map[L, Int])],
-      acceptFormula: Presburger.Formula[Either[I, L]]
+      acceptFormulas: Seq[Presburger.Formula[Either[I, L]]]
   ) extends StringIntTransducer[A, B, I] {
     type XBS = Cupstar[X, B]
     type LVal = Map[L, Int]
@@ -680,11 +697,12 @@ case class ParikhSST[Q, A, B, X, L, I](
       case (q, a, mx, ml, r) => (q, a) -> (r, (mx, ml))
     }
     val outF: Map[Q, Set[(XBS, LVal)]] = graphToMap(outGraph) { case (q, xbs, lv) => q -> (xbs, lv) }
-    def evalFormula(lVal: Map[L, Int], iVal: Map[I, Int]): Boolean = acceptFormula.eval {
-      val l = lVal.map { case (l, n) => Right(l) -> n }
-      val i = iVal.map { case (i, n) => Left(i) -> n }
-      (l ++ i).toMap
-    }
+    def evalFormula(lVal: Map[L, Int], iVal: Map[I, Int]): Boolean =
+      acceptFormulas.forall(_.eval {
+        val l = lVal.map { case (l, n) => Right(l) -> n }
+        val i = iVal.map { case (i, n) => Left(i) -> n }
+        (l ++ i).toMap
+      })
 
     val mxMonoid: Monoid[UpdateX] = updateMonoid(xs)
     val mlMonoid: Monoid[UpdateL] = ParikhSST.affineMonoid(ls)
@@ -755,7 +773,7 @@ case class ParikhSST[Q, A, B, X, L, I](
         val none = for ((q, mx, ml) <- newOutGraph if newQ0(q)) yield (None, mx, ml)
         some ++ none
       }
-      ParikhSST(oStates, inSet, xs, ls, is, oEdges, None, oOutGraph, Seq(acceptFormula))
+      ParikhSST(oStates, inSet, xs, ls, is, oEdges, None, oOutGraph, acceptFormulas)
     }
   }
 
