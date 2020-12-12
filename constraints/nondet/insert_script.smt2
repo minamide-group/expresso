@@ -1,19 +1,14 @@
-;; Solvable in around 4.5 s
+;; Solvable in around 9 s
 (declare-const x String)
 (declare-const y String)
 (declare-const z String)
 (declare-const p String)
 (declare-const s String)
-(declare-const i Int)
 (declare-const l Int)
-(declare-const n Int)
 
-;; (assert (= p (str.substr x 0 l)))
-(assert (= p (str.substr x i l)))
-(assert (= i 0))
-;; (assert (= s (str.substr x l (- (str.len x) n))))
-(assert (= s (str.substr x l n)))
-(assert (= (str.len x) (+ l n)))
+(assert (str.in.re x (re.comp (str.to.re "<script>"))))
+(assert (= p (str.substr x 0 l)))
+(assert (= s (str.substr x l (- (str.len x) l))))
 (assert (= z (str.++ p y s)))
 (assert (and (< 0 (str.len y)) (<= (str.len y) 6)))
 (assert (str.in.re z (str.to.re "<script>")))
