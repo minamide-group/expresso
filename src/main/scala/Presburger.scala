@@ -13,6 +13,11 @@ object Presburger {
       case Sub(t1, t2)       => t1.eval(valuation) - t2.eval(valuation)
       case Mult(Const(i), t) => i * t.eval(valuation)
     }
+
+    def freeVars: Set[X] = this match {
+      case Var(x) => Set(x)
+      case _      => Set.empty
+    }
   }
   case class Const[X](i: Int) extends Term[X]
   case class Var[X](x: X) extends Term[X]
@@ -23,6 +28,17 @@ object Presburger {
     def smtlib: String = Formula.formulaToSMTLIB(this)
 
     def renameVars[Y](renamer: X => Y): Formula[Y] = Formula.renameVars(this)(renamer)
+
+    def freeVars: Set[X] = this match {
+      case Top() | Bot() => Set.empty
+      case Eq(t1, t2)    => t1.freeVars ++ t2.freeVars
+      case Lt(t1, t2)    => t1.freeVars ++ t2.freeVars
+      case Le(t1, t2)    => t1.freeVars ++ t2.freeVars
+      case Conj(fs)      => fs.flatMap(_.freeVars).toSet
+      case Disj(fs)      => fs.flatMap(_.freeVars).toSet
+      case Not(f)        => f.freeVars
+      case Exists(vs, f) => f.freeVars -- vs.map(_.x)
+    }
 
     /** @throws UnsupportedOperationException if this contains Exists. */
     def eval(valuation: Map[X, Int]): Boolean = this match {
@@ -175,7 +191,7 @@ object Presburger {
     }
   }
 
-  object Suger {
+  object Sugar {
     implicit def const[X](i: Int): Term[X] = Const(i)
     implicit class TermOps[X](t: Term[X]) {
       def +(s: Term[X]): Term[X] = Add(Seq(t, s))

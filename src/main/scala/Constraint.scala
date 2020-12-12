@@ -7,127 +7,7 @@ import Solver._
 
 object Constraint {
 
-  trait ParikhAssertion[C, I] {
-    def toParikhAutomaton(alphabet: Set[C], intArgs: Seq[I]): ParikhAutomaton[Int, C, Int, I]
-  }
-
-  object ParikhAssertion {
-    case class IndexOfFromZero[A, I](target: Seq[A]) extends ParikhAssertion[A, I] {
-      def toParikhAutomaton(alphabet: Set[A], intArgs: Seq[I]): ParikhAutomaton[Int, A, Int, I] = {
-        require(intArgs.length == 1)
-        import Presburger._
-        import Suger._
-        type Q = Int
-        type L = Int
-        type Edges = Iterable[(Q, A, Map[L, Int], Q)]
-        val x = 0
-        type T = Term[Either[I, L]]
-        val Seq(iName) = intArgs
-        val i: T = Var(Left(iName))
-        val input: T = Var(Right(0))
-        val output: T = Var(Right(1))
-        val dfa = Solver.postfixDFA(target, alphabet)
-        val states = dfa.states
-        val edges: Edges = {
-          for {
-            q <- states
-            a <- alphabet
-          } yield {
-            val r = dfa.transition.getOrElse((q, a), q)
-            val skipped =
-              if (dfa.finalStates(r)) 0
-              else q + 1 - r
-            val v = Map(0 -> 1, 1 -> skipped)
-            (q, a, v, r)
-          }
-        }
-        val outGraph =
-          // On each state q, DFA has partially matched prefix of target string.
-          states.map(q => (q, Map(0 -> 0, 1 -> (q % target.length))))
-        val acceptFormulas = Seq(
-          output >= input ==> (i === -1),
-          output < input ==> (i === output)
-        )
-        ParikhAutomaton[Q, A, L, I](
-          states,
-          alphabet,
-          Set(0, 1),
-          Set(iName),
-          edges.toSet,
-          dfa.q0,
-          outGraph,
-          acceptFormulas
-        )
-      }
-    }
-  }
-
-  trait ParikhTransduction[C, I] {
-    def toParikhSST(alphabet: Set[C], intArgs: Seq[I]): ParikhSST[Int, C, C, Int, Int, I]
-  }
-
-  object ParikhTransduction {
-    case class Substr[A, I]() extends ParikhTransduction[A, I] {
-      def toParikhSST(alphabet: Set[A], intArgs: Seq[I]): ParikhSST[Int, A, A, Int, Int, I] = {
-        require(intArgs.length == 2)
-        import Presburger._
-        import Suger._
-        val X = 0
-        type T = Term[Either[I, Int]]
-        val Seq(idxName, lenName) = intArgs
-        val idx: T = Var(Left(idxName))
-        val len: T = Var(Left(lenName))
-        val input: T = Var(Right(0))
-        val taken: T = Var(Right(1))
-        val sought: T = Var(Right(2))
-        val unit: (Update[Int, A], ParikhSST.ParikhUpdate[Int]) =
-          (Map(X -> List(Cop1(X))), Map(0 -> 1, 1 -> 0, 2 -> 0))
-        val edges = alphabet
-          .flatMap { a =>
-            val (unitX, unitH) = unit
-            val seek = (unitX, unitH + (2 -> 1))
-            val take = (Map(X -> List(Cop1(X), Cop2(a))), unitH + (1 -> 1))
-            val ignore = unit
-            Iterable(
-              (0, a, seek, 0),
-              (0, a, take, 1),
-              (1, a, take, 1),
-              (1, a, ignore, 2),
-              (2, a, ignore, 2)
-            )
-          }
-          .map { case (q, a, (mx, mh), r) => (q, a, mx, mh, r) }
-        val acceptFormulas = {
-          val idxOutOrNegLen = idx < 0 || idx >= input || len <= 0
-          Seq(
-            idxOutOrNegLen ==> (taken === 0),
-            (!idxOutOrNegLen && len <= input - idx) ==> (sought === idx && taken === len),
-            (!idxOutOrNegLen && len > input - idx) ==> (sought === idx && taken === input - idx)
-          )
-        }
-        ParikhSST[Int, A, A, Int, Int, I](
-          Set(0, 1, 2),
-          alphabet,
-          Set(X),
-          Set(0, 1, 2),
-          Set(idxName, lenName),
-          edges,
-          0,
-          (0 to 2).map((_, List(Cop1(X)), (0 to 2).map(h => h -> 0).toMap)).toSet,
-          acceptFormulas
-        )
-      }
-    }
-  }
-
-  implicit class TransductionIsParikhTransduction[C, I](trans: Transduction[C])
-      extends ParikhTransduction[C, I] {
-
-    def toParikhSST(alphabet: Set[C], intArgs: Seq[I]): ParikhSST[Int, C, C, Int, Int, I] =
-      trans.toSST(alphabet).toParikhSST
-
-  }
-
+  // Nondet SST based
   /** Integer-parameterized transduction. */
   trait ParameterizedTransduction[C] {
 
@@ -206,6 +86,8 @@ object Constraint {
         )
         .renamed
     }
+
+    def usedAlphabet: Set[C]
   }
 
   /**
@@ -214,6 +96,9 @@ object Constraint {
     * @param target
     */
   case class IndexOfFromZero[C](target: Seq[C]) extends ParameterizedTransduction[C] {
+
+    override def usedAlphabet: Set[C] = target.toSet
+
     def outputStringNum: Int = 1
     def defineStringNum: Int = 0
     def intVarNum: Int = 1
@@ -241,6 +126,8 @@ object Constraint {
 
   /** For (assert (= y (str.substr x i l))), where both i and l are variables. */
   case class GeneralSubstr[C]() extends ParameterizedTransduction[C] {
+
+    override def usedAlphabet: Set[C] = Set.empty
 
     def toPairValuedSST(alphabet: Set[C]): NSST[Int, C, Option[C], Int] = {
       val xs = Set(0, 1)
@@ -322,6 +209,8 @@ object Constraint {
 
   case class ReplaceAll[C](target: Seq[C], word: Seq[C]) extends Transduction[C] {
 
+    override def usedAlphabet: Set[C] = target.toSet ++ word.toSet
+
     /** Construct NSST which replaces `target` input string with `word` */
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
       type Q = Int
@@ -361,6 +250,8 @@ object Constraint {
 
   /** x(i) := replace_some x(j) target word */
   case class ReplaceSome[C](target: Seq[C], word: Seq[C]) extends Transduction[C] {
+
+    override def usedAlphabet: Set[C] = target.toSet ++ word.toSet
 
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
       type Q = Int
@@ -404,6 +295,8 @@ object Constraint {
   /** x(i) := insert(x(j), pos, word) */
   case class Insert[C](pos: Int, word: Seq[C]) extends Transduction[C] {
 
+    override def usedAlphabet: Set[C] = word.toSet
+
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
       type X = Int
       val x = 0
@@ -437,11 +330,16 @@ object Constraint {
 
   /** x(i) := at(x(j), pos) */
   case class At[C](pos: Int) extends Transduction[C] {
+
+    override def usedAlphabet: Set[C] = Set.empty
+
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = Substr(pos, 1).toSST(alphabet)
   }
 
   /** x(i) := reverse(x(j)) */
   case class Reverse[C]() extends Transduction[C] {
+
+    override def usedAlphabet: Set[C] = Set.empty
 
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
       NSST(
@@ -459,6 +357,8 @@ object Constraint {
   /** x(i) := substr(x(j), from, len) */
   case class Substr[C](from: Int, len: Int) extends Transduction[C] {
 
+    override def usedAlphabet: Set[C] = Set.empty
+
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
       val x = 0
       val states = (0 to from + len).toSet
@@ -474,6 +374,8 @@ object Constraint {
 
   /** x(i) is prefix of x(j) */
   case class TakePrefix[C]() extends Transduction[C] {
+
+    override def usedAlphabet: Set[C] = Set.empty
 
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
       NSST(
@@ -497,6 +399,8 @@ object Constraint {
   /** x(i) is suffix of x(j) */
   case class TakeSuffix[C]() extends Transduction[C] {
 
+    override def usedAlphabet: Set[C] = Set.empty
+
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
       NSST(
         Set(0, 1),
@@ -518,6 +422,8 @@ object Constraint {
   /** x(i) := prefix of x(j) that excludes longet prefix of x(j) that excludes leftmost `target`.
     * If x(j) does not contain `target`, then x(i) will be x(j). */
   case class UntilFirst[C](target: Seq[C]) extends Transduction[C] {
+
+    override def usedAlphabet: Set[C] = target.toSet
 
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
       type Q = Int

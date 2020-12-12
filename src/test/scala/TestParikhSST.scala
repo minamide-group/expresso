@@ -33,7 +33,7 @@ class TestParikhSST extends AnyFunSuite {
   }
 
   def substr(i: String, l: String) =
-    Constraint.ParikhTransduction.Substr().toParikhSST("abcd".toSet, Seq(i, l))
+    ParikhSolver.ParikhTransduction.Substr(i, l).toParikhSST("abcd".toSet)
   val substr1 = substr("i", "l")
   test("substr transduction") {
     implicit def conv(t: (Int, Int)): Map[String, Int] = t match {
@@ -110,7 +110,7 @@ class TestParikhSST extends AnyFunSuite {
   }
 
   def indexOf(word: String, i: String) =
-    Constraint.ParikhAssertion.IndexOfFromZero(word).toParikhAutomaton("abcd".toSet, Seq(i)).toParikhSST
+    ParikhSolver.ParikhLanguage.IndexOfFromZero(word, i).toParikhAutomaton("abcd".toSet).toParikhSST
 
   test("Compose replaceAll and indexOf") {
     val replaceAll = Constraint.ReplaceAll("aab", "abc").toSST("abcd".toSet).toParikhSST[String, String]

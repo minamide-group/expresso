@@ -117,8 +117,7 @@ class TestFunctionalness extends AnyFunSuite {
         import Solver._
         val Constraint.SLConstraint(atoms, is, rs) = sl
         val contained =
-          (atoms.map(usedAlphabetAtomic) ++ rs.map(c => usedAlhpabetRegExp(c.re)))
-            .fold(Set.empty)(_ union _)
+          (atoms.map(usedAlphabetAtomic) ++ rs.map(_.re.usedAlphabet)).fold(Set.empty)(_ union _)
         val printable = ' ' to '~'
         contained ++ printable.find(c => !contained.contains(c))
       }

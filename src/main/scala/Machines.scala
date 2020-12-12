@@ -599,6 +599,36 @@ class DFA[Q, A](
     (this intersect other.complement) union (this.complement intersect other)
 
   def equiv(other: DFA[Q, A]): Boolean = (this symdiff other).isEmpty
+
+  def toParikhAutomaton[L, I]: ParikhAutomaton[Q, A, L, I] = ParikhAutomaton(
+    states,
+    alpha,
+    Set.empty,
+    Set.empty,
+    transition.map { case ((q, a), r) => (q, a, Map.empty[L, Int], r) }.toSet,
+    q0,
+    finalStates.map((_, Map.empty)),
+    Seq.empty
+  )
+
+  def toIdentityNSST: NSST[Q, A, A, Unit] = NSST(
+    states,
+    alpha,
+    Set(()),
+    transition.map { case ((q, a), r) => (q, a, Map(() -> List(Cop1(()), Cop2(a))), r) } toSet,
+    q0,
+    finalStates.map(q => q -> Set(List[Cop[Unit, A]](Cop1(())))).toMap
+  )
+}
+
+object DFA {
+  def universal[Q, A](q: Q, inSet: Set[A]): DFA[Q, A] = new DFA(
+    Set(q),
+    inSet,
+    inSet.map((q, _) -> q).toMap,
+    q,
+    Set(q)
+  )
 }
 
 class NFA[Q, A](
@@ -668,6 +698,65 @@ case class ParikhAutomaton[Q, A, L, I](
     acceptRelation: Set[(Q, Map[L, Int])],
     acceptFormulas: Seq[Presburger.Formula[Either[I, L]]]
 ) {
+  val trans = graphToMap(edges) { case (q, a, v, r)         => (q, a) -> (r, v) }
+  val acceptFunc = graphToMap(acceptRelation) { case (q, v) => q -> v }
+
+  def intersect[R, K](that: ParikhAutomaton[R, A, K, I]): ParikhAutomaton[(Q, R), A, Cop[L, K], I] = {
+    type FS = Seq[Presburger.Formula[Either[I, Cop[L, K]]]]
+    val newQ0 = (q0, that.q0)
+    def vecCoproduct(v: Map[L, Int], u: Map[K, Int]): Map[Cop[L, K], Int] = {
+      val lkv = v.map { case (l, n) => Cop1[L, K](l) -> n }
+      val lku = u.map { case (k, n) => Cop2[L, K](k) -> n }
+      (lkv ++ lku).toMap
+    }
+    def nextStates(qr: (Q, R), a: A): Set[((Q, R), Map[Cop[L, K], Int])] = {
+      val (q, r) = qr
+      for {
+        (qq, v) <- trans(q, a)
+        (rr, u) <- that.trans(r, a)
+      } yield ((qq, rr), vecCoproduct(v, u))
+    }
+    val (newStates, newEdges) = searchStates(Set(newQ0), inSet)(nextStates)(
+      _._1,
+      { case (qr, a, (qqrr, v)) => (qr, a, v, qqrr) }
+    )
+    val newAccRel = for {
+      (q, r) <- newStates
+      v <- acceptFunc(q)
+      u <- that.acceptFunc(r)
+    } yield ((q, r), vecCoproduct(v, u))
+    val newFormulas: FS = {
+      val thisFs: FS = acceptFormulas.map(_.renameVars(_.map(Cop1.apply)))
+      val thatFs: FS = that.acceptFormulas.map(_.renameVars(_.map(Cop2.apply)))
+      thisFs ++ thatFs
+    }
+    ParikhAutomaton(
+      newStates,
+      inSet ++ that.inSet,
+      ls.map(Cop1.apply) ++ that.ls.map(Cop2.apply),
+      is ++ that.is,
+      newEdges,
+      newQ0,
+      newAccRel,
+      newFormulas
+    )
+  }
+
+  def renamed: ParikhAutomaton[Int, A, Int, I] = {
+    val qMap = states.zipWithIndex.toMap
+    val lMap = ls.zipWithIndex.toMap
+    ParikhAutomaton(
+      states.map(qMap),
+      inSet,
+      ls.map(lMap),
+      is,
+      edges.map { case (q, a, v, r) => (qMap(q), a, v.map { case (l, n) => lMap(l) -> n }, qMap(r)) },
+      qMap(q0),
+      acceptRelation.map { case (q, v) => (qMap(q), v.map { case (l, n) => lMap(l) -> n }) },
+      acceptFormulas.map(_.renameVars(_.map(lMap)))
+    )
+  }
+
   def toParikhSST: ParikhSST[Q, A, A, Unit, L, I] = {
     val x = List[Cop[Unit, A]](Cop1(()))
     val update = inSet.map(a => a -> Map(() -> List(Cop1(()), Cop2(a)))).toMap
@@ -683,6 +772,19 @@ case class ParikhAutomaton[Q, A, L, I](
       acceptFormulas
     )
   }
+
+  def ignoreFormulas: NFA[Q, A] = new NFA(
+    states,
+    inSet,
+    graphToMap(edges) { case (q, a, v, r) => (q, Some(a)) -> r },
+    q0,
+    acceptRelation.map(_._1)
+  )
+}
+
+object ParikhAutomaton {
+  def universal[Q, A, L, I](q: Q, inSet: Set[A]): ParikhAutomaton[Q, A, L, I] =
+    DFA.universal(q, inSet).toParikhAutomaton
 }
 
 class RegExp2NFA[A](re: RegExp[A], alphabet: Set[A]) {
