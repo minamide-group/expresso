@@ -3,7 +3,7 @@ package com.github.kmn4.sst
 import org.scalatest.flatspec._
 import scala.math.max
 
-class TestComposition extends AnyFlatSpec {
+class CompositionTest extends AnyFlatSpec {
   implicit val logger = NopLogger
   val nsst = NSST(
     Set(0, 1),

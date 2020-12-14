@@ -4,7 +4,7 @@ import org.scalatest.funsuite.AnyFunSuite
 
 import com.github.kmn4.sst.Presburger._
 
-class TestParikhSST extends AnyFunSuite {
+class ParikhSSTTest extends AnyFunSuite {
   def testEquiv[A, B, I](t1: StringIntTransducer[A, B, I], t2: StringIntTransducer[A, B, I])(
       cases: Seq[(Seq[A], Map[I, Int])]
   ) = cases.foreach {

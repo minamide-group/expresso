@@ -2,7 +2,7 @@ package com.github.kmn4.sst
 
 import org.scalatest.flatspec._
 
-class TestParikhPresburger extends AnyFlatSpec {
+class ParikhPresburgerTest extends AnyFlatSpec {
   "Calculating Parikh image" should "be done in reasonable time" in {
     // Parikh image of `nsst` should be {(a: n, b: m) | a: odd, b: non-zero even}
     val nsst = NSST(

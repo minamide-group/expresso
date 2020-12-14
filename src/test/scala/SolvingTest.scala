@@ -2,7 +2,7 @@ package com.github.kmn4.sst
 
 import org.scalatest.flatspec._
 
-class TestSolving extends AnyFlatSpec {
+class SolvingTest extends AnyFlatSpec {
   import Solver.{concatNSST, regularNSST, parikhNSST}
   def replaceAllNSST(target: String, word: String, i: Int, j: Int, alphabet: Set[Char]) =
     Constraint.ReplaceAll(target, word).toSolverSST(i, j, alphabet)

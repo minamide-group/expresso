@@ -3,7 +3,7 @@ package com.github.kmn4.sst
 import org.scalatest.funsuite._
 import scala.util.Random.{nextInt}
 
-class TestFunctionalness extends AnyFunSuite {
+class FunctionalnessTest extends AnyFunSuite {
   import Constraint._
   test("sstEndsWith meets spec") {
     val abc = "abc".toSet
@@ -23,7 +23,7 @@ class TestFunctionalness extends AnyFunSuite {
       assert(uf.transduce(w).flatMap(endsWithAB) == ufE.transduce(w))
     }
     for (i <- 0 until 100) {
-      val n = TestRandom.randomNsstCustomized()
+      val n = RandomTest.randomNsstCustomized()
       val e = n.sstEndsWith("a".toSet)
       for (j <- 0 until 10) {
         val cs = for (_ <- 0 until nextInt(10)) yield "ab" (nextInt(2))
@@ -34,7 +34,7 @@ class TestFunctionalness extends AnyFunSuite {
   }
   test("lengthCA counts length") {
     for (i <- 0 until 100) {
-      val n = TestRandom.randomNsstCustomized()
+      val n = RandomTest.randomNsstCustomized()
       val ca = n.lengthCA
       for (i <- 0 until 100) {
         val cs = for (_ <- 0 until nextInt(10)) yield "ab" (nextInt(2))

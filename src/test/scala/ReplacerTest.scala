@@ -4,7 +4,7 @@ import org.scalatest.funsuite._
 import com.github.kmn4.sst.Replacer._
 import com.github.kmn4.sst.Replacer.PCRE._
 
-class TestReplacer extends AnyFunSuite {
+class ReplacerTest extends AnyFunSuite {
   def empty: PCRE[Char, String] = Empty()
   def eps: PCRE[Char, String] = Eps()
   implicit def chars(s: String): PCRE[Char, String] = Chars(s.toSet)

@@ -2,7 +2,7 @@ package com.github.kmn4.sst
 
 import org.scalatest.flatspec._
 
-object TestRandom {
+object RandomTest {
   import scala.util.{Random => R}
   def nextAs[A](as: Seq[A], maxRepeat: Int): List[A] =
     List.fill(R.nextInt(maxRepeat + 1))(as(R.nextInt(as.size)))
@@ -112,8 +112,8 @@ object TestRandom {
   }
 }
 
-class TestRandom extends AnyFlatSpec {
-  import TestRandom._
+class RandomTest extends AnyFlatSpec {
+  import RandomTest._
   implicit val logger = NopLogger
   "Construction of MSST" should "be done correctly" in {
     for (_ <- 0 until 100) {

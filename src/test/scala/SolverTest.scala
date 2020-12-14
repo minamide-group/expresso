@@ -4,7 +4,7 @@ import org.scalatest.funsuite._
 import Solver._
 import com.github.kmn4.sst.Constraint._
 
-class TestSolver extends AnyFunSuite {
+class SolverTest extends AnyFunSuite {
   def toOptionList(s: String): List[Option[Char]] = s.toList.map(c => if (c == '#') None else Some(c))
   def fromOptionList(l: List[Option[Char]]): String = l.map(_.getOrElse('#')).mkString
   def testTransduce[Q, X](
