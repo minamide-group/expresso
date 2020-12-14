@@ -710,6 +710,31 @@ object Solver {
       case _                                            => None
     }
   }
+
+  def expectPCRE(t: Term): Replacer.PCRE[Char, Int] = t match {
+    case SimpleApp("str.to_pcre", Seq(SString(w))) =>
+      w.map(c => Replacer.PCRE.Chars[Char, Int](Set(c)))
+        .fold[Replacer.PCRE[Char, Int]](Replacer.PCRE.Eps())(Replacer.PCRE.Cat.apply)
+    case SimpleApp("pcre.*", Seq(t)) => Replacer.PCRE.Greedy(expectPCRE(t))
+    case SimpleApp("pcre.+", Seq(t)) =>
+      val pcre = expectPCRE(t)
+      Replacer.PCRE.Cat(pcre, Replacer.PCRE.Greedy(pcre))
+    case _ => throw new Exception(s"${t.getPos}: PCRE expected but found: $t")
+  }
+
+  def expectReplacement(t: Term): Replacer.Replacement[Char, Int] = t match {
+    case SimpleApp("pcre.replacement", ts) =>
+      Replacer.Replacement(
+        ts.flatMap {
+          case SString(w)            => w.map(Left.apply)
+          case SNumeral(i) if i == 0 => Seq(Right(None))
+          case SNumeral(i) if i > 0  => Seq(Right(Some(i.toInt)))
+          case t                     => throw new Exception(s"${t.getPos}: PCRE Replacement component expected but found: $t")
+        }
+      )
+    case _ => throw new Exception(s"${t.getPos}: PCRE Replacement expected but found: $t")
+  }
+
   object SimpleTransduction {
     // (rhs, transduction)
     def unapply(e: Term): Option[(String, Transduction[Char])] =
@@ -722,6 +747,10 @@ object Solver {
           Some((name, ReplaceSome(target, word)))
         case Strings.At(SimpleQualID(name), SimpleQualID(pos)) =>
           Some((name, At(pos.toInt)))
+        case SimpleApp("str.replace_pcre", Seq(SimpleQualID(name), pcre, replacement)) =>
+          Some((name, Replacer.ReplacePCRE(expectPCRE(pcre), expectReplacement(replacement))))
+        case SimpleApp("str.replace_pcre_all", Seq(SimpleQualID(name), pcre, replacement)) =>
+          Some((name, Replacer.ReplacePCREAll(expectPCRE(pcre), expectReplacement(replacement))))
         case SimpleApp("str.insert", Seq(SimpleQualID(name), SNumeral(pos), SString(word))) =>
           Some((name, Insert(pos.toInt, word)))
         case SimpleApp("str.reverse", Seq(SimpleQualID(name))) =>

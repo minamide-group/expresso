@@ -47,29 +47,52 @@ class ParikhSolver(options: Solver.SolverOption) {
     constraints ++= (cs :+ c)
   }
 
-  var solverPSST: Option[SolverPSST[Char, String]] = None
-  var witnessVector: Option[(Map[String, Int], Map[Int, Int])] = None
-
-  def checkSat(): Unit = {
-    val psst = Compiler.compile(constraints)
-    solverPSST = Some(psst)
-    witnessVector = psst.ilVectorOption
-    witnessVector match {
-      case Some(v) => println("sat")
-      case None    => println("unsat")
+  class Checker(psst: SolverPSST[Char, String], idxVar: Map[Int, String]) {
+    // _1: Int var -> value, _2: Log var -> value
+    val witnessVector: () => Option[(Map[String, Int], Map[Int, Int])] = Cacher { psst.ilVectorOption }.getOrCalc _
+    // _1: Str var -> value, _2: Int var -> value
+    val models: () => Option[(Map[String, String], Map[String, Int])] = Cacher {
+      witnessVector().map {
+        case (iv, lv) =>
+          val (_, output) = psst.inputOutputFor(lv)
+          (parseStrModel(output), parseIntModel(iv))
+      }
+    }.getOrCalc _
+    def parseStrModel(output: Seq[Option[Char]]): Map[String, String] = {
+      var buf = output
+      var idx = 0
+      var res = Map.empty[String, Seq[Char]]
+      while (buf.nonEmpty) {
+        val took = buf.takeWhile(_.nonEmpty).flatten
+        buf = buf.drop(took.length + 1)
+        res += (idxVar(idx) -> took)
+        idx += 1
+      }
+      res.view.mapValues(_.mkString).toMap
     }
+    def parseIntModel(iv: Map[String, Int]): Map[String, Int] =
+      iv.collect { case (name, value) if name.indexOf("user_") == 0 => name.drop(5) -> value }
+    def checkSat(): Boolean = witnessVector().nonEmpty
+    def getModel(): Option[(Map[String, String], Map[String, Int])] = models()
   }
 
+  val (checker, resetChecker) = {
+    val c = Cacher[Checker] {
+      val (psst, idxVar) = Compiler.compile(constraints)
+      new Checker(psst, idxVar)
+    }
+    (c.getOrCalc _, c.reset _)
+  }
+
+  def checkSat(): Unit =
+    if (checker().checkSat()) println("sat")
+    else println("unsat")
+
   def getModel(): Unit = {
-    (solverPSST zip witnessVector) match {
-      case Some((psst, (iv, lv))) =>
-        val (_, output) = psst.inputOutputFor(lv)
-        val s = output.map(_.getOrElse('#')).mkString
-        println(s)
-        for ((name, sort) <- env) if (sort == Ints.IntSort()) {
-          val value = iv(s"user_$name")
-          println(s"(declare-fun $name () Int ${value})")
-        }
+    checker().getModel() match {
+      case Some((sModel, iModel)) =>
+        for ((name, value) <- sModel) println(s"(define-fun $name () String ${value})")
+        for ((name, value) <- iModel) println(s"(define-fun $name () Int ${value})")
       case None => println("Cannot get model")
     }
   }
@@ -596,7 +619,8 @@ object ParikhSolver {
       (assignmentPSSTs :+ lastPSST).reduce(_ compose _)
     }
 
-    def compile(constraints: Seq[ParikhConstraint]): SolverPSST[Char, String] = {
+    // _2: Index of string in PSST output -> String var name
+    def compile(constraints: Seq[ParikhConstraint]): (SolverPSST[Char, String], Map[Int, String]) = {
       val varIdx = stringVarIndex(constraints)
       val assignments = constraints.collect {
         case a @ ParikhAssignment(lhs, trans, rhs) => (varIdx(lhs), a.toSolverPSST(varIdx) _)
@@ -605,7 +629,8 @@ object ParikhSolver {
       val assertions = constraints.collect { case ParikhAssertion(sVar, lang)          => (varIdx(sVar), lang) }
       val arithFormula = constraints.collect { case IntConstraintIsParikhConstraint(f) => f }
       val alphabet = constraints.flatMap(_.usedAlphabet).toSet
-      compileTriple(assignments, assertions.groupMap(_._1)(_._2), arithFormula)(alphabet)
+      val psst = compileTriple(assignments, assertions.groupMap(_._1)(_._2), arithFormula)(alphabet)
+      (psst, varIdx.map { case (x, i) => i -> x })
     }
 
   }

@@ -129,4 +129,16 @@ package object sst {
     res
   }
 
+  class Cacher[T](f: => T) {
+    private var cache: Option[T] = None
+    def getOrCalc(): T = cache.getOrElse {
+      val t = f
+      cache = Some(t)
+      t
+    }
+    def reset(): Unit = cache = None
+  }
+  object Cacher {
+    def apply[T](f: => T) = new Cacher(f)
+  }
 }

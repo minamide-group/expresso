@@ -51,7 +51,7 @@ class ReplacerTest extends AnyFunSuite {
   def testReplaceAll(e: PCRE[Char, String], replacement: Replacement[Char, String])(
       cases: (Seq[Char], Seq[Char])*
   ) = test(s"Replace all $e with $replacement") {
-    val s = replaceAllSST(e, replacement, alphabet)
+    val s = Compiler.replaceAllSST(e, replacement, alphabet)
     for ((w, expected) <- cases) {
       val got = s.transduce(w)
       assert(got.size == 1)
