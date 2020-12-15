@@ -42,6 +42,24 @@ class ParikhSolverTest extends AnyFunSuite {
       }
     }
 
+  def withFileReader[T](fname: String)(body: java.io.FileReader => T): T = {
+    val path = java.nio.file.FileSystems.getDefault().getPath(fname)
+    val reader = new java.io.FileReader(path.toFile())
+    try {
+      body(reader)
+    } finally {
+      reader.close()
+    }
+  }
+
+  def testFileUNSAT(path: String)(implicit pos: Position) = withFileReader(path) { reader =>
+    withExecuteScript(reader) { solver =>
+      testWithInfoTime(s"""test UNSAT "$path"""") {
+        assert(solver.checker().models().isEmpty)
+      }
+    }
+  }
+
   testSAT("""
 (declare-const x String)
 (declare-const y String)
@@ -131,4 +149,30 @@ class ParikhSolverTest extends AnyFunSuite {
       assert(y == x.atmostSubstring(i, 2))
       assert(!"ab".r.matches(y))
   }
+
+  testFileUNSAT("constraints/nondet/indexof.smt2")
+
+  testUNSAT("""
+(declare-const x String)
+(declare-const y String)
+(declare-const z String)
+
+(assert (<= (str.len x) (str.len y)))
+(assert (= z (str.substr y 0 (str.len x))))
+(assert (not (= (str.len z) (str.len x))))
+(check-sat)
+""")
+
+  testSAT("""
+(declare-const x String)
+(declare-const y String)
+(declare-const z String)
+(declare-const w String)
+(assert (not (= (str.len x) (str.len y))))
+(assert (= z (str.substr x 0 (- (str.len x) 1))))
+(assert (= w (str.substr y 0 (- (str.len y) 1))))
+(assert (= (str.len z) (str.len w)))
+(check-sat)
+(get-model)
+""") { (m, _) => () }
 }
