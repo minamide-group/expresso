@@ -49,7 +49,8 @@ class ParikhSolver(options: Solver.SolverOption) {
 
   class Checker(psst: SolverPSST[Char, String], idxVar: Map[Int, String]) {
     // _1: Int var -> value, _2: Log var -> value
-    val witnessVector: () => Option[(Map[String, Int], Map[Int, Int])] = Cacher { psst.ilVectorOption }.getOrCalc _
+    def witnessVector: () => Option[(Map[String, Int], Map[Int, Int])] =
+      Cacher { psst.ilVectorOption }.getOrCalc _
     // _1: Str var -> value, _2: Int var -> value
     val models: () => Option[(Map[String, String], Map[String, Int])] = Cacher {
       witnessVector().map {
@@ -402,13 +403,12 @@ object ParikhSolver {
         val input: T = Var(Right(0))
         val taken: T = Var(Right(1))
         val sought: T = Var(Right(2))
-        val unit: (Update[Int, A], ParikhSST.ParikhUpdate[Int]) =
+        val unit @ (unitX, unitL): (Update[Int, A], ParikhSST.ParikhUpdate[Int]) =
           (Map(X -> List(Cop1(X))), Map(0 -> 1, 1 -> 0, 2 -> 0))
         val edges = alphabet
           .flatMap { a =>
-            val (unitX, unitH) = unit
-            val seek = (unitX, unitH + (2 -> 1))
-            val take = (Map(X -> List(Cop1(X), Cop2(a))), unitH + (1 -> 1))
+            val seek = (unitX, unitL + (2 -> 1))
+            val take = (Map(X -> List(Cop1(X), Cop2(a))), unitL + (1 -> 1))
             val ignore = unit
             Iterable(
               (0, a, seek, 0),
@@ -435,7 +435,7 @@ object ParikhSolver {
           Set(idxName, lenName),
           edges,
           0,
-          (0 to 2).map((_, List(Cop1(X)), (0 to 2).map(h => h -> 0).toMap)).toSet,
+          (0 to 2).map((_, List(Cop1(X)), (0 to 2).map(_ -> 0).toMap)).toSet,
           acceptFormulas
         )
       }
