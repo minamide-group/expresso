@@ -5,8 +5,7 @@ version := "0.2"
 scalaVersion := "2.13.3"
 
 libraryDependencies ++= Seq(
- "org.typelevel" %% "cats-core" % "2.1.1",
- "org.scalatest" %% "scalatest" % "3.1.0" % "test"
+  "org.scalatest" %% "scalatest" % "3.1.0" % "test"
 )
 
 fork in run := true
