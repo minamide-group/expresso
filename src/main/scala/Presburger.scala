@@ -40,7 +40,7 @@ object Presburger {
       case Exists(vs, f) => f.freeVars -- vs.map(_.x)
     }
 
-    /** @throws UnsupportedOperationException if this contains Exists. */
+    /** @throws java.lang.UnsupportedOperationException if this contains Exists. */
     def eval(valuation: Map[X, Int]): Boolean = this match {
       case Top()        => true
       case Bot()        => false
