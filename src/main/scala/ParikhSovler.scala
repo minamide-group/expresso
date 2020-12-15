@@ -91,7 +91,7 @@ class ParikhSolver(options: Solver.SolverOption) {
   def getModel(): Unit = {
     checker().getModel() match {
       case Some((sModel, iModel)) =>
-        for ((name, value) <- sModel) println(s"(define-fun $name () String ${value})")
+        for ((name, value) <- sModel) println(s"""(define-fun $name () String "${value}")""")
         for ((name, value) <- iModel) println(s"(define-fun $name () Int ${value})")
       case None => println("Cannot get model")
     }
@@ -628,7 +628,11 @@ object ParikhSolver {
       }
       val assertions = constraints.collect { case ParikhAssertion(sVar, lang)          => (varIdx(sVar), lang) }
       val arithFormula = constraints.collect { case IntConstraintIsParikhConstraint(f) => f }
-      val alphabet = constraints.flatMap(_.usedAlphabet).toSet
+      val alphabet = {
+        val used = constraints.flatMap(_.usedAlphabet).toSet
+        val printable = ' ' to '~'
+        used ++ printable.find(c => !used.contains(c))
+      }
       val psst = compileTriple(assignments, assertions.groupMap(_._1)(_._2), arithFormula)(alphabet)
       (psst, varIdx.map { case (x, i) => i -> x })
     }
