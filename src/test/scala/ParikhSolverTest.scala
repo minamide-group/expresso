@@ -60,6 +60,7 @@ class ParikhSolverTest extends AnyFunSuite {
     }
   }
 
+  // Simple replace_pcre_all (match constant)
   testSAT("""
 (declare-const x String)
 (declare-const y String)
@@ -75,6 +76,7 @@ class ParikhSolverTest extends AnyFunSuite {
     ()
   }
 
+  // Delete all b+. Should be equivalent to (replace_all x "b" "")
   testSAT("""
 (declare-const x String)
 (declare-const y String)
@@ -86,6 +88,7 @@ class ParikhSolverTest extends AnyFunSuite {
 (get-model)
 """) { (_, _) => () }
 
+  // Unsat case.
   testUNSAT(
     """
 (declare-const x String)
@@ -98,6 +101,7 @@ class ParikhSolverTest extends AnyFunSuite {
 """
   )
 
+  // Ensure replace_pcre replaces only first match
   testSAT(
     """
 (declare-const x String)
@@ -115,6 +119,7 @@ class ParikhSolverTest extends AnyFunSuite {
     assert(y != "")
   }
 
+  // Ensure replace_pcre_all matches the longest match if many exist
   testUNSAT("""
 (declare-const x String)
 (declare-const y String)
@@ -132,6 +137,7 @@ class ParikhSolverTest extends AnyFunSuite {
     }
   }
 
+  // Simple substr test (sat case)
   testSAT("""
 (declare-const x String)
 (declare-const y String)
@@ -152,6 +158,7 @@ class ParikhSolverTest extends AnyFunSuite {
 
   testFileUNSAT("constraints/nondet/indexof.smt2")
 
+  // Longer string has a prefix with the same length as shorter one.
   testUNSAT("""
 (declare-const x String)
 (declare-const y String)
@@ -163,6 +170,7 @@ class ParikhSolverTest extends AnyFunSuite {
 (check-sat)
 """)
 
+  // ???
   testSAT("""
 (declare-const x String)
 (declare-const y String)
@@ -175,4 +183,22 @@ class ParikhSolverTest extends AnyFunSuite {
 (check-sat)
 (get-model)
 """) { (m, _) => () }
+
+  // Take prefix & suffix and concat them again then we get the original string (weaker result)
+  testUNSAT("""
+(declare-const x String)
+(declare-const p String)
+(declare-const s String)
+(declare-const y String)
+(declare-const i Int)
+
+(assert (str.in.re x (str.to.re "<script>")))
+(assert (and (<= 0 i) (< i (str.len x))))
+(assert (= p (str.substr x 0 i)))
+(assert (= s (str.substr x i (str.len x))))
+(assert (= y (str.++ p s)))
+(assert (str.in.re x (re.comp (str.to.re "<script>"))))
+(check-sat)
+""")
+
 }
