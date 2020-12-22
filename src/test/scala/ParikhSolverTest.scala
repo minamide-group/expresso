@@ -130,6 +130,36 @@ class ParikhSolverTest extends AnyFunSuite {
 (check-sat)
 """)
 
+  // The following two tests shows order in PCRE alternation matters for some situations.
+  testSAT(
+    """
+(declare-const x String)
+(declare-const y String)
+
+(assert (str.in.re x (re.* (re.union (str.to.re "ab") (str.to.re "abb")))))
+(assert (= y (str.replace_pcre
+                 x
+                 (pcre.+ (pcre.alt (str.to_pcre "ab") (str.to_pcre "abb")))
+                 (pcre.replacement ""))))
+(assert (str.in.re y (re.comp (str.to.re ""))))
+(check-sat)
+(get-model)
+"""
+  ) { (sm, _) => info(sm.toString()) }
+
+  testUNSAT("""
+(declare-const x String)
+(declare-const y String)
+
+(assert (str.in.re x (re.* (re.union (str.to.re "ab") (str.to.re "abb")))))
+(assert (= y (str.replace_pcre
+                 x
+                 (pcre.+ (pcre.alt (str.to_pcre "abb") (str.to_pcre "ab")))
+                 (pcre.replacement ""))))
+(assert (str.in.re y (re.comp (str.to.re ""))))
+(check-sat)
+""")
+
   implicit class AtMostSubstring(s: String) {
     def atmostSubstring(idx: Int, len: Int): String = {
       if (0 <= idx && idx < s.length && 0 < len) s.substring(idx, idx + math.min(len, s.length - idx))
