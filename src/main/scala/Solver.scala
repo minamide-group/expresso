@@ -713,19 +713,28 @@ object Solver {
 
   def expectPCRE(t: Term): Replacer.PCRE[Char, Int] = {
     type RE = Replacer.PCRE[Char, Int]
-    t match {
+    var group = 0
+    def nextGroup(): Int = {
+      group += 1
+      group
+    }
+    def aux(t: Term): RE = t match {
       case SimpleApp("str.to_pcre", Seq(SString(w))) =>
         w.map[RE](c => Replacer.PCRE.Chars(Set(c)))
           .fold[Replacer.PCRE[Char, Int]](Replacer.PCRE.Eps())(Replacer.PCRE.Cat.apply)
-      case SimpleApp("pcre.alt", ts)   => ts.map(expectPCRE).reduce[RE](Replacer.PCRE.Alt.apply)
-      case SimpleApp("pcre.++", ts)    => ts.map(expectPCRE).reduce[RE](Replacer.PCRE.Cat.apply)
-      case SimpleApp("pcre.*", Seq(t)) => Replacer.PCRE.Greedy(expectPCRE(t))
+      case SimpleApp("pcre.alt", ts)   => ts.map(aux).reduce[RE](Replacer.PCRE.Alt.apply)
+      case SimpleApp("pcre.++", ts)    => ts.map(aux).reduce[RE](Replacer.PCRE.Cat.apply)
+      case SimpleApp("pcre.*", Seq(t)) => Replacer.PCRE.Greedy(aux(t))
       case SimpleApp("pcre.+", Seq(t)) =>
-        val pcre = expectPCRE(t)
+        val pcre = aux(t)
         Replacer.PCRE.Cat(pcre, Replacer.PCRE.Greedy(pcre))
-      case SimpleApp("pcre.*?", Seq(t)) => Replacer.PCRE.NonGreedy(expectPCRE(t))
-      case _                            => throw new Exception(s"${t.getPos}: PCRE expected but found: $t")
+      case SimpleApp("pcre.*?", Seq(t)) => Replacer.PCRE.NonGreedy(aux(t))
+      case SimpleApp("pcre.group", Seq(t)) =>
+        val group = nextGroup()
+        Replacer.PCRE.Group(aux(t), group)
+      case _ => throw new Exception(s"${t.getPos}: PCRE expected but found: $t")
     }
+    aux(t)
   }
 
   def expectReplacement(t: Term): Replacer.Replacement[Char, Int] = t match {

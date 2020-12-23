@@ -158,6 +158,20 @@ class ParikhSolverTest extends AnyFunSuite {
                  (pcre.replacement ""))))
 (assert (str.in.re y (re.comp (str.to.re ""))))
 (check-sat)
+  // pcre.group
+  testUNSAT("""
+(declare-const x String)
+(declare-const y String)
+
+(assert (str.in.re x (str.to.re "ab")))
+(assert (= y (str.replace_pcre
+                 x
+                 (pcre.++
+                   (pcre.group (str.to_pcre "a"))
+                   (pcre.group (str.to_pcre "b")))
+                 (pcre.replacement 2 1 0))))
+(assert (str.in.re y (re.comp (str.to.re "baab"))))
+(check-sat)
 """)
 
   implicit class AtMostSubstring(s: String) {
