@@ -12,7 +12,7 @@ import Presburger.Sugar._
 import Constraint.Transduction
 import Solver.{SimpleQualID, SimpleApp, SimpleTransduction, expectRegExp}
 
-class ParikhSolver(options: Solver.SolverOption) {
+class ParikhSolver(options: ParikhSolver.SolverOption) {
 
   def setLogic(logic: SMTCommands.Logic): Unit = ()
 
@@ -85,16 +85,18 @@ class ParikhSolver(options: Solver.SolverOption) {
     (c.getOrCalc _, c.reset _)
   }
 
+  def printLine(x: Any): Unit = if (options.print) println(x)
+
   def checkSat(): Unit =
-    if (checker().checkSat()) println("sat")
-    else println("unsat")
+    if (checker().checkSat()) printLine("sat")
+    else printLine("unsat")
 
   def getModel(): Unit = {
     checker().getModel() match {
       case Some((sModel, iModel)) =>
-        for ((name, value) <- sModel) println(s"""(define-fun $name () String "${value}")""")
-        for ((name, value) <- iModel) println(s"(define-fun $name () Int ${value})")
-      case None => println("Cannot get model")
+        for ((name, value) <- sModel) printLine(s"""(define-fun $name () String "${value}")""")
+        for ((name, value) <- iModel) printLine(s"(define-fun $name () Int ${value})")
+      case None => printLine("Cannot get model")
     }
   }
 
@@ -236,6 +238,7 @@ class ParikhSolver(options: Solver.SolverOption) {
 }
 
 object ParikhSolver {
+  case class SolverOption(print: Boolean = true)
 
   type SolverPSST[C, I] = ParikhSST[Int, Option[C], Option[C], Int, Int, I]
 

@@ -12,7 +12,7 @@ class ParikhSolverTest extends AnyFunSuite {
   }
   def withExecuteScript[T](reader: java.io.Reader)(body: ParikhSolver => T): T = withScript(reader) {
     script =>
-      val solver = new ParikhSolver(())
+      val solver = new ParikhSolver(ParikhSolver.SolverOption(print = false))
       solver.executeScript(script)
       body(solver)
   }
@@ -260,5 +260,4 @@ class ParikhSolverTest extends AnyFunSuite {
 (assert (str.in.re x (re.comp (str.to.re "<script>"))))
 (check-sat)
 """)
-
 }

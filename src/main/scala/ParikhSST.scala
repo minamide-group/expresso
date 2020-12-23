@@ -289,7 +289,6 @@ case class ParikhSST[Q, A, B, X, L, I](
         .withDefaultValue(Map.empty.withDefault { case (q2, _) => Set(q2) })
     }
     // logger.invTransX(invTransX)
-    println("invTransX")
 
     def possiblePreviousOf[Q, X, A, B](
         q: Q,
@@ -367,14 +366,12 @@ case class ParikhSST[Q, A, B, X, L, I](
     val initialStates =
       states.filter { case (q, kt) => q == n1.q0 && kt.forall { case (_, (k, t)) => k == t } }
     // logger.backwardFinished(states, edges, initialStates)
-    println("backward")
 
     // Remove all unreachable states.
     val reachables = closure[NQ](initialStates, graphToMap(edges) {
       case (q, _, _, _, r) => q -> r
     })
     // logger.unreachablesRemoved(reachables)
-    println("unreachables")
 
     // Wrap states with Option so initial state be unique.
     type NWQ = Option[NQ]
@@ -408,7 +405,6 @@ case class ParikhSST[Q, A, B, X, L, I](
       n2.acceptFormulas
     )
     // logger.msstConstructed(res)
-    println("msst")
     res
   }
 
