@@ -349,13 +349,17 @@ object Replacer {
       val q0 = Cop2(false)
       val qf = Cop2(true)
       val states = repetitive.states.collect[Q] { case s if s.nonEmpty => Cop1(s) } + q0 + qf
+      val unitUpdate = {
+        val repXs = rep.indexed.collect { case Right((x, i)) => Rep(x, i) }
+        updateMonoid[SSTVar[X], A](repXs.toSet + Out()).unit
+      }
       val edges = repetitive.edges.map[E] {
         case (q, a, m, r) if q == Set.empty => (q0, a, m, Cop1(r))
         case (q, a, m, r) if r == Set.empty => (Cop1(q), a, m, qf)
         case (q, a, m, r)                   => (Cop1(q), a, m, Cop1(r))
       } ++ repetitive.in.collect[E] { // loop in qf
-        case Left(a)  => (qf, Left(a), Map(Out() -> List(Cop1(Out()), Cop2(a))), qf)
-        case Right(p) => (qf, Right(p), Map(Out() -> List(Cop1(Out()))), qf)
+        case Left(a)  => (qf, Left(a), unitUpdate + (Out() -> List(Cop1(Out()), Cop2(a))), qf)
+        case Right(p) => (qf, Right(p), unitUpdate + (Out() -> List(Cop1(Out()))), qf)
       }
       repetitive.copy(
         states = states,
