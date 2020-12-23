@@ -27,8 +27,8 @@ class ParikhSolverTest extends AnyFunSuite {
   def testSAT(
       constraint: String
   )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
-    withExecuteScript(new java.io.StringReader(constraint)) { solver =>
-      testWithInfoTime(s"test SAT\n${constraint.trim}") {
+    testWithInfoTime(s"test SAT\n${constraint.trim}") {
+      withExecuteScript(new java.io.StringReader(constraint)) { solver =>
         solver.checker().models() match {
           case Some((sModel, iModel)) => assertions(sModel, iModel)
           case None                   => fail()
@@ -36,8 +36,8 @@ class ParikhSolverTest extends AnyFunSuite {
       }
     }
   def testUNSAT(constraint: String)(implicit pos: Position) =
-    withExecuteScript(new java.io.StringReader(constraint)) { solver =>
-      testWithInfoTime(s"test UNSAT\n${constraint.trim}") {
+    testWithInfoTime(s"test UNSAT\n${constraint.trim}") {
+      withExecuteScript(new java.io.StringReader(constraint)) { solver =>
         assert(solver.checker().models().isEmpty)
       }
     }
@@ -52,13 +52,27 @@ class ParikhSolverTest extends AnyFunSuite {
     }
   }
 
-  def testFileUNSAT(path: String)(implicit pos: Position) = withFileReader(path) { reader =>
-    withExecuteScript(reader) { solver =>
-      testWithInfoTime(s"""test UNSAT "$path"""") {
-        assert(solver.checker().models().isEmpty)
+  def testFileSAT(
+      path: String
+  )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
+    testWithInfoTime(s"""test SAT\n"$path"""") {
+      withFileReader(path) { reader =>
+        withExecuteScript(reader) { solver =>
+          solver.checker().models() match {
+            case Some((sModel, iModel)) => assertions(sModel, iModel)
+            case None                   => fail()
+          }
+        }
       }
     }
-  }
+  def testFileUNSAT(path: String)(implicit pos: Position) =
+    testWithInfoTime(s"""test UNSAT "$path"""") {
+      withFileReader(path) { reader =>
+        withExecuteScript(reader) { solver => assert(solver.checker().models().isEmpty) }
+      }
+    }
+
+  testFileSAT("constraints/deleteall.smt2") { (_, _) => () }
 
   // Simple replace_pcre_all (match constant)
   testSAT("""
@@ -158,6 +172,8 @@ class ParikhSolverTest extends AnyFunSuite {
                  (pcre.replacement ""))))
 (assert (str.in.re y (re.comp (str.to.re ""))))
 (check-sat)
+""")
+
   // pcre.group
   testUNSAT("""
 (declare-const x String)
