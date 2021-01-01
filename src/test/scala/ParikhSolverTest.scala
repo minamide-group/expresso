@@ -52,11 +52,13 @@ class ParikhSolverTest extends AnyFunSuite {
     }
   }
 
+  def filePath(name: String): String = s"constraints/bench/$name.smt2"
+
   def testFileSAT(
-      path: String
+      name: String
   )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
-    testWithInfoTime(s"""test SAT: "$path"""") {
-      withFileReader(path) { reader =>
+    testWithInfoTime(s"""test SAT: "$name"""") {
+      withFileReader(filePath(name)) { reader =>
         withExecuteScript(reader) { solver =>
           solver.checker().models() match {
             case Some((sModel, iModel)) => assertions(sModel, iModel)
@@ -65,14 +67,14 @@ class ParikhSolverTest extends AnyFunSuite {
         }
       }
     }
-  def testFileUNSAT(path: String)(implicit pos: Position) =
-    testWithInfoTime(s"""test UNSAT: "$path"""") {
-      withFileReader(path) { reader =>
+  def testFileUNSAT(name: String)(implicit pos: Position) =
+    testWithInfoTime(s"""test UNSAT: "$name"""") {
+      withFileReader(filePath(name)) { reader =>
         withExecuteScript(reader) { solver => assert(solver.checker().models().isEmpty) }
       }
     }
 
-  testFileSAT("constraints/deleteall.smt2") { (_, _) => () }
+  testFileSAT("deleteall") { (_, _) => () }
 
   // Simple replace_pcre_all (match constant)
   testSAT("""
@@ -145,34 +147,9 @@ class ParikhSolverTest extends AnyFunSuite {
 """)
 
   // The following two tests shows order in PCRE alternation matters for some situations.
-  testSAT(
-    """
-(declare-const x String)
-(declare-const y String)
+  testFileSAT("pcre_precedence_sat") { (sm, _) => info(sm.toString) }
 
-(assert (str.in.re x (re.* (re.union (str.to.re "ab") (str.to.re "abb")))))
-(assert (= y (str.replace_pcre
-                 x
-                 (pcre.+ (pcre.alt (str.to_pcre "ab") (str.to_pcre "abb")))
-                 (pcre.replacement ""))))
-(assert (str.in.re y (re.comp (str.to.re ""))))
-(check-sat)
-(get-model)
-"""
-  ) { (sm, _) => info(sm.toString()) }
-
-  testUNSAT("""
-(declare-const x String)
-(declare-const y String)
-
-(assert (str.in.re x (re.* (re.union (str.to.re "ab") (str.to.re "abb")))))
-(assert (= y (str.replace_pcre
-                 x
-                 (pcre.+ (pcre.alt (str.to_pcre "abb") (str.to_pcre "ab")))
-                 (pcre.replacement ""))))
-(assert (str.in.re y (re.comp (str.to.re ""))))
-(check-sat)
-""")
+  testFileUNSAT("pcre_precedence_unsat")
 
   // pcre.group
   testUNSAT("""
@@ -189,6 +166,8 @@ class ParikhSolverTest extends AnyFunSuite {
 (assert (str.in.re y (re.comp (str.to.re "baab"))))
 (check-sat)
 """)
+
+  testFileSAT("group_sc") { (sm, _) => info(sm.toString) }
 
   implicit class AtMostSubstring(s: String) {
     def atmostSubstring(idx: Int, len: Int): String = {
@@ -216,19 +195,11 @@ class ParikhSolverTest extends AnyFunSuite {
       assert(!"ab".r.matches(y))
   }
 
-  testFileUNSAT("constraints/nondet/indexof.smt2")
+  testFileUNSAT("indexof")
 
-  // Longer string has a prefix with the same length as shorter one.
-  testUNSAT("""
-(declare-const x String)
-(declare-const y String)
-(declare-const z String)
+  testFileSAT("substr_zip_sat") { (sm, _) => info(sm.toString) }
 
-(assert (<= (str.len x) (str.len y)))
-(assert (= z (str.substr y 0 (str.len x))))
-(assert (not (= (str.len z) (str.len x))))
-(check-sat)
-""")
+  testFileUNSAT("substr_zip_unsat")
 
   // ???
   testSAT("""
@@ -244,20 +215,15 @@ class ParikhSolverTest extends AnyFunSuite {
 (get-model)
 """) { (m, _) => () }
 
-  // Take prefix & suffix and concat them again then we get the original string (weaker result)
-  testUNSAT("""
-(declare-const x String)
-(declare-const p String)
-(declare-const s String)
-(declare-const y String)
-(declare-const i Int)
+  testFileUNSAT("concat_prefix_suffix")
 
-(assert (str.in.re x (str.to.re "<script>")))
-(assert (and (<= 0 i) (< i (str.len x))))
-(assert (= p (str.substr x 0 i)))
-(assert (= s (str.substr x i (str.len x))))
-(assert (= y (str.++ p s)))
-(assert (str.in.re x (re.comp (str.to.re "<script>"))))
-(check-sat)
-""")
+  testFileSAT("reverse_indexof_sat") { (m, _) => info(m.toString) }
+
+  testFileUNSAT("reverse_indexof_unsat")
+
+  // Using isFunctional, the following property will be provable:
+  // 1. (str.replace_all x "a" "") and (str.replace_pcre_all x (pcre.+ (str.to_pcre "a")) (pcre.replacement ""))
+  //    is equivalent for any x.
+  // 2. (str.replace_all x "a" "b") and (str.replace_pcre_all x (pcre.+ (str.to_pcre "a")) (pcre.replacement "b"))
+  //    is NOT equivalent, e.g. when x = "aa" the former is "bb" while the latter is "b".
 }

@@ -732,7 +732,8 @@ object Solver {
       case SimpleApp("pcre.group", Seq(t)) =>
         val group = nextGroup()
         Replacer.PCRE.Group(aux(t), group)
-      case _ => throw new Exception(s"${t.getPos}: PCRE expected but found: $t")
+      case SimpleQualID("pcre.allchar") => Replacer.PCRE.AllChar()
+      case _                            => throw new Exception(s"${t.getPos}: PCRE expected but found: $t")
     }
     aux(t)
   }

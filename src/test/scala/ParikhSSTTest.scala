@@ -42,6 +42,7 @@ class ParikhSSTTest extends AnyFunSuite {
     testExamples(substr1)(
       Seq(
         ("abab", (0, 2), "ab"),
+        ("abab", (2, 0), ""),
         ("abab", (1, 2), "ba"),
         ("bba", (1, 2), "ba"),
         ("aa", (-1, 2), ""),
