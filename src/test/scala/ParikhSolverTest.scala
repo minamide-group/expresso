@@ -55,7 +55,7 @@ class ParikhSolverTest extends AnyFunSuite {
   def testFileSAT(
       path: String
   )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
-    testWithInfoTime(s"""test SAT\n"$path"""") {
+    testWithInfoTime(s"""test SAT: "$path"""") {
       withFileReader(path) { reader =>
         withExecuteScript(reader) { solver =>
           solver.checker().models() match {
@@ -66,7 +66,7 @@ class ParikhSolverTest extends AnyFunSuite {
       }
     }
   def testFileUNSAT(path: String)(implicit pos: Position) =
-    testWithInfoTime(s"""test UNSAT "$path"""") {
+    testWithInfoTime(s"""test UNSAT: "$path"""") {
       withFileReader(path) { reader =>
         withExecuteScript(reader) { solver => assert(solver.checker().models().isEmpty) }
       }
