@@ -175,12 +175,14 @@ object Solver {
   private case class REC(r: RegexConstraint[Char]) extends BoolExp
 
   object SimpleQualID {
+    def apply(name: String): QualifiedIdentifier = QualifiedIdentifier(SimpleIdentifier(SSymbol(name)), None)
     def unapply(term: Term): Option[String] = term match {
       case QualifiedIdentifier(SimpleIdentifier(SSymbol(name)), None) => Some(name)
       case _                                                          => None
     }
   }
   object SimpleApp {
+    def apply(name: String, args: Term*): Term = FunctionApplication(SimpleQualID(name), args)
     def unapply(term: Term): Option[(String, Seq[Term])] = term match {
       case FunctionApplication(SimpleQualID(name), terms) => Some((name, terms))
       case _                                              => None

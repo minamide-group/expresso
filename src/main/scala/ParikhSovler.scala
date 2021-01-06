@@ -1,6 +1,7 @@
 package com.github.kmn4.sst
 
 import smtlib.theories
+import smtlib.theories.{Core => CoreTheory}
 import smtlib.theories.Ints
 import smtlib.theories.experimental.Strings
 import smtlib.trees.{Terms => SMTTerms}
@@ -11,6 +12,7 @@ import ParikhSolver._
 import Presburger.Sugar._
 import Constraint.Transduction
 import Solver.{SimpleQualID, SimpleApp, SimpleTransduction, expectRegExp}
+import smtlib.theories.experimental.Strings.StringSort
 
 class ParikhSolver(options: ParikhSolver.SolverOption) {
 
@@ -43,7 +45,7 @@ class ParikhSolver(options: ParikhSolver.SolverOption) {
     }
 
   def assert(assertion: SMTTerm): Unit = {
-    val (c, cs) = expectConstraint(assertion)
+    val (c, cs) = expectConstraint(expandMacro(assertion))
     constraints ++= (cs :+ c)
   }
 
@@ -100,9 +102,29 @@ class ParikhSolver(options: ParikhSolver.SolverOption) {
     }
   }
 
+  def expandMacro(t: SMTTerm): SMTTerm = t match {
+    case CoreTheory.Not(CoreTheory.Equals(SimpleQualID(s1), SimpleQualID(s2)))
+        if env.get(s1).exists(_ == StringSort()) && env.get(s2).exists(_ == StringSort()) =>
+      val (x, y) = (SimpleQualID(s1), SimpleQualID(s2))
+      val i = SimpleQualID(freshTemp())
+      // codeAt(x, i) != codeAt(y, i)
+      CoreTheory.Not(CoreTheory.Equals(ParikhLanguage.CodeAt(x, i), ParikhLanguage.CodeAt(y, i)))
+    case _ => t
+  }
+
   // arbitrary int expression.
   // ex. (+ (str.indexof x "a" 0) 1) => Add(temp_i, 1), [x ∈ IndexOfFromZero("a", temp_i)]
   def expectInt(t: SMTTerm): (Presburger.Term[String], Seq[ParikhConstraint]) = {
+    def parseAndAbstract(t: SMTTerm): (String, Seq[ParikhConstraint]) = {
+      val (pt, cs) = expectInt(t)
+      pt match {
+        case Presburger.Var(s) => (s, cs)
+        case _ => {
+          val newVar = freshTemp()
+          (newVar, cs :+ (Presburger.Var(newVar) === pt))
+        }
+      }
+    }
     t match {
       case SNumeral(i)        => (Presburger.Const(i.toInt), Seq.empty)
       case SimpleQualID(name) => (Presburger.Var(s"user_$name"), Seq.empty)
@@ -112,6 +134,11 @@ class ParikhSolver(options: ParikhSolver.SolverOption) {
       case Strings.Length(SimpleQualID(name)) =>
         val lenVar = s"len_${name}"
         (Presburger.Var(lenVar), Seq(ParikhAssertion(name, ParikhLanguage.Length(lenVar))))
+      case ParikhLanguage.CodeAt(SimpleQualID(name), i) if env.get(name).exists(_ == StringSort()) =>
+        val c = freshTemp()
+        val (j, cs) = parseAndAbstract(i)
+        val assertion = ParikhAssertion(name, ParikhLanguage.CodeAt(j, c))
+        (Presburger.Var(c), cs :+ assertion)
       case SimpleApp("+", ts) =>
         val (pts, css) = ts.map(expectInt).unzip
         (Presburger.Add(pts), css.flatten)
@@ -156,7 +183,7 @@ class ParikhSolver(options: ParikhSolver.SolverOption) {
           (Presburger.Term[String], Presburger.Term[String]) => Presburger.Formula[String]
       )
     ](
-      (theories.Core.Equals, Presburger.Eq.apply[String] _),
+      (CoreTheory.Equals, Presburger.Eq.apply[String] _),
       (Ints.LessThan, Presburger.Lt.apply[String] _),
       (Ints.LessEquals, Presburger.Le.apply[String] _),
       (Ints.GreaterThan, Presburger.Gt _),
@@ -172,13 +199,13 @@ class ParikhSolver(options: ParikhSolver.SolverOption) {
       }
       if (binOpt.nonEmpty) return Some(binOpt.get)
       t match {
-        case theories.Core.Not(IntConstraint((f, cs))) => Some((Presburger.Not(f), cs))
-        case theories.Core.And(ts @ _*) =>
+        case CoreTheory.Not(IntConstraint((f, cs))) => Some((Presburger.Not(f), cs))
+        case CoreTheory.And(ts @ _*) =>
           val sub = ts.map(unapply)
           if (sub.exists(_.isEmpty)) return None
           val (fs, css) = sub.map(_.get).unzip
           Some((Presburger.Conj(fs), css.flatten))
-        case theories.Core.Or(ts @ _*) =>
+        case CoreTheory.Or(ts @ _*) =>
           val sub = ts.map(unapply)
           if (sub.exists(_.isEmpty)) return None
           val (fs, css) = sub.map(_.get).unzip
@@ -207,7 +234,7 @@ class ParikhSolver(options: ParikhSolver.SolverOption) {
   // _1 is t, and _2 is int equations and / or Parick assertions (for length).
   def expectConstraint(t: SMTTerm): (ParikhConstraint, Seq[ParikhConstraint]) = t match {
     // If (= x t) and x is string variable then t is transduction
-    case theories.Core.Equals(SimpleQualID(name), t) if env(name) == Strings.StringSort() =>
+    case CoreTheory.Equals(SimpleQualID(name), t) if env(name) == Strings.StringSort() =>
       t match {
         case SimpleTransduction(rhsStringVar, trans) =>
           (ParikhAssignment(name, trans, rhsStringVar), Seq.empty)
@@ -315,6 +342,44 @@ object ParikhSolver {
           outGraph,
           acceptFormulas
         )
+      }
+    }
+
+    case class CodeAt[I](iName: I, cName: I) extends ParikhLanguage[Char, I] {
+      def usedAlphabet: Set[Char] = Set.empty
+      def toParikhAutomaton(alphabet: Set[Char]): ParikhAutomaton[Int, Char, Int, I] = {
+        import Presburger._
+        val (q0, qf) = (0, 1)
+        type T = Term[Either[I, Int]]
+        val (i, c): (T, T) = (Var(Left(iName)), Var(Left(cName)))
+        val (input, index, code): (T, T, T) = (Var(Right(0)), Var(Right(1)), Var(Right(2)))
+        ParikhAutomaton(
+          Set(q0, qf),
+          alphabet,
+          Set(0, 1, 2),
+          Set(iName, cName),
+          alphabet.flatMap { a =>
+            Iterable(
+              (q0, a, Map(0 -> 1, 1 -> 1, 2 -> 0), q0),
+              (q0, a, Map(0 -> 1, 1 -> 0, 2 -> a.toInt), qf),
+              (qf, a, Map(0 -> 1, 1 -> 0, 2 -> 0), qf)
+            )
+          },
+          q0,
+          Set((q0, Map(0 -> 0, 1 -> 0, 2 -> -1)), (qf, Map(0 -> 0, 1 -> 0, 2 -> 0))),
+          Seq(
+            (i >= 0 && i < input) ==> (i === index && c === code),
+            (i < 0 || input <= i) ==> (c === -1)
+          )
+        )
+      }
+    }
+
+    object CodeAt {
+      def apply(x: SMTTerm, i: SMTTerm): SMTTerm = SimpleApp("code_at", x, i)
+      def unapply(t: SMTTerm): Option[(SMTTerm, SMTTerm)] = t match {
+        case SimpleApp("code_at", Seq(x, i)) => Some(x, i)
+        case _                               => None
       }
     }
   }
