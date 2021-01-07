@@ -110,12 +110,12 @@ class ParikhSSTTest extends AnyFunSuite {
     testExamples(composed)(cases)
   }
 
-  def indexOf(word: String, i: String) =
-    ParikhSolver.ParikhLanguage.IndexOfFromZero(word, i).toParikhAutomaton("abcd".toSet).toParikhSST
+  def indexOf0(word: String, i: String) =
+    ParikhSolver.ParikhLanguage.IndexOfConst(word, 0, i).toParikhAutomaton("abcd".toSet).toParikhSST
 
   test("Compose replaceAll and indexOf") {
     val replaceAll = Constraint.ReplaceAll("aab", "abc").toSST("abcd".toSet).toParikhSST[String, String]
-    val indexOfAB = indexOf("ab", "i")
+    val indexOfAB = indexOf0("ab", "i")
     testExamples(indexOfAB)(
       Seq(
         ("aab", Map("i" -> 1), "aab")

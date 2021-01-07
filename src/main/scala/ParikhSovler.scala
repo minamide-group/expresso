@@ -148,13 +148,12 @@ class ParikhSolver(options: ParikhSolver.SolverOption) {
         (Presburger.Sub(pt1, pt2), cs1 ++ cs2)
       case Strings.Experimental.IndexOf(SimpleQualID(name), SString(w), SNumeral(c)) if c == 0 =>
         val newVar = freshTemp()
-        val constr = ParikhAssertion(name, ParikhLanguage.IndexOfFromZero(w, newVar))
+        val constr = ParikhAssertion(name, ParikhLanguage.IndexOfConst(w, c.toInt, newVar))
         (Presburger.Var(newVar), Seq(constr))
-      case Strings.Experimental.IndexOf(SimpleQualID(name), SString(w), e) =>
-        val (pt, cs) = expectInt(e)
-        // val constr = ParikhAssertion(StringVar(name), ParikhLanguage.IndexOf(w, newVar, i))
-        // (Presburger.Var(newVar), cs :+ constr)
-        ???
+      case Strings.Experimental.IndexOf(SimpleQualID(name), SString(w), t) =>
+        val (i, cs) = parseAndAbstract(t)
+        val j = freshTemp()
+        (Presburger.Var(j), cs :+ ParikhAssertion(name, ParikhLanguage.IndexOf(w, i, j)))
       case _ =>
         throw new Exception(s"${t.getPos}: Cannot interpret given S-expression ${t} as int expression")
     }
@@ -297,20 +296,27 @@ object ParikhSolver {
           Seq(Presburger.Eq(Presburger.Var(Left(lenVar)), Presburger.Var(Right(0))))
         )
     }
-    case class IndexOfFromZero[A, I](target: Seq[A], iName: I) extends ParikhLanguage[A, I] {
+
+    // (= j (str.indexof x w c)) --> IndexOfConst(w, c, j)
+    case class IndexOfConst[A, I](target: Seq[A], from: Int, jName: I) extends ParikhLanguage[A, I] {
       def usedAlphabet: Set[A] = target.toSet
 
       def toParikhAutomaton(alphabet: Set[A]): ParikhAutomaton[Int, A, Int, I] = {
         import Presburger._
-        type Q = Int
         type L = Int
-        type Edges = Iterable[(Q, A, Map[L, Int], Q)]
-        val x = 0
         type T = Term[Either[I, L]]
-        val i: T = Var(Left(iName))
+        val j: T = Var(Left(jName))
         val input: T = Var(Right(0))
-        val output: T = Var(Right(1))
+        val untilMatch: T = Var(Right(1))
+        type Q = Int
+        type Edges = Iterable[(Q, A, Map[L, Int], Q)]
         val dfa = Solver.postfixDFA(target, alphabet)
+        val skipStates = (-from to -1).toSet
+        val skipEdges = for {
+          q <- skipStates
+          a <- alphabet
+        } yield (q, a, Map(0 -> 1, 1 -> 1), q + 1)
+        val skipOutGraph = skipStates.map(q => (q, Map(0 -> 0, 1 -> 0)))
         val states = dfa.states
         val edges: Edges = {
           for {
@@ -329,22 +335,80 @@ object ParikhSolver {
           // On each state q, DFA has partially matched prefix of target string.
           states.map(q => (q, Map(0 -> 0, 1 -> (q % target.length))))
         val acceptFormulas = Seq(
-          output >= input ==> (i === -1),
-          output < input ==> (i === output)
+          (input < from || input <= untilMatch) ==> (j === -1),
+          (input >= from && input > untilMatch) ==> (j === untilMatch)
         )
         ParikhAutomaton[Q, A, L, I](
-          states,
+          states ++ skipStates,
           alphabet,
           Set(0, 1),
-          Set(iName),
-          edges.toSet,
-          dfa.q0,
-          outGraph,
+          Set(jName),
+          edges.toSet ++ skipEdges,
+          -from,
+          outGraph ++ skipOutGraph,
           acceptFormulas
         )
       }
     }
 
+    // (= j (str.indexof x w i)) --> x ∈ IndexOf(w, i, j)
+    case class IndexOf[A, I](target: Seq[A], iName: I, jName: I) extends ParikhLanguage[A, I] {
+      def usedAlphabet: Set[A] = target.toSet
+
+      def toParikhAutomaton(alphabet: Set[A]): ParikhAutomaton[Int, A, Int, I] = {
+        import Presburger._
+        type L = Int
+        type T = Term[Either[I, L]]
+        val i: T = Var(Left(iName))
+        val j: T = Var(Left(jName))
+        val input: T = Var(Right(0))
+        val untilMatch: T = Var(Right(1))
+        val skipped: T = Var(Right(2))
+        type Q = Int
+        type Edges = Iterable[(Q, A, Map[L, Int], Q)]
+        val dfa = Solver.postfixDFA(target, alphabet)
+        val states = dfa.states
+        val edges: Edges = {
+          for {
+            q <- states
+            a <- alphabet
+          } yield {
+            val r = dfa.transition.getOrElse((q, a), q)
+            val skipped =
+              if (dfa.finalStates(r)) 0
+              else q + 1 - r
+            val v = Map(0 -> 1, 1 -> skipped, 2 -> 0)
+            (q, a, v, r)
+          }
+        }
+        val outGraph =
+          // On each state q, DFA has partially matched prefix of target string.
+          states.map(q => (q, Map(0 -> 0, 1 -> (q % target.length), 2 -> 0)))
+        val acceptFormulas = Seq(
+          skipped === i,
+          (input <= untilMatch) ==> (j === -1),
+          (input > untilMatch) ==> (j === untilMatch)
+        )
+        val skipState = -1
+        val fromSkipState = {
+          val trans = graphToMap(edges) { case (q, a, v, r) => (q, a) -> (r, v) }
+          alphabet.flatMap { a =>
+            trans(dfa.q0, a).map { case (r, v) => (skipState, a, v + (2 -> 0), r) } +
+              ((skipState, a, Map(0 -> 1, 1 -> 1, 2 -> 1), dfa.q0))
+          }
+        }
+        ParikhAutomaton[Q, A, L, I](
+          states + skipState,
+          alphabet,
+          Set(0, 1, 2),
+          Set(iName, jName),
+          edges.toSet ++ fromSkipState,
+          skipState,
+          outGraph + ((skipState, Map(0 -> 0, 1 -> 0, 2 -> 0))),
+          acceptFormulas
+        )
+      }
+    }
     case class CodeAt[I](iName: I, cName: I) extends ParikhLanguage[Char, I] {
       def usedAlphabet: Set[Char] = Set.empty
       def toParikhAutomaton(alphabet: Set[Char]): ParikhAutomaton[Int, Char, Int, I] = {
