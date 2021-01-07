@@ -677,7 +677,7 @@ object ParikhSolver {
         "Not straight-line"
       )
       val lastPSST = {
-        val lastVarIdx = assignments.last._1
+        val lastVarIdx = assignments.lastOption.map(_._1).getOrElse(assertions.map(_._1).max)
         val p = compileParikhAssertions(assertions, alphabet, lastVarIdx)
         val is = arithFormulas.flatMap(_.freeVars)
         val formulas = arithFormulas.map(_.renameVars[Either[String, Int]](Left.apply))
