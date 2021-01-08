@@ -13,8 +13,9 @@ import Presburger.Sugar._
 import Constraint.Transduction
 import Solver.{SimpleQualID, SimpleApp, SimpleTransduction, expectRegExp}
 import smtlib.theories.experimental.Strings.StringSort
+import com.typesafe.scalalogging.Logger
 
-class ParikhSolver(options: ParikhSolver.SolverOption) {
+class ParikhSolver(print: Boolean = false, logger: Logger = Logger("nop")) {
 
   def setLogic(logic: SMTCommands.Logic): Unit = ()
 
@@ -81,21 +82,25 @@ class ParikhSolver(options: ParikhSolver.SolverOption) {
 
   val (checker, resetChecker) = {
     val c = Cacher[Checker] {
-      val (psst, idxVar) = Compiler.compile(constraints)
+      val (psst, idxVar) = Compiler.compile(constraints, logger)
       new Checker(psst, idxVar)
     }
     (c.getOrCalc _, c.reset _)
   }
 
-  def printLine(x: Any): Unit = if (options.print) println(x)
+  def printLine(x: Any): Unit = if (print) println(x)
 
-  def checkSat(): Unit =
-    if (checker().checkSat()) printLine("sat")
+  def checkSat(): Unit = {
+    val sat = checker().checkSat()
+    logger.trace(s"checking done, ${if (sat) "SAT" else "UNSAT"}")
+    if (sat) printLine("sat")
     else printLine("unsat")
+  }
 
   def getModel(): Unit = {
     checker().getModel() match {
       case Some((sModel, iModel)) =>
+        logger.trace(s"got model ${(sModel, iModel)}")
         for ((name, value) <- sModel) printLine(s"""(define-fun $name () String "${value}")""")
         for ((name, value) <- iModel) printLine(s"(define-fun $name () Int ${value})")
       case None => printLine("Cannot get model")
@@ -264,7 +269,7 @@ class ParikhSolver(options: ParikhSolver.SolverOption) {
 }
 
 object ParikhSolver {
-  case class SolverOption(print: Boolean = true)
+  case class SolverOption(print: Boolean = true, logger: Logger = Logger("nop"))
 
   type SolverPSST[C, I] = ParikhSST[Int, Option[C], Option[C], Int, Int, I]
 
@@ -734,7 +739,8 @@ object ParikhSolver {
           (Int, Set[Char] => SolverPSST[Char, String])
         ], // ([lhsVarIdx], [corresponding solver PSST])
         assertions: Map[Int, Seq[ParikhLanguage[Char, String]]], // [string var idx] in [Parikh langs]
-        arithFormulas: Seq[PureIntConstraint] // formula over int variables
+        arithFormulas: Seq[PureIntConstraint], // formula over int variables
+        logger: Logger
     )(alphabet: Set[Char]): SolverPSST[Char, String] = {
       require(
         assignments.map(_._1).sliding(2).forall(l => l.length < 2 || l(1) == l(0) + 1),
@@ -748,11 +754,23 @@ object ParikhSolver {
         p.copy(is = p.is ++ is, acceptFormulas = p.acceptFormulas ++ formulas)
       }
       val assignmentPSSTs = assignments.map(_._2(alphabet))
-      (assignmentPSSTs :+ lastPSST).reduce(_ compose _)
+      logger.trace("got the following PSSTs:")
+      (assignmentPSSTs :+ lastPSST).zipWithIndex.foreach {
+        case (psst, i) => logger.trace(s"#$i: ${psst.sizes}")
+      }
+      (assignmentPSSTs :+ lastPSST).reduce[SolverPSST[Char, String]] {
+        case (p1, p2) =>
+          logger.trace(s"compose ${p1.sizes} and ${p2.sizes}")
+          p1 compose p2
+      }
     }
 
     // _2: Index of string in PSST output -> String var name
-    def compile(constraints: Seq[ParikhConstraint]): (SolverPSST[Char, String], Map[Int, String]) = {
+    def compile(
+        constraints: Seq[ParikhConstraint],
+        logger: Logger
+    ): (SolverPSST[Char, String], Map[Int, String]) = {
+      logger.trace("start compilation")
       val varIdx = stringVarIndex(constraints)
       val assignments = constraints.collect {
         case a @ ParikhAssignment(lhs, trans, rhs) => (varIdx(lhs), a.toSolverPSST(varIdx) _)
@@ -765,7 +783,8 @@ object ParikhSolver {
         val printable = ' ' to '~'
         used ++ printable.find(c => !used.contains(c))
       }
-      val psst = compileTriple(assignments, assertions.groupMap(_._1)(_._2), arithFormula)(alphabet)
+      val psst = compileTriple(assignments, assertions.groupMap(_._1)(_._2), arithFormula, logger)(alphabet)
+      logger.trace(s"composition done, got PSST ${psst.sizes}")
       (psst, varIdx.map { case (x, i) => i -> x })
     }
 

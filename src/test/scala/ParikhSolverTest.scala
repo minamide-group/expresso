@@ -2,6 +2,7 @@ package com.github.kmn4.sst
 
 import org.scalatest.funsuite._
 import org.scalactic.source.Position
+import com.typesafe.scalalogging.Logger
 
 class ParikhSolverTest extends AnyFunSuite {
   def withScript[T](reader: java.io.Reader)(body: smtlib.trees.Commands.Script => T): T = {
@@ -12,7 +13,7 @@ class ParikhSolverTest extends AnyFunSuite {
   }
   def withExecuteScript[T](reader: java.io.Reader)(body: ParikhSolver => T): T = withScript(reader) {
     script =>
-      val solver = new ParikhSolver(ParikhSolver.SolverOption(print = false))
+      val solver = new ParikhSolver()
       solver.executeScript(script)
       body(solver)
   }
@@ -53,13 +54,16 @@ class ParikhSolverTest extends AnyFunSuite {
   }
 
   def filePath(name: String): String = s"constraints/bench/$name.smt2"
+  def loggerName(name: String): String = s"bench.$name"
 
   def testFileSAT(
       name: String
   )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
     testWithInfoTime(s"""test SAT: "$name"""") {
       withFileReader(filePath(name)) { reader =>
-        withExecuteScript(reader) { solver =>
+        withScript(reader) { script =>
+          val solver = new ParikhSolver(print = false, logger = Logger(loggerName(name)))
+          solver.executeScript(script)
           solver.checker().models() match {
             case Some((sModel, iModel)) => assertions(sModel, iModel)
             case None                   => fail()
@@ -70,7 +74,11 @@ class ParikhSolverTest extends AnyFunSuite {
   def testFileUNSAT(name: String)(implicit pos: Position) =
     testWithInfoTime(s"""test UNSAT: "$name"""") {
       withFileReader(filePath(name)) { reader =>
-        withExecuteScript(reader) { solver => assert(solver.checker().models().isEmpty) }
+        withScript(reader) { script =>
+          val solver = new ParikhSolver(print = false, logger = Logger(loggerName(name)))
+          solver.executeScript(script)
+          assert(solver.checker().models().isEmpty)
+        }
       }
     }
 

@@ -105,6 +105,9 @@ case class ParikhSST[Q, A, B, X, L, I](
     )
   }
 
+  def sizes: (Int, Int, Int, Int, Int, Int) =
+    (states.size, xs.size, ls.size, edges.size, outGraph.size, acceptFormulas.size)
+
   def endWith(bs: Set[B]): ParikhSST[(Q, Option[X]), A, B, X, L, I] = {
     val newOutGraph = outGraph.flatMap {
       case (q, xbs, v) =>
