@@ -11,12 +11,15 @@ class ParikhSolverTest extends AnyFunSuite {
     val script = parser.parseScript
     body(script)
   }
-  def withExecuteScript[T](reader: java.io.Reader)(body: ParikhSolver => T): T = withScript(reader) {
-    script =>
-      val solver = new ParikhSolver()
-      solver.executeScript(script)
-      body(solver)
+  def withExecuteScript[T](print: Boolean, logger: Logger, alphabet: Set[Char])(
+      reader: java.io.Reader
+  )(body: ParikhSolver => T): T = withScript(reader) { script =>
+    val solver = new ParikhSolver(print = print, logger = logger, alphabet = alphabet)
+    solver.executeScript(script)
+    body(solver)
   }
+  def withExecuteScript[T](reader: java.io.Reader)(body: ParikhSolver => T): T =
+    withExecuteScript(false, logger = Logger("nop"), "ab".toSet)(reader)(body)
   def testWithInfoTime[T](testName: String, testTags: org.scalatest.Tag*)(
       testFun: => Any
   )(implicit pos: Position): Unit = test(testName, testTags: _*) {
@@ -53,33 +56,25 @@ class ParikhSolverTest extends AnyFunSuite {
     }
   }
 
-  def filePath(name: String): String = s"constraints/bench/$name.smt2"
-  def loggerName(name: String): String = s"bench.$name"
+  def withExecuteFile[T](fname: String)(body: ParikhSolver => T): T =
+    withFileReader(s"constraints/bench/$fname.smt2") { reader =>
+      withExecuteScript(false, Logger(s"bench.$fname"), "ab".toSet)(reader)(body)
+    }
 
   def testFileSAT(
       name: String
   )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
     testWithInfoTime(s"""test SAT: "$name"""") {
-      withFileReader(filePath(name)) { reader =>
-        withScript(reader) { script =>
-          val solver = new ParikhSolver(print = false, logger = Logger(loggerName(name)))
-          solver.executeScript(script)
-          solver.checker().models() match {
-            case Some((sModel, iModel)) => assertions(sModel, iModel)
-            case None                   => fail()
-          }
+      withExecuteFile(name) { solver =>
+        solver.checker().models() match {
+          case Some((sModel, iModel)) => assertions(sModel, iModel)
+          case None                   => fail()
         }
       }
     }
   def testFileUNSAT(name: String)(implicit pos: Position) =
     testWithInfoTime(s"""test UNSAT: "$name"""") {
-      withFileReader(filePath(name)) { reader =>
-        withScript(reader) { script =>
-          val solver = new ParikhSolver(print = false, logger = Logger(loggerName(name)))
-          solver.executeScript(script)
-          assert(solver.checker().models().isEmpty)
-        }
-      }
+      withExecuteFile(name) { solver => assert(solver.checker().models().isEmpty) }
     }
 
   testFileSAT("deleteall") { (_, _) => () }

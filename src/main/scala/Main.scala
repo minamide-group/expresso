@@ -1,6 +1,7 @@
 package com.github.kmn4.sst
 
 import java.nio.file.{FileSystems, Files}
+import com.typesafe.scalalogging.Logger
 
 object Main extends App {
   val fname = args(0)
@@ -8,5 +9,6 @@ object Main extends App {
   val lexer = new smtlib.lexer.Lexer(new java.io.FileReader(path.toFile()))
   val parser = new smtlib.parser.Parser(lexer)
   val script = parser.parseScript
-  new ParikhSolver().executeScript(script)
+  // Ensure that alphabet includes at least 2 letters.
+  new ParikhSolver(print = true, logger = Logger("nop"), alphabet = "ab".toSet).executeScript(script)
 }

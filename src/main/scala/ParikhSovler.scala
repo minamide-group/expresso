@@ -15,7 +15,11 @@ import Solver.{SimpleQualID, SimpleApp, SimpleTransduction, expectRegExp}
 import smtlib.theories.experimental.Strings.StringSort
 import com.typesafe.scalalogging.Logger
 
-class ParikhSolver(print: Boolean = false, logger: Logger = Logger("nop")) {
+class ParikhSolver(
+    print: Boolean = false,
+    logger: Logger = Logger("nop"),
+    alphabet: Set[Char] = Set.empty // ADDED to the alphabet of constraints
+) {
 
   def setLogic(logic: SMTCommands.Logic): Unit = ()
 
@@ -82,7 +86,7 @@ class ParikhSolver(print: Boolean = false, logger: Logger = Logger("nop")) {
 
   val (checker, resetChecker) = {
     val c = Cacher[Checker] {
-      val (psst, idxVar) = Compiler.compile(constraints, logger)
+      val (psst, idxVar) = Compiler.compile(constraints, alphabet, logger)
       new Checker(psst, idxVar)
     }
     (c.getOrCalc _, c.reset _)
@@ -704,7 +708,7 @@ object ParikhSolver {
         lastVarIdx: Int
     ): SolverPSST[Char, String] = {
       require(
-        lastVarIdx >= assertions.map(_._1).max,
+        assertions.isEmpty || lastVarIdx >= assertions.map(_._1).max,
         "All LHS of PA assertions should be less than or equal to max LHS of assignments."
       )
       val idxRegularsParikhs = {
@@ -768,6 +772,7 @@ object ParikhSolver {
     // _2: Index of string in PSST output -> String var name
     def compile(
         constraints: Seq[ParikhConstraint],
+        additionalAlphabet: Set[Char],
         logger: Logger
     ): (SolverPSST[Char, String], Map[Int, String]) = {
       logger.trace("start compilation")
@@ -780,8 +785,7 @@ object ParikhSolver {
       val arithFormula = constraints.collect { case IntConstraintIsParikhConstraint(f) => f }
       val alphabet = {
         val used = constraints.flatMap(_.usedAlphabet).toSet
-        val printable = ' ' to '~'
-        used ++ printable.find(c => !used.contains(c))
+        used ++ additionalAlphabet
       }
       val psst = compileTriple(assignments, assertions.groupMap(_._1)(_._2), arithFormula, logger)(alphabet)
       logger.trace(s"composition done, got PSST ${psst.sizes}")
