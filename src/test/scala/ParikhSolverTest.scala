@@ -81,6 +81,13 @@ class ParikhSolverTest extends AnyFunSuite {
 
   testFileUNSAT("concat_unsat_03")
 
+  testFileSAT("concat_delete") { (m, _) =>
+    val (xy, x, y, z) = (m("xy"), m("x"), m("y"), m("z"))
+    assert(xy == x ++ y)
+    assert(z == xy.replaceAll("<script>", ""))
+    assert("<script>".r.matches(z))
+  }
+
   testFileSAT("replace_some_1") { (m, _) =>
     val (x, y) = (m("x"), m("y"))
     assert("a+".r.matches(x))

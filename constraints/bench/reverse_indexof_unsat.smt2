@@ -5,3 +5,5 @@
 (assert (= y (str.reverse x)))
 
 (assert (not (< (str.indexof y "a" 0) (str.indexof y "b" 0))))
+
+(check-sat)

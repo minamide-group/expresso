@@ -742,6 +742,10 @@ case class ParikhAutomaton[Q, A, L, I](
     )
   }
 
+  /** Returns a pair (n, v) of I vector and L vector that meets the following if exists:
+    * there exists w for which this outputs v and formula(n, v) == true. */
+  def ilVectorOption: Option[(Map[I, Int], Map[L, Int])] = toParikhSST.ilVectorOption
+
   def renamed: ParikhAutomaton[Int, A, Int, I] = {
     val qMap = states.zipWithIndex.toMap
     val lMap = ls.zipWithIndex.toMap
