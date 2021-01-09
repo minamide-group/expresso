@@ -1,9 +1,10 @@
 package com.github.kmn4.sst
 
-import smtlib.trees._
 import smtlib.theories.experimental.Strings
-import Commands._
-import Terms._
+import smtlib.trees.Commands._
+import smtlib.trees.Terms
+import smtlib.trees.Terms._
+
 import Constraint._
 import Solver._
 

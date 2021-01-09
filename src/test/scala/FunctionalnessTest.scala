@@ -1,7 +1,8 @@
 package com.github.kmn4.sst
 
+import scala.util.Random.nextInt
+
 import org.scalatest.funsuite._
-import scala.util.Random.{nextInt}
 
 class FunctionalnessTest extends AnyFunSuite {
   import Constraint._

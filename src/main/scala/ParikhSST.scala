@@ -1,6 +1,7 @@
 package com.github.kmn4.sst
 
 import com.microsoft.z3
+
 import ParikhSST.Implicits._
 
 trait StringIntTransducer[A, B, I] {

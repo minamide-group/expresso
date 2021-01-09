@@ -1,8 +1,9 @@
 package com.github.kmn4.sst
 
 import org.scalatest.funsuite._
+
 import Solver._
-import com.github.kmn4.sst.Constraint._
+import Constraint._
 
 class SolverTest extends AnyFunSuite {
   def toOptionList(s: String): List[Option[Char]] = s.toList.map(c => if (c == '#') None else Some(c))

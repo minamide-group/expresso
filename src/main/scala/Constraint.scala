@@ -3,7 +3,8 @@ package com.github.kmn4.sst
 import smtlib.theories.Ints.IntSort
 import smtlib.theories.experimental.Strings.StringSort
 import smtlib.trees.Terms.Sort
-import Solver._
+
+import Solver.{solverNsstTemplate, SolverSST, postfixDFA}
 
 object Constraint {
 

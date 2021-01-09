@@ -1,19 +1,20 @@
+// TODO rename this file
 package com.github.kmn4.sst
 
-import smtlib.theories
-import smtlib.theories.{Core => CoreTheory}
+import com.typesafe.scalalogging.Logger
 import smtlib.theories.Ints
 import smtlib.theories.experimental.Strings
-import smtlib.trees.{Terms => SMTTerms}
-import smtlib.trees.Terms.{Term => SMTTerm, SNumeral, SString, Sort}
-import smtlib.trees.{Commands => SMTCommands}
+import smtlib.theories.experimental.Strings.StringSort
+import smtlib.theories.{Core => CoreTheory}
 import smtlib.trees.Commands.{Command => SMTCommand}
+import smtlib.trees.Terms.{SNumeral, SString, Sort, Term => SMTTerm}
+import smtlib.trees.{Commands => SMTCommands}
+import smtlib.trees.{Terms => SMTTerms}
+
 import ParikhSolver._
 import Presburger.Sugar._
 import Constraint.Transduction
 import Solver.{SimpleQualID, SimpleApp, SimpleTransduction, expectRegExp}
-import smtlib.theories.experimental.Strings.StringSort
-import com.typesafe.scalalogging.Logger
 
 class ParikhSolver(
     print: Boolean = false,

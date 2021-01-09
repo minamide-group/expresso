@@ -1,7 +1,8 @@
 package com.github.kmn4.sst
 
-import org.scalatest.flatspec._
 import scala.math.max
+
+import org.scalatest.flatspec._
 
 class CompositionTest extends AnyFlatSpec {
   implicit val logger = NopLogger

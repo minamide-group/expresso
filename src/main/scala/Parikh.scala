@@ -1,6 +1,7 @@
 package com.github.kmn4.sst
 
 import com.microsoft.z3
+
 import Presburger._
 
 object Parikh {

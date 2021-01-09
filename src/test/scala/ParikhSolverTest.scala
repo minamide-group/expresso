@@ -1,8 +1,8 @@
 package com.github.kmn4.sst
 
-import org.scalatest.funsuite._
-import org.scalactic.source.Position
 import com.typesafe.scalalogging.Logger
+import org.scalactic.source.Position
+import org.scalatest.funsuite._
 
 class ParikhSolverTest extends AnyFunSuite {
   def withScript[T](reader: java.io.Reader)(body: smtlib.trees.Commands.Script => T): T = {

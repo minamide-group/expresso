@@ -1,6 +1,7 @@
 package com.github.kmn4.sst
 
 import java.nio.file.{FileSystems, Files}
+
 import com.typesafe.scalalogging.Logger
 
 object Main extends App {
