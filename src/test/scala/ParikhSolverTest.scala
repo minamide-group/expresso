@@ -79,6 +79,24 @@ class ParikhSolverTest extends AnyFunSuite {
 
   testFileSAT("deleteall") { (_, _) => () }
 
+  testFileUNSAT("concat_unsat_03")
+
+  testFileSAT("replace_some_1") { (m, _) =>
+    val (x, y) = (m("x"), m("y"))
+    assert("a+".r.matches(x))
+    assert("(ab)+".r.matches(y))
+  }
+
+  testFileUNSAT("replace_some_2")
+
+  testFileSAT("replaceall_int") { (m, _) =>
+    val (x, y, z) = (m("x"), m("y"), m("z"))
+    assert("[ab]*".r.matches(x))
+    assert(y == x.replaceAll("ab", "c"))
+    assert(z == y.replaceAll("ac", "aaaa"))
+    assert(x.length + 5 <= z.length)
+  }
+
   // Simple replace_pcre_all (match constant)
   testSAT("""
 (declare-const x String)

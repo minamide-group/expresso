@@ -4,6 +4,7 @@ import org.scalatest.funsuite._
 
 import Solver._
 import Constraint._
+import ParikhSolver.ParikhTransduction.NSSTTransductionIsParikhTransduction
 
 class SolverTest extends AnyFunSuite {
   def toOptionList(s: String): List[Option[Char]] = s.toList.map(c => if (c == '#') None else Some(c))
@@ -14,78 +15,67 @@ class SolverTest extends AnyFunSuite {
       expected: String*
   ) = assert(sst.transduce(toOptionList(w)) == expected.map(toOptionList).toSet)
   val alphabet = "ab".toSet
-  test("constNSST") {
-    {
-      val n = constantNSST(2, "ab".toList, alphabet)
-      testTransduce(n, "ba#b#", "ba#b#ab#")
-      assert(n.transduce(toOptionList("ba#")) == Set.empty)
-    }
-  }
   test("replaceAllNSST") {
-    {
-      val n = ReplaceAll("aab", "b").toSolverSST(1, 0, alphabet)
-      testTransduce(n, "aaabaab#", "aaabaab#abb#")
-    }
+    val n = ReplaceAll("aab", "b").toSolverPSST(alphabet, 1, 0).sst
+    testTransduce(n, "aaabaab#", "aaabaab#abb#")
   }
 
   test("ReplaceSome") {
-    {
-      val n = ReplaceSome("aab", "b").toSolverSST(1, 0, alphabet)
-      assert(
-        n.transduce(toOptionList("aaabaab#")).map(fromOptionList) == Set(
-          "aaabaab#aaabaab#",
-          "aaabaab#aaabb#",
-          "aaabaab#abaab#",
-          "aaabaab#abb#"
-        )
+    val n = ReplaceSome("aab", "b").toSolverPSST(alphabet, 1, 0).sst
+    assert(
+      n.transduce(toOptionList("aaabaab#")).map(fromOptionList) == Set(
+        "aaabaab#aaabaab#",
+        "aaabaab#aaabb#",
+        "aaabaab#abaab#",
+        "aaabaab#abb#"
       )
-    }
+    )
   }
 
   test("concatNSST") {
     {
       // 2 := a0bb
-      val n = concatNSST(2, List(Left("a".toList), Right(0), Left("bb".toList)), alphabet)
+      val n = concatNSST(2, List(Left("a".toList), Right(0), Left("bb".toList)), alphabet).toParikhSST.sst
       assert(n.variables.size == 2)
       testTransduce(n, "ba#b#", "ba#b#ababb#")
       assert(n.transduce(toOptionList("ba#")) == Set.empty)
     }
     {
       // 2 := a1bb
-      val n = concatNSST(2, List(Left("a".toList), Right(1), Left("bb".toList)), alphabet)
+      val n = concatNSST(2, List(Left("a".toList), Right(1), Left("bb".toList)), alphabet).toParikhSST.sst
       assert(n.variables.size == 2)
       testTransduce(n, "ba#b#", "ba#b#abbb#")
       assert(n.transduce(toOptionList("ba#")) == Set.empty)
     }
     {
       // 2 := 10
-      val n = concatNSST(2, List(Right(1), Right(0)), alphabet)
+      val n = concatNSST(2, List(Right(1), Right(0)), alphabet).toParikhSST.sst
       assert(n.variables.size == 3)
       testTransduce(n, "ba#b#", "ba#b#bba#")
     }
     {
       // 2 := 00
-      val n = concatNSST(2, List(Right(0), Right(0)), alphabet)
+      val n = concatNSST(2, List(Right(0), Right(0)), alphabet).toParikhSST.sst
       assert(n.variables.size == 3)
       testTransduce(n, "ba#b#", "ba#b#baba#")
     }
   }
   test("insertNSST") {
     {
-      val n = Insert(1, "aa").toSolverSST(2, 0, alphabet)
+      val n = Insert(1, "aa").toSolverPSST(alphabet, 2, 0).sst
       testTransduce(n, "bb##", "bb##baab#")
       testTransduce(n, "##", "###")
     }
   }
   test("reverseNSST") {
     {
-      val n = Reverse().toSolverSST(2, 0, alphabet)
+      val n = Reverse().toSolverPSST(alphabet, 2, 0).sst
       testTransduce(n, "ab##", "ab##ba#")
     }
   }
   test("atNSST") {
     {
-      val n = At(1).toSolverSST(2, 0, alphabet)
+      val n = At(1).toSolverPSST(alphabet, 2, 0).sst
       testTransduce(n, "aba##", "aba##b#")
       testTransduce(n, "ab#a#", "ab#a#b#")
       testTransduce(n, "a#b#", "a#b##")
@@ -93,7 +83,7 @@ class SolverTest extends AnyFunSuite {
   }
   test("substrNSST") {
     {
-      val n = Substr(1, 2).toSolverSST(2, 0, alphabet)
+      val n = Substr(1, 2).toSolverPSST(alphabet, 2, 0).sst
       testTransduce(n, "##", "###")
       testTransduce(n, "a##", "a###")
       testTransduce(n, "ab##", "ab##b#")
@@ -104,7 +94,7 @@ class SolverTest extends AnyFunSuite {
 
   test("takePrefixNSST") {
     {
-      val n = TakePrefix().toSolverSST(2, 0, alphabet)
+      val n = TakePrefix().toSolverPSST(alphabet, 2, 0).sst
       assert(
         n.transduce(toOptionList("abb##")) == Set(
           "abb###",
@@ -118,7 +108,7 @@ class SolverTest extends AnyFunSuite {
 
   test("takeSuffixNSST") {
     {
-      val n = TakeSuffix().toSolverSST(2, 0, alphabet)
+      val n = TakeSuffix().toSolverPSST(alphabet, 2, 0).sst
       assert(
         n.transduce(toOptionList("abb##")) == Set(
           "abb###",
@@ -128,21 +118,6 @@ class SolverTest extends AnyFunSuite {
         ).map(toOptionList)
       )
     }
-  }
-
-  test("UntilFirst") {
-    val n = UntilFirst("aa").toSST(alphabet)
-    assert(n.transduce("aa".toList) == Set("".toList))
-    assert(n.transduce("baa".toList) == Set("b".toList))
-    assert(n.transduce("abaa".toList) == Set("ab".toList))
-    assert(n.transduce("aba".toList) == Set("aba".toList))
-  }
-
-  test("Copylessness") {
-    assert(GeneralSubstr().toPairValuedSST(" ab".toSet).isCopyless)
-    assert(IndexOfFromZero("aab").toPairValuedSST(" ab".toSet).isCopyless)
-    assert(IndexOfFromZero("aab").toSolverSST(1, 0, " ab".toSet).isCopyless)
-    assert(GeneralSubstr().toSolverSST(2, 0, " ab".toSet).isCopyless)
   }
 
 //   test("Nondeterministic case 1") {
@@ -176,63 +151,10 @@ class SolverTest extends AnyFunSuite {
 // (assert (= (str.len x1) (str.len y1)))
 // (assert (= 10 (str.len x1)))
 // """
-
-  val constraintBase = "./constraints"
-  def solveFile(fname: String)(check: Option[Map[String, String]] => Unit) = {
-    import smtlib.trees.Commands.{Script, GetModel}
-    import java.nio.file.FileSystems
-    val path = FileSystems.getDefault().getPath(s"$constraintBase/$fname")
-    val lexer = new smtlib.lexer.Lexer(new java.io.FileReader(path.toFile()))
-    val parser = new smtlib.parser.Parser(lexer)
-    val script = Script(parser.parseScript.commands.filter { case GetModel() => false; case _ => true })
-    val solver = new Solver(())
-    solver.executeTransPrint(script)
-    check(solver.model())
-  }
-  test("deleteall.smt2") {
-    solveFile("deleteall.smt2") {
-      case Some(model) => {
-        assert(model("x1") + model("y1") == model("xy"))
-        assert(model("xy") == "<script>")
-      }
-      case None => fail()
-    }
-  }
-  test("zhu/int3.smt2") {
-    solveFile("zhu/int3.smt2") {
-      case Some(model) => {
-        val x0 = model("x0")
-        val x1 = model("x1")
-        val x2 = model("x2")
-        assert(x1 == x0.reverse)
-        assert(x2 == x1.replaceAll("ab", "c"))
-        assert(x1.length() >= x2.length() + 5)
-      }
-      case None => fail()
-    }
-  }
-  test("replace_some_1.smt2") {
-    solveFile("nondet/replace_some_1.smt2") {
-      case Some(model) => {
-        val x = model("x")
-        val y = model("y")
-        info(s"x:${x},y:${y}")
-        assert("a+".r.matches(x))
-        assert("(:?ab)+".r.matches(y))
-      }
-      case None => fail()
-    }
-  }
-  test("replace_some_2.smt2") {
-    solveFile("nondet/replace_some_2.smt2") {
-      case Some(model) => fail()
-      case None        => {}
-    }
-  }
-  test("ab_star_prefix.smt2") {
-    solveFile("nondet/ab_star_prefix.smt2") {
-      case Some(model) => fail()
-      case None        => {}
-    }
-  }
+  // test("ab_star_prefix.smt2") {
+  //   solveFile("nondet/ab_star_prefix.smt2") {
+  //     case Some(model) => fail()
+  //     case None        => {}
+  //   }
+  // }
 }

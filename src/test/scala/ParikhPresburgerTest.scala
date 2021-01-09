@@ -1,7 +1,9 @@
 package com.github.kmn4.sst
 
 import org.scalatest.flatspec._
+import org.scalatest.Ignore
 
+@Ignore
 class ParikhPresburgerTest extends AnyFlatSpec {
   "Calculating Parikh image" should "be done in reasonable time" in {
     // Parikh image of `nsst` should be {(a: n, b: m) | a: odd, b: non-zero even}
