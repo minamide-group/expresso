@@ -1,9 +1,8 @@
 ;; <sc>
 ;; DSST: 4.22 secs
-;; NSST: 1.33 secs, 28/28 -> 83/82 -> 141/126
 ;; <script>
-;; DSST: 247.60 secs
-;; NSST: 16.06 secs, 66/66 -> 417/416 -> 775/730 states
+;; DSST: 247.60 secs 変数減らしたらもう少し速かった気がする
+;; NSST: 2.52 secs
 (declare-const x0 String)
 (declare-const x1 String)
 (declare-const y0 String)
@@ -18,7 +17,22 @@
 (check-sat)
 (get-model)
 
-;; Deterministic checker benchmark
+;; PSST benchmark
+;; 01-09 17:56:24.371 deleteall - start compilation
+;; 01-09 17:56:24.617 deleteall - got the following PSSTs:
+;; 01-09 17:56:24.619 deleteall - #0: (10,2,0,99,1,0)
+;; 01-09 17:56:24.620 deleteall - #1: (11,2,0,110,1,0)
+;; 01-09 17:56:24.621 deleteall - #2: (5,3,0,44,1,0)
+;; 01-09 17:56:24.621 deleteall - #3: (15,1,0,145,1,0)
+;; 01-09 17:56:24.621 deleteall - compose (10,2,0,99,1,0) and (11,2,0,110,1,0)
+;; 01-09 17:56:24.925 deleteall - compose (19,3,0,198,1,1) and (5,3,0,44,1,0)
+;; 01-09 17:56:25.058 deleteall - compose (19,5,0,198,1,2) and (15,1,0,145,1,0)
+;; 01-09 17:56:25.785 deleteall - composition done, got PSST (443,5,0,559,9,3)
+;; 01-09 17:56:26.054 deleteall - checking done, SAT
+;; 01-09 17:56:26.312 deleteall - got model (HashMap(y0 -> ipt>, xy -> <script>, x0 -> <scr, y1 -> ipt>, x1 -> <scr),Map())
+
+
+;; DSST benchmark
 ;; SST number: 4
 ;; SST List:
 ;; Q: 10,  X: 2, Delta: 81, Eta: 81

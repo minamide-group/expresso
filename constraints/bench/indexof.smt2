@@ -10,6 +10,13 @@
 
 (check-sat) ; should be unsat
 
-;; Result:
-;; PSST (ce07444): unsat in about 1.2 s
 ;; OSTRICH (2f3ea5c): (error "Multiple definitions found for x, input is not straightline")
+
+;; PSST benchmark
+;; 01-09 17:56:44.025 indexof - start compilation
+;; 01-09 17:56:44.032 indexof - got the following PSSTs:
+;; 01-09 17:56:44.032 indexof - #0: (4,2,3,13,1,3)
+;; 01-09 17:56:44.032 indexof - #1: (10,1,3,23,1,5)
+;; 01-09 17:56:44.032 indexof - compose (4,2,3,13,1,3) and (10,1,3,23,1,5)
+;; 01-09 17:56:44.063 indexof - composition done, got PSST (29,2,6,85,4,4)
+;; 01-09 17:56:44.111 indexof - checking done, UNSAT
