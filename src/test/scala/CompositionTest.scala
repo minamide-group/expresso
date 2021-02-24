@@ -326,4 +326,54 @@ class CompositionTest extends AnyFlatSpec {
         ).map(_.toList)
     )
   }
+
+  "Example" should "" in {
+    val alpha = "ab".toSet
+    val s1 = ParikhSST[Int, Char, Char, Char, Nothing, Nothing](
+      Set(0),
+      alpha,
+      Set('x', 'y'),
+      Set(),
+      Set(),
+      alpha.map { a =>
+        (0, a, Map('x' -> List(Cop1('x'), Cop2(a)), 'y' -> List(Cop2(a), Cop1('y'))), Map(), 0)
+      },
+      0,
+      Set((0, List(Cop1('x'), Cop2('b'), Cop1('y')), Map())),
+      Seq()
+    ).sst
+    val s2 = ParikhSST[Int, Char, Char, Char, Nothing, Nothing](
+      Set(0, 1),
+      alpha,
+      Set('z'),
+      Set(),
+      Set(), {
+        val id = Map('z' -> List(Cop1('z')))
+        alpha.flatMap { a =>
+          Iterable(
+            (0, a, Map('z' -> List(Cop1('z'), Cop2(a))), Map(), 0),
+            (0, a, id, Map(), 1),
+            (1, a, id, Map(), 1)
+          )
+        }
+      },
+      0,
+      Set((0, List(Cop1('z')), Map()), (1, List(Cop1('z')), Map())),
+      Seq()
+    ).sst
+    assert(s1.transduce("") == Set("b").map(_.toList))
+    assert(s1.transduce("a") == Set("aba").map(_.toList))
+    assert(s2.transduce("b") == Set("", "b").map(_.toList))
+    assert(s2.transduce("aba") == Set("", "a", "ab", "aba").map(_.toList))
+    val s = NSST.composeNsstsToMsst(s1, s2)
+    assert(s.transduce("".toList) == Set("", "b").map(_.toList))
+    assert(s.transduce("a".toList) == Set("", "a", "ab", "aba").map(_.toList))
+    info(s.toString())
+  }
+  {
+    import scala.collection.immutable.{HashSet, HashMap}
+    val Seq(a, b) = "ab".toSeq
+    val Seq(x, y, z) = "xyz".toSeq
+    // MSST(HashSet(Some((0, Map(y -> (1, 1), x -> (0, 1)))), Some((0, Map(y -> (0, 0), x -> (0, 0)))), Some((0, Map(y -> (0, 1), x -> (0, 0)))), Some((0, Map(y -> (1, 1), x -> (0, 0))))), Set(a, b), Set(x, y), Set(z), Map((Some((0, Map(x -> (0, 0), y -> (0, 0)))), a) -> Set((Some((0, Map(y -> (0, 0), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(a))))), y -> List(Cop2(Map(z -> List(Cop1(z), Cop2(a)))), Cop1(y))))), (Some((0, Map(x -> (0, 0), y -> (0, 1)))), b) -> Set((Some((0, Map(y -> (0, 1), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(b))))), y -> List(Cop2(Map(z -> List(Cop1(z), Cop2(b)))), Cop1(y))))), (Some((0, Map(x -> (0, 0), y -> (1, 1)))), a) -> Set((Some((0, Map(y -> (0, 1), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(a))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y)))), (Some((0, Map(y -> (1, 1), x -> (0, 1)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y)))), (Some((0, Map(y -> (1, 1), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(a))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y))))), (Some((0, Map(x -> (0, 1), y -> (1, 1)))), b) -> Set((Some((0, Map(y -> (1, 1), x -> (0, 1)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y))))), (Some((0, Map(x -> (0, 0), y -> (0, 1)))), a) -> Set((Some((0, Map(y -> (0, 1), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(a))))), y -> List(Cop2(Map(z -> List(Cop1(z), Cop2(a)))), Cop1(y))))), (Some((0, Map(x -> (0, 0), y -> (0, 0)))), b) -> Set((Some((0, Map(y -> (0, 0), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(b))))), y -> List(Cop2(Map(z -> List(Cop1(z), Cop2(b)))), Cop1(y))))), (Some((0, Map(x -> (0, 1), y -> (1, 1)))), a) -> Set((Some((0, Map(y -> (1, 1), x -> (0, 1)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y))))), (Some((0, Map(x -> (0, 0), y -> (1, 1)))), b) -> Set((Some((0, Map(y -> (1, 1), x -> (0, 1)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y)))), (Some((0, Map(y -> (1, 1), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(b))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y)))), (Some((0, Map(y -> (0, 1), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(b))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y)))))), ???, HashMap(Some((0, Map(y -> (1, 1), x -> (0, 1)))) -> Set((List(Cop1(x), Cop2(Map(z -> List(Cop1(z)))), Cop1(y)), List(Cop1(z)))), Some((0, Map(y -> (0, 0), x -> (0, 0)))) -> Set((List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(b)))), Cop1(y)), List(Cop1(z)))), Some((0, Map(y -> (0, 1), x -> (0, 0)))) -> Set((List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(b)))), Cop1(y)), List(Cop1(z)))), Some((0, Map(y -> (1, 1), x -> (0, 0)))) -> Set((List(Cop1(x), Cop2(Map(z -> List(Cop1(z)))), Cop1(y)), List(Cop1(z))))))
+  }
 }

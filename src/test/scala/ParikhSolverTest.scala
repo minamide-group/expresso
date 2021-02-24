@@ -223,6 +223,12 @@ class ParikhSolverTest extends AnyFunSuite {
       assert(!"ab".r.matches(y))
   }
 
+  testFileSAT("indexof_sat") { (m, _) =>
+    val (x, y) = (m("x"), m("y"))
+    assert(y == x.atmostSubstring(x.indexOf("aab"), x.length))
+    assert(!"aab.*".r.matches(y))
+  }
+
   testFileUNSAT("indexof")
 
   testFileSAT("substr_zip_sat") { (sm, _) => info(sm.toString) }
@@ -245,9 +251,15 @@ class ParikhSolverTest extends AnyFunSuite {
 
   testFileUNSAT("concat_prefix_suffix")
 
+  testFileSAT("insert_script") { (m, _) => info(m.toString) }
+
   testFileSAT("reverse_indexof_sat") { (m, _) => info(m.toString) }
 
   testFileUNSAT("reverse_indexof_unsat")
+
+  testFileUNSAT("substr_equiv")
+
+  testFileSAT("for_slide") { (sm, im) => info(s"$sm, $im") }
 
   // Using isFunctional, the following property will be provable:
   // 1. (str.replace_all x "a" "") and (str.replace_pcre_all x (pcre.+ (str.to_pcre "a")) (pcre.replacement ""))

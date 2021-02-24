@@ -160,6 +160,9 @@ class ParikhSolver(
         val newVar = freshTemp()
         val constr = ParikhAssertion(name, ParikhLanguage.IndexOfConst(w, c.toInt, newVar))
         (Presburger.Var(newVar), Seq(constr))
+      case Ints.Mul(SNumeral(c), t) =>
+        val (pt, cs) = expectInt(t)
+        (Presburger.Mult(Presburger.Const(c.toInt), pt), cs)
       case Strings.Experimental.IndexOf(SimpleQualID(name), SString(w), t) =>
         val (i, cs) = parseAndAbstract(t)
         val j = freshTemp()
@@ -590,7 +593,10 @@ object ParikhSolver {
     def dependeeVars: Seq[String]
   }
   sealed trait AtomicAssignment extends ParikhConstraint {
+    def lhsStringVar: String
     def toSolverPSST(varIdx: Map[String, Int])(alphabet: Set[Char]): SolverPSST[Char, String]
+
+    def dependerVars: Seq[String] = Seq(lhsStringVar)
   }
   case class ParikhAssignment(
       lhsStringVar: String,
@@ -614,7 +620,7 @@ object ParikhSolver {
 
     override def dependeeVars: Seq[String] = wordAndVars.flatMap(_.toOption)
 
-    def usedAlphabet: Set[Char] = wordAndVars.flatMap(_.left.toOption.map(_.toSet).getOrElse(Set.empty)).toSet
+    def usedAlphabet: Set[Char] = wordAndVars.flatMap(_.left.getOrElse(Set.empty)).toSet
     def toSolverPSST(varIdx: Map[String, Int])(alphabet: Set[Char]): SolverPSST[Char, String] =
       Solver.concatNSST(varIdx(lhsStringVar), wordAndVars.map(_.map(varIdx)), alphabet).toParikhSST
   }
@@ -763,7 +769,7 @@ object ParikhSolver {
       (assignmentPSSTs :+ lastPSST).zipWithIndex.foreach {
         case (psst, i) => logger.trace(s"#$i: ${psst.sizes}")
       }
-      (assignmentPSSTs :+ lastPSST).reduce[SolverPSST[Char, String]] {
+      (assignmentPSSTs :+ lastPSST).reduceLeft[SolverPSST[Char, String]] {
         case (p1, p2) =>
           logger.trace(s"compose ${p1.sizes} and ${p2.sizes}")
           p1 compose p2
@@ -779,8 +785,7 @@ object ParikhSolver {
       logger.trace("start compilation")
       val varIdx = stringVarIndex(constraints)
       val assignments = constraints.collect {
-        case a @ ParikhAssignment(lhs, trans, rhs) => (varIdx(lhs), a.toSolverPSST(varIdx) _)
-        case a @ CatAssignment(lhs, wordAndVars)   => (varIdx(lhs), a.toSolverPSST(varIdx) _)
+        case a: AtomicAssignment => (varIdx(a.lhsStringVar), a.toSolverPSST(varIdx) _)
       }
       val assertions = constraints.collect { case ParikhAssertion(sVar, lang)          => (varIdx(sVar), lang) }
       val arithFormula = constraints.collect { case IntConstraintIsParikhConstraint(f) => f }
