@@ -57,7 +57,7 @@ class ParikhSolver(
 
   class Checker(psst: SolverPSST[Char, String], idxVar: Map[Int, String]) {
     // _1: Int var -> value, _2: Log var -> value
-    def witnessVector: () => Option[(Map[String, Int], Map[Int, Int])] =
+    val witnessVector: () => Option[(Map[String, Int], Map[Int, Int])] =
       Cacher { psst.ilVectorOption }.getOrCalc _
     // _1: Str var -> value, _2: Int var -> value
     val models: () => Option[(Map[String, String], Map[String, Int])] = Cacher {
