@@ -589,6 +589,7 @@ case class ParikhSST[Q, A, B, X, L, I](
           val formula = {
             type FormulaVar = Either[I, Cop[L, (X, K)]]
             val x = xs.head // Here xs should not be empty
+            // TODO ここで Conj をとる意味がわからない
             val formulaK = Presburger.Conj(acceptFormulasK.map(_.renameVars(_.map[Cop[L, K]](Cop2.apply))))
             val renamed: Presburger.Formula[FormulaVar] = formulaK.renameVars(_.map {
               case Cop1(l) => Cop1(l)
@@ -695,6 +696,116 @@ case class ParikhSST[Q, A, B, X, L, I](
         newFormulas
       )
     }
+
+    def toLocallyConstrainedParikhSST: LocallyConstrainedParikhSST[Option[(Q, Map[L, L])], A, B, X, L, I] = {
+      type NQ = (Q, Map[L, L])
+      type NewUpdateL = Map[L, Int]
+      val newOutGraph = {
+        val id = ls.map(l => l -> l).toMap
+        outGraph.map { case (q, xbs, lv, phi) => ((q, id), xbs, lv, phi) }
+      }
+      val backTrans = graphToMap(edges) { case (q, a, mx, ml, r) => (r, a) -> (q, mx, ml) }
+      // ll means Map[L, L], i.e. for each l, where it's going to?
+      def llOf(ml: ParikhSST.AffineUpdate[L]): Map[L, L] =
+        for ((l2, (_, s)) <- ml; l1 <- s) yield l1 -> l2
+      def prevStates(nq: NQ, a: A): Set[(NQ, (UpdateX, NewUpdateL))] = {
+        val (r, ll) = nq
+        backTrans((r, a)).map {
+          case (q, mx, ml) =>
+            val llMl = llOf(ml)
+            // l is assigned to k and k is to go to j, then l is to go to j.
+            val prevLL = for {
+              l <- ls
+              k <- llMl.get(l)
+              j <- ll.get(k)
+            } yield l -> j
+            val lv = {
+              var lv = collection.mutable.Map.from(ls.map(_ -> 0))
+              // n is added to l and l is to go to k, then n should be added to k.
+              for {
+                (l, (n, _)) <- ml
+                k <- ll.get(l)
+              } lv(k) += n
+              lv.toMap
+            }
+            ((q, prevLL.toMap), (mx, lv))
+        }
+      }
+      val (newStates, newEdges) =
+        searchStates(newOutGraph.map { case (q, _, _, _) => q }, inSet)(prevStates)(
+          { case (q, _)                => q },
+          { case (r, a, (q, (mx, ml))) => (q, a, mx, ml, r) }
+        )
+      val newQ0 = newStates.filter { case (q, _) => q == q0 }
+      val oStates = newStates.map(Option.apply) + None
+      val oEdges = {
+        val some = newEdges.map { case (q, a, mx, ml, r) => (Option(q), a, mx, ml, Option(r)) }
+        val fromNone = for ((q, a, mx, ml, r) <- newEdges if newQ0(q)) yield (None, a, mx, ml, Option(r))
+        some ++ fromNone
+      }
+      val oOutGraph = {
+        val some = newOutGraph.map { case (q, mx, ml, phi) => (Option(q), mx, ml, phi) }
+        val none = for ((q, mx, ml, phi) <- newOutGraph if newQ0(q)) yield (None, mx, ml, phi)
+        some ++ none
+      }
+      LocallyConstrainedParikhSST(
+        oStates,
+        inSet,
+        xs,
+        ls,
+        is,
+        oEdges,
+        None,
+        globalAcceptFormulas,
+        oOutGraph
+      )
+
+    }
+  }
+
+  case class LocallyConstrainedParikhSST[Q, A, B, X, L, I](
+      states: Set[Q],
+      inSet: Set[A],
+      xs: Set[X],
+      ls: Set[L],
+      is: Set[I],
+      edges: Set[(Q, A, Update[X, B], ParikhSST.ParikhUpdate[L], Q)],
+      q0: Q,
+      globalAcceptFormulas: Seq[Presburger.Formula[Either[I, L]]],
+      outGraph: Set[(Q, Cupstar[X, B], Map[L, Int], Presburger.Formula[Either[I, L]])]
+  ) {
+    type XBS = Cupstar[X, B]
+    type LVal = Map[L, Int]
+    def renamed: LocallyConstrainedParikhSST[Int, A, B, Int, Int, I] = {
+      val stateMap = (states.zipWithIndex).toMap
+      val xMap = (xs.zipWithIndex).toMap
+      val lMap = (ls.zipWithIndex).toMap
+      def renameXbs(xbs: XBS): Cupstar[Int, B] = xbs.map(_.map1(xMap))
+      def renameLVal(lv: LVal): Map[Int, Int] = lv.map { case (l, n) => lMap(l) -> n }
+      def renameFormula(phi: Presburger.Formula[Either[I, L]]): Presburger.Formula[Either[I, Int]] =
+        phi.renameVars(_.map(lMap))
+      copy(
+        states = states.map(stateMap),
+        xs = xs.map(xMap),
+        ls = ls.map(lMap),
+        edges =
+          for {
+            e @ (q, a, m, v, r) <- edges if states(q) && states(r)
+          } yield (
+            stateMap(q),
+            a,
+            m.map { case (x, xbs) => xMap(x) -> renameXbs(xbs) },
+            renameLVal(v),
+            stateMap(r)
+          ),
+        q0 = stateMap(q0),
+        globalAcceptFormulas = globalAcceptFormulas.map(renameFormula),
+        outGraph = outGraph.map {
+          case (q, xbs, lv, phi) => (stateMap(q), renameXbs(xbs), renameLVal(lv), renameFormula(phi))
+        }
+      )
+    }
+
   }
 
   case class AffineParikhSST[Q, A, B, X, L, I](
