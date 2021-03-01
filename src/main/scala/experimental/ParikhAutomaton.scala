@@ -4,6 +4,7 @@ import com.github.kmn4.sst.ParikhSST
 import com.github.kmn4.sst.Presburger
 
 case class ParikhAutomaton[Q, A, L, I](
+    id: Int,
     states: Set[Q],
     inSet: Set[A],
     ls: Set[L],

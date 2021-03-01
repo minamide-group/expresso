@@ -4,6 +4,7 @@ import com.github.kmn4.sst.ParikhSST
 import com.github.kmn4.sst.NopLogger
 import com.github.kmn4.sst.graphToMap
 import com.github.kmn4.sst.Presburger
+import com.github.kmn4.sst.Presburger.Sugar._
 
 // // A*(#1)...(#k-1)A*, n1, ..., nl -> A*
 // trait Transduction[A, B, I] {
@@ -121,7 +122,10 @@ import com.github.kmn4.sst.Presburger
 
 // A*(#1)...(#k-1)A*, n1, ..., nl -> A*
 trait Transduction[A, B] {
-  def preImage[R, K](pa: ParikhAutomaton[R, B, K, String]): PreImage[Int, A, Int, String]
+  // pa の逆像を計算する
+  // maxID がいまある最大の ID．
+  // 新しく使う ID はこれよりも大きくする．
+  def preImage[R, K](pa: ParikhAutomaton[R, B, K, String], maxID: Int): PreImage[Int, A, Int, String]
 }
 
 object Transduction {
@@ -134,7 +138,8 @@ object Transduction {
     val arity = psst.inSet.flatMap(_.toOption).maxOption.getOrElse(-1) + 2
 
     override def preImage[R, K](
-        lang: ParikhAutomaton[R, B, K, String]
+        lang: ParikhAutomaton[R, B, K, String],
+        maxID: Int
     ): PreImage[Int, A, Int, String] = {
       // lang を PSST とみなす
       // PSST 同士の合成をする (LC-APSST まで)
@@ -171,9 +176,11 @@ object Transduction {
         val states = lcp.states + qf
         val lastSharp = Right(arity - 1)
         // TODO 到達性で状態を減らす
+        // TODO 不要な L を削除
         LazyList.from(lcp.outGraph).map {
           case (q, _, v, phi) =>
             ParikhAutomaton(
+              maxID, // この PA は一時的なものなので maxID を使ってもいい
               states,
               lcp.inSet + lastSharp,
               lcp.ls,
@@ -196,10 +203,6 @@ object Transduction {
           graphToMap(pa.edges) { case (q, a, v, r) => (r, a) -> (q, v) }
         val trans: Map[(Q, Either[A, Int]), Set[(Q, Map[L, Int])]] =
           graphToMap(pa.edges) { case (q, a, v, r) => (q, a) -> (r, v) }
-        val sharpEdge: Map[Int, Iterable[Edge]] = graphToMap(pa.edges.filter(_._2.isRight)) {
-          case e @ (_, Right(i), _, _) => i -> e
-          case _                       => throw new Exception("This cannot be the case.")
-        }
 
         // pa 上で qf から戻れないものを刈る
         def pruneStatesBack(qf: Q): (Set[Q], Set[Edge]) =
@@ -220,13 +223,16 @@ object Transduction {
           (qs1 intersect qs2, es1 intersect es2)
         }
 
+        // pa の状態を qs, 辺集合を es に制限．
         // 状態が空なら None になる
+        // NOTE id は呼び出し元で上書きすること
+        // NOTE acceptRelation は呼び出し元で上書きすること
         def statesRemoved(
             qs: Set[Q],
             es: Set[Edge]
-        ): Option[ParikhAutomaton[Q, Either[A, Int], L, String]] = {
-          ???
-        }
+        ): Option[ParikhAutomaton[Q, Either[A, Int], L, String]] =
+          if (qs.isEmpty) None
+          else Some { pa.copy(states = qs, edges = es) } // id, acceptRelation はあとで上書きされる
 
         def prune(q0: Q, qf: Q): Option[ParikhAutomaton[Q, Either[A, Int], L, String]] = {
           val (qs, es) = pruneStates(q0, qf)
@@ -238,22 +244,45 @@ object Transduction {
           statesRemoved(qs, es)
         }
 
+        // sharp はないはず．あったら例外を投げる
         def mustRemoveSharps(
             pa: ParikhAutomaton[Q, Either[A, Int], L, String]
-        ): ParikhAutomaton[Q, A, L, String] = ???
+        ): ParikhAutomaton[Q, A, L, String] = {
+          pa.copy(
+            inSet = pa.inSet.flatMap(_.left.toOption),
+            edges = pa.edges.map(e => e.copy(_2 = e._2.left.toOption.get))
+          )
+        }
 
         def splitAux(
             pa: ParikhAutomaton[Q, Either[A, Int], L, String],
             i: Int
         ): LazyList[(Seq[ParikhAutomaton[Q, A, L, String]], Seq[Presburger.Formula[String]])] = {
+          val sharpEdge: Map[Int, Iterable[Edge]] = graphToMap(pa.edges.filter(_._2.isRight)) {
+            case e @ (_, Right(i), _, _) => i -> e
+            case _                       => throw new Exception("This cannot be the case.")
+          }
+
+          val newID = maxID + i + 1
+
+          def copyVar(paID: Int, l: L) = s"copy_${paID}_${l}"
+          def sumVar(paID: Int, l: L) = s"sum_${paID}_${l}"
 
           if (i == 0) {
             for {
               sharp0 @ (q0, _, v, _) <- LazyList.from(sharpEdge(0))
               pa0 <- pruneBackward(q0)
             } yield {
-              // TODO PA に論理式を追加
-              (Seq(mustRemoveSharps(pa0)), Seq.empty)
+              import Presburger._
+              val noSharp = mustRemoveSharps(pa0)
+              val syncFormulas = // PA と大域整数制約の同期
+                pa0.ls.map(l => Eq[Either[String, L]](Var(Right(l)), Var(Left(sumVar(newID, l)))))
+              val newPA = noSharp.copy(
+                id = newID,
+                acceptRelation = (q0, v),
+                acceptFormulas = noSharp.acceptFormulas ++ syncFormulas
+              )
+              (Seq(newPA), Seq.empty)
             }
           } else if (i > 0) {
             for {
@@ -263,10 +292,25 @@ object Transduction {
               pa1 <- pruneBackward(r1).toList
               (relation1, formula) <- splitAux(pa1, i - 1)
             } yield {
-              // TODO
-              // 1. PA に論理式を追加
-              // 2. formula を追加
-              (relation1 :+ mustRemoveSharps(paI), formula ++ ???)
+              import Presburger._
+              val noSharp = mustRemoveSharps(paI)
+              // l (L) === copy_id_l (I)
+              val copyFormulas =
+                paI.ls.map(l => Eq[Either[String, L]](Var(Right(l)), Var(Left(copyVar(newID, l)))))
+              // sum_id_l === sum_{id-1}_l + copy_id_l
+              val syncFormulas = paI.ls.map { l =>
+                val sumL = Var(sumVar(newID, l))
+                val prevL = Var(sumVar(newID - 1, l))
+                val copyL = Var(copyVar(newID, l))
+                Eq(sumL, Add(Seq(prevL, copyL)))
+              }
+              val newPA = noSharp.copy(
+                id = newID,
+                acceptRelation = (qi, v),
+                acceptFormulas = noSharp.acceptFormulas ++ copyFormulas
+              )
+              (Seq(newPA), Seq.empty)
+              (relation1 :+ newPA, formula ++ syncFormulas)
             }
           } else throw new Exception("i < 0")
         }
