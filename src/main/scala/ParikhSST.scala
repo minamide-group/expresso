@@ -369,42 +369,40 @@ case class ParikhSST[Q, A, B, X, L, I](
 
     val initialStates =
       states.filter { case (q, kt) => q == n1.q0 && kt.forall { case (_, (k, t)) => k == t } }
-    // logger.backwardFinished(states, edges, initialStates)
-
-    // Remove all unreachable states.
-    val reachables = closure[NQ](initialStates, graphToMap(edges) {
-      case (q, _, _, _, r) => q -> r
-    })
-    // logger.unreachablesRemoved(reachables)
 
     // Wrap states with Option so initial state be unique.
     type NWQ = Option[NQ]
-    val newStates = reachables.map[NWQ](Some.apply) + None
+    val newStates = states.map[NWQ](Some.apply) + None
     val newEdges = {
       val wrapped =
-        for ((q, a, mx, ml, r) <- edges if reachables(q) && reachables(r))
-          yield (Some(q), a, mx, ml, Some(r))
+        for ((q, a, mx, ml, r) <- edges)
+          yield (Some(q), a, mx, ml, Option(r))
       val fromNone =
         for ((q, a, mx, ml, r) <- edges if initialStates(q))
-          yield (None, a, mx, ml, Some(r))
+          yield (None, a, mx, ml, Option(r))
       wrapped ++ fromNone
     }
     val newOutGraph: Set[(NWQ, Cupstar[X, UpdateYK], Cupstar[Y, C], Map[L, Int], Map[K, Int])] = {
       val wrapped =
-        for ((q, xms, ycs, lv, kv) <- outGraph if reachables(q)) yield (Some(q), xms, ycs, lv, kv)
+        for ((q, xms, ycs, lv, kv) <- outGraph) yield (Some(q), xms, ycs, lv, kv)
       val atNone =
         for ((q, xms, ycs, lv, kv) <- outGraph if initialStates(q)) yield (None, xms, ycs, lv, kv)
       wrapped ++ atNone
     }
 
+    // Remove all unreachable states.
+    val reachables = closure[NWQ](Set(None), graphToMap(newEdges) {
+      case (q, _, _, _, r) => q -> r
+    })
+
     val res = new MonoidSST[NWQ, C, Y, K](
-      newStates,
+      reachables,
       n2.xs,
       n2.ls,
       n1.is ++ n2.is,
-      newEdges.toSet,
+      newEdges.filter { case (q, _, _, _, r) => reachables(q) && reachables(r) },
       None,
-      newOutGraph,
+      newOutGraph.filter { case (q, _, _, _, _) => reachables(q) },
       n1.acceptFormulas,
       n2.acceptFormulas
     )
