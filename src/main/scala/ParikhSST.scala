@@ -805,7 +805,17 @@ case class ParikhSST[Q, A, B, X, L, I](
         }
       )
     }
-
+    // 到達不可能な状態を除去
+    def optimized: LocallyConstrainedParikhSST[Q, A, B, X, L, I] = {
+      val reachable = closure(Set(q0), graphToMap(edges) {
+        case (q, _, _, _, r) => q -> r
+      })
+      copy(
+        states = reachable,
+        edges = edges.filter { case (q, _, _, _, r) => reachable(q) && reachable(r) },
+        outGraph = outGraph.filter(e => reachable(e._1))
+      )
+    }
   }
 
   case class AffineParikhSST[Q, A, B, X, L, I](

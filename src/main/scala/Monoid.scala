@@ -6,9 +6,9 @@ trait Monoid[M] {
 }
 
 object Monoid {
-  implicit def listMonoid[A] = new Monoid[List[A]] {
+  implicit def seqMonoid[A] = new Monoid[Seq[A]] {
     def unit = Nil
-    def combine(l1: List[A], l2: List[A]) = l1 ++ l2
+    def combine(l1: Seq[A], l2: Seq[A]) = l1 ++ l2
   }
   implicit def unitMonoid = new Monoid[Unit] {
     def unit = ()

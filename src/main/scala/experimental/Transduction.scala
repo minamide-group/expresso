@@ -6,120 +6,6 @@ import com.github.kmn4.sst.graphToMap
 import com.github.kmn4.sst.Presburger
 import com.github.kmn4.sst.Presburger.Sugar._
 
-// // A*(#1)...(#k-1)A*, n1, ..., nl -> A*
-// trait Transduction[A, B, I] {
-//   def preImage[R, K](pa: ParikhAutomaton[R, B, K, I]): ParikhRelation[Int, A, Int, I]
-// }
-
-// object Transduction {
-//   implicit class ParikhTransduction[Q, A, B, X, L, I](
-//       psst: ParikhSST[Q, Either[A, Int], B, X, L, I]
-//   ) extends Transduction[A, B, I] {
-
-//     val arity = psst.edges.flatMap(_._2.toOption).maxOption.getOrElse(0)
-
-//     override def preImage[R, K](lang: ParikhAutomaton[R, B, K, I]): ParikhRelation[Int, A, Int, I] = {
-//       // lang を PSST とみなす
-//       // PSST 同士の合成をする (LC-APSST まで)
-//       // 受理状態を固定するごとに1つの PA をつくる
-
-//       // lang を PSST とみなす
-//       val pa = {
-//         ParikhSST[R, B, Nothing, Nothing, K, I](
-//           lang.states,
-//           lang.inSet,
-//           Set.empty,
-//           lang.ls,
-//           lang.is,
-//           lang.edges.map { case (q, b, v, r) => (q, b, Map.empty, v, r) },
-//           lang.q0, {
-//             val (qf, v) = lang.acceptRelation
-//             Set((qf, Nil, v))
-//           },
-//           lang.acceptFormulas
-//         )
-//       }
-
-//       // PSST 同士の合成をする (LC-PA まで)
-//       val lcp = psst
-//         .composeNsstsToMsst[R, Nothing, Nothing, K](psst, pa)(NopLogger)
-//         .toLocallyConstrainedAffineParikhSST
-//         .toLocallyConstrainedParikhSST
-//         .renamed
-
-//       val backTrans: Map[(Int, Either[A, Int]), Set[(Int, Map[Int, Int])]] =
-//         graphToMap(lcp.edges) { case (q, a, _, v, r) => (r, a) -> (q, v) }
-//       val trans: Map[(Int, Either[A, Int]), Set[(Int, Map[Int, Int])]] =
-//         graphToMap(lcp.edges) { case (q, a, _, v, r) => (q, a) -> (r, v) }
-
-//       // lcp 上で qf から戻れないものを刈る
-//       def pruneBack(qf: Int): (Set[Int], Set[(Int, Either[A, Int], Map[Int, Int], Int)]) =
-//         com.github.kmn4.sst.searchStates(Set(qf), lcp.inSet) {
-//           case (r, a) => backTrans((r, a))
-//         }(_._1, { case (r, a, (q, v)) => (q, a, v, r) })
-
-//       // lcp 上で q0 から到達できないものを刈る
-//       def pruneForward(q0: Int): (Set[Int], Set[(Int, Either[A, Int], Map[Int, Int], Int)]) =
-//         com.github.kmn4.sst.searchStates(Set(q0), lcp.inSet) {
-//           case (q, a) => trans((q, a))
-//         }(_._1, { case (q, a, (r, v)) => (q, a, v, r) })
-
-//       def prune(q0: Int, qf: Int): (Set[Int], Set[(Int, Either[A, Int], Map[Int, Int], Int)]) = {
-//         val (qs1, es1) = pruneBack(qf)
-//         val (qs2, es2) = pruneForward(q0)
-//         (qs1 intersect qs2, es1 intersect es2)
-//       }
-
-//       def paOf(states: Set[Int], edges: Set[(Int, Either[A, Int], Map[Int, Int], Int)]) = {
-//         ???
-//       }
-
-//       def split(qf: Int, n: Int): Iterable[ParikhRelation[Int, A, Int, I]] = {
-//         if (n < 0) {
-//           val (states, edges) = pruneBack(qf)
-//           Iterable(ParikhRelation(paOf(states, edges), Iterable()))
-//         } else {
-//           lcp.edges.withFilter { case (_, Right(i), _, _, _) => i == n }.flatMap{
-//             case (q, _, _, v , r) => for {
-//               split(q)
-//             }
-//           }
-//         }
-//       }
-
-//       // # で分割する
-//       def split(
-//           pa: ParikhAutomaton[Int, Either[A, Int], Int, I]
-//       ): Iterable[ParikhRelation[Int, A, Int, I]] = {
-//         // qf を受理として #_n で分割する
-//         def aux(qf: Int, n: Int): Iterable[ParikhRelation[Int, A, Int, I]] = {
-//           for {
-//             e @ () <- lcp.edges if
-//           }
-//           ???
-//         }
-//         aux(???)
-//       }
-
-//       // 受理状態を固定するごとに1つの PA をつくる
-//       // - 分割
-//       // - lcp の受理状態
-//       // - #
-//       val pr = for {
-//         (qf, _, v, phi) <- lcp.outGraph
-//       } yield {
-//         val q0 = lcp.q0
-//         // q0 から
-//         ???
-//       }
-
-//       ???
-//     }
-
-//   }
-
-// }
-
 // A*(#1)...(#k-1)A*, n1, ..., nl -> A*
 trait Transduction[A, B] {
   // pa の逆像を計算する
@@ -169,12 +55,14 @@ object Transduction {
         .toLocallyConstrainedAffineParikhSST
         .toLocallyConstrainedParikhSST
         .renamed
+        .optimized
 
       // lcp を受理状態ごとに PA へ分割
       val pas: LazyList[ParikhAutomaton[Int, Either[A, Int], Int, String]] = {
-        val qf = lcp.states.max + 1
+        val qf = lcp.states.maxOption.getOrElse(0) + 1 // 存在しなかったら LazyList が空
         val states = lcp.states + qf
         val lastSharp = Right(arity - 1)
+        val zero = lcp.ls.map(_ -> 0).toMap
         // TODO 到達性で状態を減らす
         // TODO 不要な L を削除
         LazyList.from(lcp.outGraph).map {
@@ -187,11 +75,14 @@ object Transduction {
               lcp.is,
               lcp.edges.map { case (q, a, _, v, r) => (q, a, v, r) } + ((q, lastSharp, v, qf)),
               lcp.q0,
-              (qf, v),
+              (qf, zero),
               lcp.globalAcceptFormulas :+ phi // TODO phi は Seq のほうがいいかも?
             )
         }
       }
+
+      def copyVar[L](paID: Int, l: L) = s"copy_${paID}_${l}"
+      def sumVar[L](paID: Int, l: L) = s"sum_${paID}_${l}"
 
       def split[Q, L](
           pa: ParikhAutomaton[Q, Either[A, Int], L, String]
@@ -265,9 +156,6 @@ object Transduction {
 
           val newID = maxID + i + 1
 
-          def copyVar(paID: Int, l: L) = s"copy_${paID}_${l}"
-          def sumVar(paID: Int, l: L) = s"sum_${paID}_${l}"
-
           if (i == 0) {
             for {
               sharp0 @ (q0, _, v, _) <- LazyList.from(sharpEdge(0))
@@ -276,27 +164,35 @@ object Transduction {
               import Presburger._
               val noSharp = mustRemoveSharps(pa0)
               val syncFormulas = // PA と大域整数制約の同期
-                pa0.ls.map(l => Eq[Either[String, L]](Var(Right(l)), Var(Left(sumVar(newID, l)))))
+                pa0.ls.toSeq.map(l => Eq[Either[String, L]](Var(Right(l)), Var(Left(sumVar(newID, l)))))
               val newPA = noSharp.copy(
                 id = newID,
                 acceptRelation = (q0, v),
-                acceptFormulas = noSharp.acceptFormulas ++ syncFormulas
+                acceptFormulas = syncFormulas
               )
               (Seq(newPA), Seq.empty)
             }
           } else if (i > 0) {
             for {
-              sharp1 @ (_, _, _, r1) <- LazyList.from(sharpEdge(i - 1))
+              sharp1 @ (q1, _, _, r1) <- LazyList.from(sharpEdge(i - 1))
               sharpI @ (qi, _, v, _) <- sharpEdge(i)
               paI <- prune(r1, qi).toList
-              pa1 <- pruneBackward(r1).toList
+              pa1 <- pruneBackward(q1).map { pa =>
+                // 再帰のため最後に #_i-1 で遷移するようにしたい
+                // TODO もう少し綺麗に書けるのでは
+                //      例えば PA は # 終端しない文字列組を受理することにする
+                pa.copy(
+                  states = pa.states + r1,
+                  edges = pa.edges + sharp1
+                )
+              }.toList
               (relation1, formula) <- splitAux(pa1, i - 1)
             } yield {
               import Presburger._
               val noSharp = mustRemoveSharps(paI)
               // l (L) === copy_id_l (I)
               val copyFormulas =
-                paI.ls.map(l => Eq[Either[String, L]](Var(Right(l)), Var(Left(copyVar(newID, l)))))
+                paI.ls.toSeq.map(l => Eq[Either[String, L]](Var(Right(l)), Var(Left(copyVar(newID, l)))))
               // sum_id_l === sum_{id-1}_l + copy_id_l
               val syncFormulas = paI.ls.map { l =>
                 val sumL = Var(sumVar(newID, l))
@@ -307,7 +203,7 @@ object Transduction {
               val newPA = noSharp.copy(
                 id = newID,
                 acceptRelation = (qi, v),
-                acceptFormulas = noSharp.acceptFormulas ++ copyFormulas
+                acceptFormulas = copyFormulas
               )
               (Seq(newPA), Seq.empty)
               (relation1 :+ newPA, formula ++ syncFormulas)
@@ -320,8 +216,14 @@ object Transduction {
 
       for {
         pa <- pas
-        relphi <- split(pa)
-      } yield relphi
+        (rel, phi) <- split(pa)
+      } yield (
+        rel,
+        phi ++ pa.acceptFormulas.map(_.renameVars {
+          case Right(l) => sumVar(maxID + arity, l)
+          case Left(i)  => i
+        })
+      )
     }
 
   }
