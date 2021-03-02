@@ -1,12 +1,13 @@
 package com.github.kmn4.sst.experimental
 
-import org.scalatest.funsuite.AnyFunSuite
+import com.github.kmn4.sst.Cop
+import com.github.kmn4.sst.Cop1
+import com.github.kmn4.sst.Cop2
 import com.github.kmn4.sst.MNFT
 import com.github.kmn4.sst.NSST
-import com.github.kmn4.sst.{Cop1, Cop2}
-import com.github.kmn4.sst.Cop
-import com.github.kmn4.sst.ParikhSolver
 import com.github.kmn4.sst.ParikhSST
+import com.github.kmn4.sst.ParikhSolver
+import org.scalatest.funsuite.AnyFunSuite
 
 class TransductionTest extends AnyFunSuite {
   type NFT[Q, A, B] = MNFT[Q, A, Seq[B]]
