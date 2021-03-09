@@ -373,7 +373,9 @@ case class NSST[Q, A, B, X](
 }
 
 object NSST {
-  type Edges[Q, A, X, B] = Map[(Q, A), Set[(Q, Update[X, B])]]
+  type Edge[Q, A, B, X] = (Q, A, Update[X, B], Q)
+  type Edges[Q, A, B, X] = Set[Edge[Q, A, B, X]]
+  type Out[Q, X, B] = (Q, Cupstar[X, B])
   def isCopylessUpdate[X, B](update: Update[X, B]): Boolean = {
     val vars = update.keySet
     def count(x: X): Int = update.foldLeft(0) {

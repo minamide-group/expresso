@@ -33,7 +33,7 @@ class ParikhSolverTest extends AnyFunSuite {
   )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
     testWithInfoTime(s"test SAT\n${constraint.trim}") {
       withExecuteScript(new java.io.StringReader(constraint)) { solver =>
-        solver.checker().models() match {
+        solver.checker().getModel() match {
           case Some((sModel, iModel)) => assertions(sModel, iModel)
           case None                   => fail()
         }
@@ -66,7 +66,7 @@ class ParikhSolverTest extends AnyFunSuite {
   )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
     testWithInfoTime(s"""test SAT: "$name"""") {
       withExecuteFile(name) { solver =>
-        solver.checker().models() match {
+        solver.checker().getModel() match {
           case Some((sModel, iModel)) => assertions(sModel, iModel)
           case None                   => fail()
         }

@@ -69,12 +69,13 @@ case class ParikhSST[Q, A, B, X, L, I](
     case (q, (mx, ml)) => outF(q).map { case (xbs, lv) => (mx.update(emptyEnv).eval(xbs), ml(lv)) }
   }
 
-  def renamed: ParikhSST[Int, A, B, Int, Int, I] = {
-    val stateMap = (states.zipWithIndex).toMap
-    val xMap = (xs.zipWithIndex).toMap
-    val lMap = (ls.zipWithIndex).toMap
-    def renameXbs(xbs: XBS): Cupstar[Int, B] = xbs.map(_.map1(xMap))
-    def renameLVal(lv: LVal): Map[Int, Int] = lv.map { case (l, n) => lMap(l) -> n }
+  def renamed[R, Y, K](
+      stateMap: Q => R = identity _,
+      xMap: X => Y = identity _,
+      lMap: L => K = identity _
+  ): ParikhSST[R, A, B, Y, K, I] = {
+    def renameXbs(xbs: XBS): Cupstar[Y, B] = xbs.map(_.map1(xMap))
+    def renameLVal(lv: LVal): Map[K, Int] = lv.map { case (l, n) => lMap(l) -> n }
     val newEdges =
       edges
         .flatMap {
@@ -94,16 +95,23 @@ case class ParikhSST[Q, A, B, X, L, I](
       case (q, xbs, lv) => (stateMap(q), renameXbs(xbs), renameLVal(lv))
     }
     ParikhSST(
-      stateMap.map(_._2).toSet,
+      states.map(stateMap),
       inSet,
-      xMap.values.toSet,
-      lMap.values.toSet,
+      xs.map(xMap),
+      ls.map(lMap),
       is,
       newEdges,
       stateMap(q0),
       newF,
       acceptFormulas.map(_.renameVars(l => l.map(lMap)))
     )
+  }
+
+  def renamed: ParikhSST[Int, A, B, Int, Int, I] = {
+    val stateMap = (states.zipWithIndex).toMap
+    val xMap = (xs.zipWithIndex).toMap
+    val lMap = (ls.zipWithIndex).toMap
+    renamed(stateMap, xMap, lMap)
   }
 
   def sizes: (Int, Int, Int, Int, Int, Int) =
@@ -163,6 +171,7 @@ case class ParikhSST[Q, A, B, X, L, I](
     ParikhSST(newStates, inSet, xs, ls, is, newEdges, (q0, None), newOutGraph, acceptFormulas)
   }
 
+  // TODO 不要
   // ParikhAutomaton shares inSet (input alphabet), ls (log variables), is (integer variables),
   // and acceptFormulas with PSST.
   // This ParikhAutomaton has non-standard semantics specialized to decide whether a PSST is functional.
@@ -972,7 +981,7 @@ case class ParikhSST[Q, A, B, X, L, I](
     }
   }
 
-  /** Returns w if there exists w' such that this transduces w to (w', v) and formula(n, v) == true. */
+  /** Returns (w, w') such that this transduces w to (w', v). */
   def inputOutputFor(v: Map[L, Int]): (Seq[A], Seq[B]) = {
     val enft = toLogVectorEpsNFT
     val in = enft.takeInputFor(v, u => u.exists { case (l, i) => i > v(l) })

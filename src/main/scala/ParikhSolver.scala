@@ -1,6 +1,7 @@
 // TODO rename this file
 package com.github.kmn4.sst
 
+import com.microsoft.z3
 import com.typesafe.scalalogging.Logger
 import smtlib.theories.Ints
 import smtlib.theories.experimental.Strings
@@ -15,6 +16,8 @@ import ParikhSolver._
 import Presburger.Sugar._
 import Constraint.Transduction
 import Solver.{SimpleQualID, SimpleApp, SimpleTransduction, expectRegExp}
+import com.github.kmn4.sst.experimental.ParikhRelation
+import com.github.kmn4.sst.experimental.PST
 
 class ParikhSolver(
     print: Boolean = false,
@@ -55,40 +58,79 @@ class ParikhSolver(
     constraints ++= (cs :+ c)
   }
 
-  class Checker(psst: SolverPSST[Char, String], idxVar: Map[Int, String]) {
-    // _1: Int var -> value, _2: Log var -> value
-    val witnessVector: () => Option[(Map[String, Int], Map[Int, Int])] =
-      Cacher { psst.ilVectorOption }.getOrCalc _
-    // _1: Str var -> value, _2: Int var -> value
-    val models: () => Option[(Map[String, String], Map[String, Int])] = Cacher {
-      witnessVector().map {
-        case (iv, lv) =>
-          val (_, output) = psst.inputOutputFor(lv)
-          (parseStrModel(output), parseIntModel(iv))
+  class Checker(relGen: Iterator[SolverPR[Char, String]], idxVar: Seq[String]) {
+    // pr の satisfialibity を確認
+    // sat なら x_0, x_1, ... の値と i_0, i_1, ... の値を返す
+    // 等式の左辺に現れる変数の値は返さないことに注意
+    private def checkClause(pr: SolverPR[Char, String]): Option[(Seq[String], Map[String, Int])] = {
+      // experimental の PA をこのパッケージの PA に変換
+      def transform[Q, A, L, I](pa: experimental.ParikhAutomaton[Q, A, L, I]): ParikhAutomaton[Q, A, L, I] =
+        ???
+      // 共通部分をとる
+      // 異なる文字列変数に対応する PA のログ変数がかぶらないようにする
+      val psts: Seq[ParikhSST[Int, Char, Char, Unit, (Int /* index */, Int /* l */ ), String]] =
+        pr.parikhAutomata.zipWithIndex.map {
+          case (pas, idx) =>
+            val pa = pas.map(transform).reduce[ParikhAutomaton[Int, Char, Int, String]] {
+              case (p, q) => p.intersect(q).renamed
+            }
+            pa.toParikhSST.renamed(identity _, identity _, l => (idx, l))
+        }
+      // 整数変数 int_*, ログ変数 log_*_*, 束縛変数 bound_*
+      val pstFormulas = psts.flatMap { pst =>
+        val accept = pst.acceptFormula.renameVars {
+          case Left(i)         => s"int_$i"
+          case Right((idx, l)) => s"log_${idx}_$l"
+        }
+        val parikh = pst.parikhImageFormula.renameVars {
+          case Left(b)         => s"bound_$b"
+          case Right((idx, l)) => s"log_${idx}_$l"
+        }
+        Seq(accept, parikh)
       }
-    }.getOrCalc _
-    def parseStrModel(output: Seq[Option[Char]]): Map[String, String] = {
-      var buf = output
-      var idx = 0
-      var res = Map.empty[String, Seq[Char]]
-      while (buf.nonEmpty) {
-        val took = buf.takeWhile(_.nonEmpty).flatten
-        buf = buf.drop(took.length + 1)
-        res += (idxVar(idx) -> took)
-        idx += 1
+      val globalFormulas = pr.globalFormulas.map(_.renameVars(i => s"int_$i"))
+      val formula = Presburger.Conj(pstFormulas ++ globalFormulas)
+      withZ3Context { (ctx) =>
+        val solver = ctx.mkSolver()
+        val z3Expr = Presburger.Formula.formulaToZ3Expr(ctx, Map.empty[String, z3.IntExpr], formula)
+        solver.add(z3Expr)
+        if (solver.check() == z3.Status.SATISFIABLE) {
+          val model = solver.getModel()
+          def getValue(name: String): Int = model.eval(ctx.mkIntConst(name), false).toString().toInt
+          // 得られたモデルの値を出力する入力文字列を探す
+          val inputs = psts.map { pst =>
+            val v = pst.ls.map { case il @ (idx, l) => il -> getValue(s"log_${idx}_$l") }.toMap
+            pst.inputOutputFor(v)._1.mkString
+          }
+          // 整数変数のモデル
+          val pat = "^int_(.*)".r
+          val intVarValues = formula.freeVars.collect {
+            case i @ pat(name) => name -> getValue(i)
+          }
+          Some((inputs, intVarValues.toMap))
+        } else None
       }
-      res.view.mapValues(_.mkString).toMap
     }
     def parseIntModel(iv: Map[String, Int]): Map[String, Int] =
       iv.collect { case (name, value) if name.indexOf("user_") == 0 => name.drop(5) -> value }
-    def checkSat(): Boolean = witnessVector().nonEmpty
-    def getModel(): Option[(Map[String, String], Map[String, Int])] = models()
+    val models = Cacher {
+      for {
+        rel <- relGen
+        models <- checkClause(rel)
+      } yield models
+    }.getOrCalc _
+    def checkSat(): Boolean = models().nonEmpty
+    def getModel(): Option[(Map[String, String], Map[String, Int])] = models().nextOption().map {
+      case (inputs, intVarValues) =>
+        (inputs.zipWithIndex.map { case (s, idx) => idxVar(idx) -> s }.toMap, intVarValues)
+    }
   }
 
+  // TODO Checker と Compiler.compile の型を変えれば preImage で判定できないか?
   val (checker, resetChecker) = {
     val c = Cacher[Checker] {
-      val (psst, idxVar) = Compiler.compile(constraints, alphabet, logger)
-      new Checker(psst, idxVar)
+      val (relGen, idxVar) = Compiler.compile(constraints, alphabet, logger)
+      new Checker(relGen, idxVar)
     }
     (c.getOrCalc _, c.reset _)
   }
@@ -280,6 +322,7 @@ object ParikhSolver {
   case class SolverOption(print: Boolean = true, logger: Logger = Logger("nop"))
 
   type SolverPSST[C, I] = ParikhSST[Int, Option[C], Option[C], Int, Int, I]
+  type SolverPR[C, I] = ParikhRelation[Int, C, Int, I]
 
   sealed trait ParikhLanguage[C, I] {
     def toParikhAutomaton(alphabet: Set[C]): ParikhAutomaton[Int, C, Int, I]
@@ -595,6 +638,7 @@ object ParikhSolver {
   sealed trait AtomicAssignment extends ParikhConstraint {
     def lhsStringVar: String
     def toSolverPSST(varIdx: Map[String, Int])(alphabet: Set[Char]): SolverPSST[Char, String]
+    def toExpPST(alphabet: Set[Char]): experimental.PST
 
     def dependerVars: Seq[String] = Seq(lhsStringVar)
   }
@@ -603,6 +647,14 @@ object ParikhSolver {
       trans: ParikhTransduction[Char, String],
       rhsStringVar: String
   ) extends AtomicAssignment {
+
+    override def toExpPST(alphabet: Set[Char]): PST = {
+      val psst = trans.toParikhSST(alphabet)
+      psst.copy(
+        inSet = psst.inSet.map(Left.apply),
+        edges = psst.edges.map(e => e.copy(_2 = Left(e._2)))
+      )
+    }
 
     override def dependerVars: Seq[String] = Seq(lhsStringVar)
 
@@ -615,6 +667,58 @@ object ParikhSolver {
   // Left(word), Right(stringVar)
   case class CatAssignment(lhsStringVar: String, wordAndVars: Seq[Either[Seq[Char], String]])
       extends AtomicAssignment {
+
+    // TODO wordsAndVars が少なくとも1つの文字列変数を含むことを仮定している点を緩和
+    override def toExpPST(alphabet: Set[Char]): PST = {
+      type Q = Int
+      type A = Either[Char, Int]
+      type B = Char
+      type X = Unit
+      type E = NSST.Edge[Q, A, B, X]
+      type O = NSST.Out[Q, X, B]
+      val depSize: Int = dependeeVars.size
+      val states: Set[Q] = (0 until depSize).toSet
+      val inSet: Set[A] = alphabet.map(Left.apply) ++ (0 to depSize - 2).map(Right.apply).toSet
+      // w0 x0 w1 ... wn-1 xn-1 wn のときの w0 ... wn
+      val words: Seq[Seq[Char]] = {
+        wordAndVars.foldRight(List(Seq.empty[B])) {
+          case (Left(s), h :: rst) => (s ++ h) :: rst
+          case (Right(_), acc)     => Nil :: acc
+          case _                   => throw new Exception("This cannot be the case")
+        }
+      }
+      val edges: Set[E] = {
+        val loop: Iterable[E] =
+          for {
+            i <- 0 to depSize - 1
+            a <- alphabet
+          } yield {
+            val adding = List(Cop1(()), Cop2(a))
+            val m = Map(() -> adding)
+            (i, Left(a), m, i)
+          }
+        val next: Iterable[E] =
+          (0 to depSize - 2).map { i =>
+            val xbs = Cop1(()) :: words(i + 1).map(Cop2.apply).toList
+            val m = Map(() -> xbs)
+            (i, Right(i), m, i + 1)
+          }
+        (loop ++ next).toSet
+      }
+      val outGraph: Set[O] = {
+        val added: Cupstar[X, B] =
+          (words(0).map(Cop2.apply) ++ Seq(Cop1(())) ++ words.last.map(Cop2.apply)).toList
+        Set((depSize - 1, added))
+      }
+      NSST(
+        states,
+        inSet,
+        Set(()),
+        edges,
+        0,
+        graphToMap(outGraph)(identity)
+      ).renamed.toParikhSST
+    }
 
     override def dependerVars: Seq[String] = Seq(lhsStringVar)
 
@@ -650,11 +754,11 @@ object ParikhSolver {
   }
 
   object Compiler {
-    def stringVarIndex(constraints: Seq[ParikhConstraint]): Map[String, Int] = {
+    def stringVarIndex(constraints: Seq[ParikhConstraint]): Seq[(String, Int)] = {
       val dependers = constraints.flatMap(_.dependerVars).distinct
       val dependees = constraints.flatMap(_.dependeeVars).distinct
       val independents = dependees.diff(dependers)
-      (independents ++ dependers).distinct.zipWithIndex.toMap
+      (independents ++ dependers).distinct.zipWithIndex
     }
 
     /** Returns ParikhAutomaton that accepts an input iff it meets constriant given by `pas`.
@@ -745,47 +849,158 @@ object ParikhSolver {
       solverPA((0 to lastVarIdx).map(idxPA.getOrElse(_, universalPA)), 0).toParikhSST.renamed
     }
 
-    def compileTriple(
-        assignments: Seq[
-          (Int, Set[Char] => SolverPSST[Char, String])
-        ], // ([lhsVarIdx], [corresponding solver PSST])
+    // TODO この名前だと Hoare 論理のアレみたいで misleading なので変える
+    case class Triple(
+        assignments: Seq[(Int, Set[Char] => experimental.PST, Seq[Int])], // (左辺, PST, 右辺)
         assertions: Map[Int, Seq[ParikhLanguage[Char, String]]], // [string var idx] in [Parikh langs]
-        arithFormulas: Seq[PureIntConstraint], // formula over int variables
+        arithFormulas: Seq[PureIntConstraint] // formula over int variables
+    ) {
+      // 文字列変数の添字の最大値
+      def maxStringVarOption: Option[Int] = {
+        val iter1 = assignments.iterator.map(_._1)
+        val iter2 = assertions.iterator.map(_._1)
+        (iter1 ++ iter2).maxOption
+      }
+
+      // 文字列変数の添字の最大値
+      // なお，assignments が非空ならその最後のインデックスに一致するはず
+      def maxStringVar: Int = maxStringVarOption.get
+    }
+
+    case class PreImagable(pst: experimental.PST, rhs: Seq[Int])
+
+    // 条件: transductions は lhs について昇順
+    // 条件: relation の PA は lhs について昇順で，0 から順にならぶ
+    case class Configuration(
+        transductions: Seq[PreImagable],
+        relation: ParikhRelation[Int, Char, Int, String]
+    )
+
+    // トランスダクション，言語，整数制約を PST と PR にまとめる
+    // NOTE assignments は左辺変数でソート済みと仮定
+    def organize(triple: Triple, alphabet: Set[Char]): Configuration = {
+      val Triple(assignments, assertions, _) = triple
+      val maxVar = triple.maxStringVar
+      // assignments から PST を構成
+      val transes = assignments.map {
+        case (_, trans, rhs) =>
+          val pst = trans(alphabet)
+          PreImagable(pst, rhs)
+      }
+      // assertions と arithFormulas から PR が得られる
+      val rel = {
+        val pas = (0 to maxVar).map { idx =>
+          val all = ParikhAutomaton.universal[Int, Char, Int, String](0, alphabet)
+          assertions(idx).foldLeft(all) {
+            case (acc, lang) => acc.intersect(lang.toParikhAutomaton(alphabet)).renamed
+          }
+        }
+        val withID = pas.zipWithIndex.map {
+          case (pa, idx) =>
+            Seq(
+              experimental.ParikhAutomaton(
+                idx,
+                pa.states,
+                pa.inSet,
+                pa.ls,
+                pa.is,
+                pa.edges,
+                pa.q0,
+                ???, // pa.acceptRelation,
+                pa.acceptFormulas
+              )
+            )
+        }
+        ParikhRelation(withID, triple.arithFormulas)
+      }
+      Configuration(transes, rel)
+    }
+
+    // transductions が非空である間 relation の逆像を計算する
+    // disjunction が現れると非決定的な選択をする．この非決定性は Iterator が表している．
+    def iteratePreImage(config: Configuration): Iterator[ParikhRelation[Int, Char, Int, String]] = {
+      import experimental.Transduction._
+      val Configuration(ts, rel) = config
+      ts.foldRight(LazyList(rel)) {
+          case (PreImagable(pst, rhs), acc) =>
+            type PA = experimental.ParikhAutomaton[Int, Char, Int, String]
+            // next() すると pst^-1(lang) から1つずつ選んだ組を返す
+            // TODO PR において各変数の言語が単一の PA で表されればにここは不要になる
+            def clauseChoices(
+                langs: LazyList[PA],
+                maxID: Int
+            ): Iterator[Seq[(Seq[PA], experimental.GlobalFormulas[String])]] = {
+              val idInc = rhs.length // maxID は逆像をとるたび idInc 分だけ増える
+              var mxid = maxID - idInc
+              choose(
+                langs.map { lang =>
+                  mxid += idInc
+                  new experimental.Transduction.ParikhTransduction(pst).preImage(lang, mxid)
+                }
+              ).iterator
+            }
+            val lhs = rel.parikhAutomata.length - 1
+            for {
+              rel <- acc
+              choice <- clauseChoices(LazyList.from(rel.parikhAutomata(lhs)), rel.maxID)
+            } yield {
+              // 1. rel から最右要素を除く
+              // 2. rel へ rhs に従って choice を追加する
+              rel.copy(parikhAutomata = rel.parikhAutomata.dropRight(1)).impose(choice, rhs)
+            }
+        }
+        .iterator
+    }
+
+    // 入力: (文字列変数インデックス，PST), (文字列変数インデックス, PAs), 整数制約
+    // 出力: 逆像を計算していったときの conjunction の可能性を列挙するイテレータ
+    def compileTriple(
+        triple: Triple,
         logger: Logger
-    )(alphabet: Set[Char]): SolverPSST[Char, String] = {
+    )(alphabet: Set[Char]): Iterator[ParikhRelation[Int, Char, Int, String]] = {
+      val Triple(assignments, assertions, arithFormulas) = triple
       require(
         assignments.map(_._1).sliding(2).forall(l => l.length < 2 || l(1) == l(0) + 1),
         "Not straight-line"
       )
-      val lastPSST = {
-        val lastVarIdx = assignments.lastOption.map(_._1).getOrElse(assertions.map(_._1).max)
-        val p = compileParikhAssertions(assertions, alphabet, lastVarIdx)
-        val is = arithFormulas.flatMap(_.freeVars)
-        val formulas = arithFormulas.map(_.renameVars[Either[String, Int]](Left.apply))
-        p.copy(is = p.is ++ is, acceptFormulas = p.acceptFormulas ++ formulas)
-      }
-      val assignmentPSSTs = assignments.map(_._2(alphabet))
-      logger.trace("got the following PSSTs:")
-      (assignmentPSSTs :+ lastPSST).zipWithIndex.foreach {
-        case (psst, i) => logger.trace(s"#$i: ${psst.sizes}")
-      }
-      (assignmentPSSTs :+ lastPSST).reduceLeft[SolverPSST[Char, String]] {
-        case (p1, p2) =>
-          logger.trace(s"compose ${p1.sizes} and ${p2.sizes}")
-          p1 compose p2
-      }
+      val initialConfig = organize(triple, alphabet)
+      iteratePreImage(initialConfig)
+      // val lastPSST = {
+      //   val lastVarIdx = assignments.lastOption.map(_._1).getOrElse(assertions.map(_._1).max)
+      //   val p = compileParikhAssertions(assertions, alphabet, lastVarIdx)
+      //   val is = arithFormulas.flatMap(_.freeVars)
+      //   val formulas = arithFormulas.map(_.renameVars[Either[String, Int]](Left.apply))
+      //   p.copy(is = p.is ++ is, acceptFormulas = p.acceptFormulas ++ formulas)
+      // }
+      // val assignmentPSSTs = assignments.map(_._2(alphabet))
+      // logger.trace("got the following PSSTs:")
+      // (assignmentPSSTs :+ lastPSST).zipWithIndex.foreach {
+      //   case (psst, i) => logger.trace(s"#$i: ${psst.sizes}")
+      // }
+      // (assignmentPSSTs :+ lastPSST).reduceLeft[SolverPSST[Char, String]] {
+      //   case (p1, p2) =>
+      //     logger.trace(s"compose ${p1.sizes} and ${p2.sizes}")
+      //     p1 compose p2
+      // }
     }
 
-    // _2: Index of string in PSST output -> String var name
+    // _1 : LazyList
+    // _2 : index in relation → string variable name
     def compile(
         constraints: Seq[ParikhConstraint],
         additionalAlphabet: Set[Char],
         logger: Logger
-    ): (SolverPSST[Char, String], Map[Int, String]) = {
+        // ): (SolverPSST[Char, String], Map[Int, String]) = {
+    ): (Iterator[SolverPR[Char, String]], Seq[String]) = {
       logger.trace("start compilation")
-      val varIdx = stringVarIndex(constraints)
+      val (varIdx, idxVar) = {
+        val vi = stringVarIndex(constraints)
+        (vi.toMap, vi.map(_._1))
+      }
       val assignments = constraints.collect {
-        case a: AtomicAssignment => (varIdx(a.lhsStringVar), a.toSolverPSST(varIdx) _)
+        case a: AtomicAssignment =>
+          val rhs = a.dependeeVars.map(varIdx)
+          (varIdx(a.lhsStringVar), a.toExpPST _, rhs)
       }
       val assertions = constraints.collect { case ParikhAssertion(sVar, lang)          => (varIdx(sVar), lang) }
       val arithFormula = constraints.collect { case IntConstraintIsParikhConstraint(f) => f }
@@ -793,9 +1008,10 @@ object ParikhSolver {
         val used = constraints.flatMap(_.usedAlphabet).toSet
         used ++ additionalAlphabet
       }
-      val psst = compileTriple(assignments, assertions.groupMap(_._1)(_._2), arithFormula, logger)(alphabet)
-      logger.trace(s"composition done, got PSST ${psst.sizes}")
-      (psst, varIdx.map { case (x, i) => i -> x })
+      val triple = Triple(assignments, assertions.groupMap(_._1)(_._2), arithFormula)
+      val relGen = compileTriple(triple, logger)(alphabet)
+      logger.trace(s"compilation done")
+      (relGen, idxVar)
     }
 
   }
