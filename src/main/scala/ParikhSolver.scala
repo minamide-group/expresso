@@ -63,15 +63,12 @@ class ParikhSolver(
     // sat なら x_0, x_1, ... の値と i_0, i_1, ... の値を返す
     // 等式の左辺に現れる変数の値は返さないことに注意
     private def checkClause(pr: SolverPR[Char, String]): Option[(Seq[String], Map[String, Int])] = {
-      // experimental の PA をこのパッケージの PA に変換
-      def transform[Q, A, L, I](pa: experimental.ParikhAutomaton[Q, A, L, I]): ParikhAutomaton[Q, A, L, I] =
-        ???
       // 共通部分をとる
       // 異なる文字列変数に対応する PA のログ変数がかぶらないようにする
       val psts: Seq[ParikhSST[Int, Char, Char, Unit, (Int /* index */, Int /* l */ ), String]] =
         pr.parikhAutomata.zipWithIndex.map {
           case (pas, idx) =>
-            val pa = pas.map(transform).reduce[ParikhAutomaton[Int, Char, Int, String]] {
+            val pa = pas.map(_.pa).reduce[ParikhAutomaton[Int, Char, Int, String]] {
               case (p, q) => p.intersect(q).renamed
             }
             pa.toParikhSST.renamed(identity _, identity _, l => (idx, l))
@@ -126,7 +123,6 @@ class ParikhSolver(
     }
   }
 
-  // TODO Checker と Compiler.compile の型を変えれば preImage で判定できないか?
   val (checker, resetChecker) = {
     val c = Cacher[Checker] {
       val (relGen, idxVar) = Compiler.compile(constraints, alphabet, logger)
@@ -891,25 +887,13 @@ object ParikhSolver {
       val rel = {
         val pas = (0 to maxVar).map { idx =>
           val all = ParikhAutomaton.universal[Int, Char, Int, String](0, alphabet)
-          assertions(idx).foldLeft(all) {
+          assertions.getOrElse(idx, Seq.empty).foldLeft(all) {
             case (acc, lang) => acc.intersect(lang.toParikhAutomaton(alphabet)).renamed
           }
         }
         val withID = pas.zipWithIndex.map {
           case (pa, idx) =>
-            Seq(
-              experimental.ParikhAutomaton(
-                idx,
-                pa.states,
-                pa.inSet,
-                pa.ls,
-                pa.is,
-                pa.edges,
-                pa.q0,
-                ???, // pa.acceptRelation,
-                pa.acceptFormulas
-              )
-            )
+            Seq(experimental.IdentifiedPA(idx, pa))
         }
         ParikhRelation(withID, triple.arithFormulas)
       }
@@ -923,7 +907,7 @@ object ParikhSolver {
       val Configuration(ts, rel) = config
       ts.foldRight(LazyList(rel)) {
           case (PreImagable(pst, rhs), acc) =>
-            type PA = experimental.ParikhAutomaton[Int, Char, Int, String]
+            type PA = experimental.IdentifiedPA[Int, Char, Int, String]
             // next() すると pst^-1(lang) から1つずつ選んだ組を返す
             // TODO PR において各変数の言語が単一の PA で表されればにここは不要になる
             def clauseChoices(
@@ -939,14 +923,21 @@ object ParikhSolver {
                 }
               ).iterator
             }
-            val lhs = rel.parikhAutomata.length - 1
             for {
               rel <- acc
-              choice <- clauseChoices(LazyList.from(rel.parikhAutomata(lhs)), rel.maxID)
+              choice <- {
+                val lhs = rel.parikhAutomata.length - 1
+                val automata = LazyList.from(rel.parikhAutomata(lhs))
+                clauseChoices(automata, rel.maxID)
+              }
             } yield {
               // 1. rel から最右要素を除く
               // 2. rel へ rhs に従って choice を追加する
-              rel.copy(parikhAutomata = rel.parikhAutomata.dropRight(1)).impose(choice, rhs)
+              ParikhRelation.impose(
+                rel.copy(parikhAutomata = rel.parikhAutomata.dropRight(1)),
+                choice,
+                rhs
+              )
             }
         }
         .iterator

@@ -5,13 +5,14 @@ import com.github.kmn4.sst.NopLogger
 import com.github.kmn4.sst.graphToMap
 import com.github.kmn4.sst.Presburger
 import com.github.kmn4.sst.Presburger.Sugar._
+import com.github.kmn4.sst.ParikhAutomaton
 
 // A*(#1)...(#k-1)A*, n1, ..., nl -> A*
 trait Transduction[A, B] {
   // pa の逆像を計算する
   // maxID がいまある最大の ID．
   // 新しく使う ID はこれよりも大きくする．
-  def preImage[R, K](pa: ParikhAutomaton[R, B, K, String], maxID: Int): PreImage[Int, A, Int, String]
+  def preImage[R, K](pa: IdentifiedPA[R, B, K, String], maxID: Int): PreImage[Int, A, Int, String]
 }
 
 object Transduction {
@@ -24,9 +25,10 @@ object Transduction {
     val arity = psst.inSet.flatMap(_.toOption).maxOption.getOrElse(-1) + 2
 
     override def preImage[R, K](
-        lang: ParikhAutomaton[R, B, K, String],
+        ipa: IdentifiedPA[R, B, K, String],
         maxID: Int
     ): PreImage[Int, A, Int, String] = {
+      val IdentifiedPA(id, lang) = ipa
       // lang を PSST とみなす
       // PSST 同士の合成をする (LC-APSST まで)
       // 受理状態を固定するごとに1つの PA をつくる
@@ -34,6 +36,7 @@ object Transduction {
 
       // lang を PSST とみなす
       val langPST = {
+        // TODO PairkhAutomaton のメソッドを使う
         ParikhSST[R, B, Nothing, Nothing, K, String](
           lang.states,
           lang.inSet,
@@ -41,10 +44,8 @@ object Transduction {
           lang.ls,
           lang.is,
           lang.edges.map { case (q, b, v, r) => (q, b, Map.empty, v, r) },
-          lang.q0, {
-            val (qf, v) = lang.acceptRelation
-            Set((qf, Nil, v))
-          },
+          lang.q0,
+          lang.acceptRelation.map { case (qf, v) => (qf, Nil, v) },
           lang.acceptFormulas
         )
       }
@@ -68,14 +69,13 @@ object Transduction {
         LazyList.from(lcp.outGraph).map {
           case (q, _, v, phi) =>
             ParikhAutomaton(
-              maxID, // この PA は一時的なものなので maxID を使ってもいい
               states,
               lcp.inSet + lastSharp,
               lcp.ls,
               lcp.is,
               lcp.edges.map { case (q, a, _, v, r) => (q, a, v, r) } + ((q, lastSharp, v, qf)),
               lcp.q0,
-              (qf, zero),
+              Set((qf, zero)),
               lcp.globalAcceptFormulas :+ phi // TODO phi は Seq のほうがいいかも?
             )
         }
@@ -86,7 +86,7 @@ object Transduction {
 
       def split[Q, L](
           pa: ParikhAutomaton[Q, Either[A, Int], L, String]
-      ): LazyList[(Seq[ParikhAutomaton[Q, A, L, String]], Seq[Presburger.Formula[String]])] = {
+      ): LazyList[(Seq[IdentifiedPA[Q, A, L, String]], Seq[Presburger.Formula[String]])] = {
         type Edge = (Q, Either[A, Int], Map[L, Int], Q)
 
         // cache
@@ -116,14 +116,10 @@ object Transduction {
 
         // pa の状態を qs, 辺集合を es に制限．
         // 状態が空なら None になる
-        // NOTE id は呼び出し元で上書きすること
         // NOTE acceptRelation は呼び出し元で上書きすること
-        def statesRemoved(
-            qs: Set[Q],
-            es: Set[Edge]
-        ): Option[ParikhAutomaton[Q, Either[A, Int], L, String]] =
+        def statesRemoved(qs: Set[Q], es: Set[Edge]): Option[ParikhAutomaton[Q, Either[A, Int], L, String]] =
           if (qs.isEmpty) None
-          else Some { pa.copy(states = qs, edges = es) } // id, acceptRelation はあとで上書きされる
+          else Some { pa.copy(states = qs, edges = es) }
 
         def prune(q0: Q, qf: Q): Option[ParikhAutomaton[Q, Either[A, Int], L, String]] = {
           val (qs, es) = pruneStates(q0, qf)
@@ -148,7 +144,7 @@ object Transduction {
         def splitAux(
             pa: ParikhAutomaton[Q, Either[A, Int], L, String],
             i: Int
-        ): LazyList[(Seq[ParikhAutomaton[Q, A, L, String]], Seq[Presburger.Formula[String]])] = {
+        ): LazyList[(Seq[IdentifiedPA[Q, A, L, String]], Seq[Presburger.Formula[String]])] = {
           val sharpEdge: Map[Int, Iterable[Edge]] = graphToMap(pa.edges.filter(_._2.isRight)) {
             case e @ (_, Right(i), _, _) => i -> e
             case _                       => throw new Exception("This cannot be the case.")
@@ -166,11 +162,11 @@ object Transduction {
               val syncFormulas = // PA と大域整数制約の同期
                 pa0.ls.toSeq.map(l => Eq[Either[String, L]](Var(Right(l)), Var(Left(sumVar(newID, l)))))
               val newPA = noSharp.copy(
-                id = newID,
-                acceptRelation = (q0, v),
+                acceptRelation = Set((q0, v)),
                 acceptFormulas = syncFormulas
               )
-              (Seq(newPA), Seq.empty)
+              val ipa = IdentifiedPA(newID, newPA)
+              (Seq(ipa), Seq.empty)
             }
           } else if (i > 0) {
             for {
@@ -201,12 +197,11 @@ object Transduction {
                 Eq(sumL, Add(Seq(prevL, copyL)))
               }
               val newPA = noSharp.copy(
-                id = newID,
-                acceptRelation = (qi, v),
+                acceptRelation = Set((qi, v)),
                 acceptFormulas = copyFormulas
               )
-              (Seq(newPA), Seq.empty)
-              (relation1 :+ newPA, formula ++ syncFormulas)
+              val ipa = IdentifiedPA(newID, newPA)
+              (relation1 :+ ipa, formula ++ syncFormulas)
             }
           } else throw new Exception("i < 0")
         }

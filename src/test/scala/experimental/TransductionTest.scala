@@ -50,17 +50,7 @@ class TransductionTest extends AnyFunSuite {
 |y| = i""") {
     val alphabet = "ab".toSet
     val pa = ParikhSolver.ParikhLanguage.Length("i").toParikhAutomaton(alphabet)
-    val lang = ParikhAutomaton(
-      0,
-      pa.states,
-      pa.inSet,
-      pa.ls,
-      pa.is,
-      pa.edges,
-      pa.q0,
-      pa.acceptRelation.head,
-      pa.acceptFormulas
-    )
+    val lang = IdentifiedPA(0, pa)
     val f = concatTransducer(2, alphabet).toParikhSST[Int, String]
     val preImage = new Transduction.ParikhTransduction(f).preImage(lang, 0)
     for (clause <- preImage) info(s"$clause")
