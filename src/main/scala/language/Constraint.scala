@@ -1,7 +1,8 @@
-package com.github.kmn4.sst
+package com.github.kmn4.sst.language
 
-import com.github.kmn4.sst.machine.NSST
+import com.github.kmn4.sst._
 import com.github.kmn4.sst.math._
+import com.github.kmn4.sst.machine._
 
 import smtlib.theories.Ints.IntSort
 import smtlib.theories.experimental.Strings.StringSort

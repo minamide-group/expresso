@@ -2,8 +2,8 @@ package com.github.kmn4.sst
 
 import org.scalatest.funsuite._
 
-import Replacer.PCRE._
-import Replacer._
+import com.github.kmn4.sst.language.Replacer.PCRE._
+import com.github.kmn4.sst.language.Replacer._
 
 class ReplacerTest extends AnyFunSuite {
   def empty: PCRE[Char, String] = Empty()

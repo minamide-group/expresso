@@ -12,11 +12,12 @@ import smtlib.trees.Terms.{SNumeral, SString, Sort, Term => SMTTerm}
 import smtlib.trees.{Commands => SMTCommands}
 import smtlib.trees.{Terms => SMTTerms}
 
-import com.github.kmn4.sst.machine.{ParikhSST, ParikhAutomaton, NSST, DFA}
+import com.github.kmn4.sst.machine._
 import com.github.kmn4.sst.ParikhSolver._
 import com.github.kmn4.sst.math._
 import com.github.kmn4.sst.math.Presburger.Sugar._
-import com.github.kmn4.sst.Constraint.Transduction
+import com.github.kmn4.sst.language._
+import com.github.kmn4.sst.language.Constraint.Transduction
 import com.github.kmn4.sst.Solver.{SimpleQualID, SimpleApp, SimpleTransduction, expectRegExp}
 import com.github.kmn4.sst.experimental.ParikhRelation
 import com.github.kmn4.sst.experimental.PST

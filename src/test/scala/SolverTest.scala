@@ -2,9 +2,9 @@ package com.github.kmn4.sst
 
 import org.scalatest.funsuite._
 
+import com.github.kmn4.sst.language.Constraint._
 import com.github.kmn4.sst.machine.NSST
 import Solver._
-import Constraint._
 import ParikhSolver.ParikhTransduction.NSSTTransductionIsParikhTransduction
 
 class SolverTest extends AnyFunSuite {

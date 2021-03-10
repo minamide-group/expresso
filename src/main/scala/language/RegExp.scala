@@ -1,6 +1,8 @@
-package com.github.kmn4.sst
+package com.github.kmn4.sst.language
 
-import com.github.kmn4.sst.machine.NFA
+import com.github.kmn4.sst._
+import com.github.kmn4.sst.math._
+import com.github.kmn4.sst.machine._
 
 sealed trait RegExp[+A] {
   def usedAlphabet[B >: A]: Set[B] = this match {
