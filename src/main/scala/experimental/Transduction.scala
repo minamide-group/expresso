@@ -155,16 +155,13 @@ object Transduction {
           if (i == 0) {
             for {
               sharp0 @ (q0, _, v, _) <- LazyList.from(sharpEdge(0))
-              pa0 <- pruneBackward(q0)
+              pa0 <- pruneBackward(q0).map { pa => pa.copy(acceptRelation = Set((q0, v))) }
             } yield {
               import Presburger._
               val noSharp = mustRemoveSharps(pa0)
               val syncFormulas = // PA と大域整数制約の同期
                 pa0.ls.toSeq.map(l => Eq[Either[String, L]](Var(Right(l)), Var(Left(sumVar(newID, l)))))
-              val newPA = noSharp.copy(
-                acceptRelation = Set((q0, v)),
-                acceptFormulas = syncFormulas
-              )
+              val newPA = noSharp.copy(acceptFormulas = syncFormulas)
               val ipa = IdentifiedPA(newID, newPA)
               (Seq(ipa), Seq.empty)
             }
@@ -172,15 +169,12 @@ object Transduction {
             for {
               sharp1 @ (q1, _, _, r1) <- LazyList.from(sharpEdge(i - 1))
               sharpI @ (qi, _, v, _) <- sharpEdge(i)
-              paI <- prune(r1, qi).toList
+              paI <- prune(r1, qi).map { pa => pa.copy(q0 = r1, acceptRelation = Set((qi, v))) }.toList
               pa1 <- pruneBackward(q1).map { pa =>
                 // 再帰のため最後に #_i-1 で遷移するようにしたい
                 // TODO もう少し綺麗に書けるのでは
                 //      例えば PA は # 終端しない文字列組を受理することにする
-                pa.copy(
-                  states = pa.states + r1,
-                  edges = pa.edges + sharp1
-                )
+                pa.copy(states = pa.states + r1, edges = pa.edges + sharp1)
               }.toList
               (relation1, formula) <- splitAux(pa1, i - 1)
             } yield {
@@ -196,10 +190,7 @@ object Transduction {
                 val copyL = Var(copyVar(newID, l))
                 Eq(sumL, Add(Seq(prevL, copyL)))
               }
-              val newPA = noSharp.copy(
-                acceptRelation = Set((qi, v)),
-                acceptFormulas = copyFormulas
-              )
+              val newPA = noSharp.copy(acceptFormulas = copyFormulas)
               val ipa = IdentifiedPA(newID, newPA)
               (relation1 :+ ipa, formula ++ syncFormulas)
             }
