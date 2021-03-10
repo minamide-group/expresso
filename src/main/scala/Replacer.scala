@@ -1,5 +1,6 @@
 package com.github.kmn4.sst
 
+import com.github.kmn4.sst.machine.NSST
 import MonadPlus.MonadPlusOps
 
 sealed trait Tree[A] {

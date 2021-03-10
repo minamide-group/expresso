@@ -5,8 +5,9 @@ import smtlib.trees.Commands._
 import smtlib.trees.Terms
 import smtlib.trees.Terms._
 
-import Constraint._
-import Solver._
+import com.github.kmn4.sst.machine.{DFA, NSST}
+import com.github.kmn4.sst.Constraint._
+import com.github.kmn4.sst.Solver._
 
 object Solver {
   object SimpleQualID {

@@ -1,8 +1,9 @@
-package com.github.kmn4.sst
+package com.github.kmn4.sst.machine
 
 import com.microsoft.z3
 
-import ParikhSST.Implicits._
+import com.github.kmn4.sst._
+import com.github.kmn4.sst.machine.ParikhSST.Implicits._
 
 trait StringIntTransducer[A, B, I] {
   def transduce(w: Seq[A], n: Map[I, Int]): Set[Seq[B]]

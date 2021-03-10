@@ -1,5 +1,7 @@
 package com.github.kmn4.sst
 
+import com.github.kmn4.sst.machine.{NSST, MSST}
+
 trait CompositionLogger {
   def start[Q1, Q2, A, B, C, X, Y](n1: NSST[Q1, A, B, X], n2: NSST[Q2, B, C, Y]): Unit
   def invTransX[Q1, Q2, X](m: Map[Q1, Map[(Q2, X), Set[Q2]]]): Unit

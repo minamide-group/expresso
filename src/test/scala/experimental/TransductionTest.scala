@@ -3,9 +3,9 @@ package com.github.kmn4.sst.experimental
 import com.github.kmn4.sst.Cop
 import com.github.kmn4.sst.Cop1
 import com.github.kmn4.sst.Cop2
-import com.github.kmn4.sst.MNFT
-import com.github.kmn4.sst.NSST
-import com.github.kmn4.sst.ParikhSST
+import com.github.kmn4.sst.machine.MNFT
+import com.github.kmn4.sst.machine.NSST
+import com.github.kmn4.sst.machine.ParikhSST
 import com.github.kmn4.sst.ParikhSolver
 import org.scalatest.funsuite.AnyFunSuite
 

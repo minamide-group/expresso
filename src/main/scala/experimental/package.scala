@@ -1,6 +1,7 @@
 package com.github.kmn4.sst
 
 import com.github.kmn4.sst.Presburger
+import com.github.kmn4.sst.machine.ParikhSST
 
 package object experimental {
   type Formulas[I, L] = Seq[Presburger.Formula[Either[I, L]]]

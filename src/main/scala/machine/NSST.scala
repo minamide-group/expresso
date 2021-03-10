@@ -1,4 +1,6 @@
-package com.github.kmn4.sst
+package com.github.kmn4.sst.machine
+
+import com.github.kmn4.sst._
 
 /** Nondeterministic streaming string transducer */
 case class NSST[Q, A, B, X](

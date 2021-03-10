@@ -1,5 +1,6 @@
 package com.github.kmn4.sst
 
+import com.github.kmn4.sst.machine.{MSST, NSST}
 import org.scalatest.flatspec._
 
 object RandomTest {

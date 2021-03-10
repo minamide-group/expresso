@@ -1,5 +1,7 @@
 package com.github.kmn4.sst
 
+import com.github.kmn4.sst.machine.NSST
+
 import smtlib.theories.Ints.IntSort
 import smtlib.theories.experimental.Strings.StringSort
 import smtlib.trees.Terms.Sort
