@@ -1,6 +1,6 @@
 package com.github.kmn4.sst
 
-import com.github.kmn4.sst.Presburger
+import com.github.kmn4.sst.math.Presburger
 import com.github.kmn4.sst.machine.ParikhSST
 
 package object experimental {

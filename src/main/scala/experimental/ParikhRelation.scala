@@ -1,6 +1,6 @@
 package com.github.kmn4.sst.experimental
 
-import com.github.kmn4.sst.Presburger
+import com.github.kmn4.sst.math.Presburger
 import com.github.kmn4.sst.machine.ParikhSST
 
 // parikhAutomata の要素 Seq[Parikh...] を conjunction と呼ぶ

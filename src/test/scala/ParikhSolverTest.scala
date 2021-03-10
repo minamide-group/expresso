@@ -201,7 +201,7 @@ class ParikhSolverTest extends AnyFunSuite {
 
   implicit class AtMostSubstring(s: String) {
     def atmostSubstring(idx: Int, len: Int): String = {
-      if (0 <= idx && idx < s.length && 0 < len) s.substring(idx, idx + math.min(len, s.length - idx))
+      if (0 <= idx && idx < s.length && 0 < len) s.substring(idx, idx + scala.math.min(len, s.length - idx))
       else ""
     }
   }

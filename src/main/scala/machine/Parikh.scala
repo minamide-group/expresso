@@ -3,7 +3,7 @@ package com.github.kmn4.sst.machine
 import com.microsoft.z3
 
 import com.github.kmn4.sst._
-import com.github.kmn4.sst.Presburger._
+import com.github.kmn4.sst.math.Presburger._
 
 object Parikh {
   type Image[A] = Map[A, Int]

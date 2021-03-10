@@ -77,9 +77,9 @@ object CompositionLog {
       statesSize = n.states.size,
       varsSize = n.variables.size,
       edgesSize = n.edges.size,
-      edgesNorm = n.delta.view.map(_._2.size).fold(0)(math.max),
+      edgesNorm = n.delta.view.map(_._2.size).fold(0)(scala.math.max),
       fSize = n.outF.size,
-      fNorm = n.outF.view.map(_._2.size).fold(0)(math.max)
+      fNorm = n.outF.view.map(_._2.size).fold(0)(scala.math.max)
     )
   }
   case class Started(

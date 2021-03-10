@@ -1,7 +1,8 @@
 package com.github.kmn4.sst
 
 import com.github.kmn4.sst.machine.NSST
-import MonadPlus.MonadPlusOps
+import com.github.kmn4.sst.math._
+import com.github.kmn4.sst.math.MonadPlus.MonadPlusOps
 
 sealed trait Tree[A] {
   def toSeq: Seq[A] = this match {

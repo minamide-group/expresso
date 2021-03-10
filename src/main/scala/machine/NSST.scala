@@ -1,6 +1,7 @@
 package com.github.kmn4.sst.machine
 
 import com.github.kmn4.sst._
+import com.github.kmn4.sst.math._
 
 /** Nondeterministic streaming string transducer */
 case class NSST[Q, A, B, X](
@@ -13,7 +14,7 @@ case class NSST[Q, A, B, X](
 ) {
   import NSST._
 
-  implicit val monoid: Monoid[Update[X, B]] = variables
+  implicit val monoid: Monoid[Update[X, B]] = updateMonoid(variables)
   val outF: Map[Q, Set[Cupstar[X, B]]] = partialF.withDefaultValue(Set())
   val outGraph: List[(Q, Cupstar[X, B])] = mapToGraph(partialF)(identity).toList
   val out: Set[B] = Set.from {

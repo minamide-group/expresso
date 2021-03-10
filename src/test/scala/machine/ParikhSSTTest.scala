@@ -2,8 +2,7 @@ package com.github.kmn4.sst.machine
 
 import com.github.kmn4.sst.{ParikhSolver, Constraint, NopLogger}
 import org.scalatest.funsuite.AnyFunSuite
-
-import com.github.kmn4.sst.Presburger._
+import com.github.kmn4.sst.math._
 
 class ParikhSSTTest extends AnyFunSuite {
   def testEquiv[A, B, I](t1: StringIntTransducer[A, B, I], t2: StringIntTransducer[A, B, I])(

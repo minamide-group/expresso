@@ -4,6 +4,7 @@ import com.microsoft.z3
 
 import com.github.kmn4.sst._
 import com.github.kmn4.sst.machine.ParikhSST.Implicits._
+import com.github.kmn4.sst.math._
 
 trait StringIntTransducer[A, B, I] {
   def transduce(w: Seq[A], n: Map[I, Int]): Set[Seq[B]]

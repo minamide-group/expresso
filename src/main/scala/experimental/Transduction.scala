@@ -3,8 +3,8 @@ package com.github.kmn4.sst.experimental
 import com.github.kmn4.sst.machine.ParikhSST
 import com.github.kmn4.sst.NopLogger
 import com.github.kmn4.sst.graphToMap
-import com.github.kmn4.sst.Presburger
-import com.github.kmn4.sst.Presburger.Sugar._
+import com.github.kmn4.sst.math.Presburger
+import com.github.kmn4.sst.math.Presburger.Sugar._
 import com.github.kmn4.sst.machine.ParikhAutomaton
 
 // A*(#1)...(#k-1)A*, n1, ..., nl -> A*

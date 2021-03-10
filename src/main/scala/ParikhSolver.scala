@@ -14,7 +14,8 @@ import smtlib.trees.{Terms => SMTTerms}
 
 import com.github.kmn4.sst.machine.{ParikhSST, ParikhAutomaton, NSST, DFA}
 import com.github.kmn4.sst.ParikhSolver._
-import com.github.kmn4.sst.Presburger.Sugar._
+import com.github.kmn4.sst.math._
+import com.github.kmn4.sst.math.Presburger.Sugar._
 import com.github.kmn4.sst.Constraint.Transduction
 import com.github.kmn4.sst.Solver.{SimpleQualID, SimpleApp, SimpleTransduction, expectRegExp}
 import com.github.kmn4.sst.experimental.ParikhRelation

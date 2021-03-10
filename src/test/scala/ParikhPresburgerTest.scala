@@ -1,6 +1,7 @@
 package com.github.kmn4.sst
 
 import com.github.kmn4.sst.machine.{NSST}
+import com.github.kmn4.sst.math._
 import org.scalatest.flatspec._
 import org.scalatest.Ignore
 

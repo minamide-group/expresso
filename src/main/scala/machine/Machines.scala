@@ -2,6 +2,7 @@ package com.github.kmn4.sst.machine
 
 import scala.collection.immutable.Queue
 import com.github.kmn4.sst._
+import com.github.kmn4.sst.math._
 
 /** Nondeterministic monoid SST */
 class MSST[Q, A, B, X, Y](
@@ -222,7 +223,7 @@ case class CounterMachine[Q](
     val rangeN = edges.foldLeft(Map.from { states.map(q => q -> (0, 0)) }) {
       case (acc, (q, n, _)) => {
         val (min, max) = acc(q)
-        acc + (q -> (math.min(min, n), math.max(max, n)))
+        acc + (q -> (scala.math.min(min, n), scala.math.max(max, n)))
       }
     }
     val newStates = states.flatMap { q =>
