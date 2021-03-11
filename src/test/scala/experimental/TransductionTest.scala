@@ -1,10 +1,11 @@
 package com.github.kmn4.sst.experimental
 
 import com.github.kmn4.sst.math._
-import com.github.kmn4.sst.machine.MNFT
-import com.github.kmn4.sst.machine.NSST
-import com.github.kmn4.sst.machine.ParikhSST
+import com.github.kmn4.sst.machine._
 import com.github.kmn4.sst.ParikhSolver
+import com.github.kmn4.sst.language.Constraint._
+import com.github.kmn4.sst.strategy.IdentifiedPA
+import com.github.kmn4.sst.strategy.Transduction
 import org.scalatest.funsuite.AnyFunSuite
 
 class TransductionTest extends AnyFunSuite {
@@ -47,7 +48,7 @@ class TransductionTest extends AnyFunSuite {
   test("""y = x.x
 |y| = i""") {
     val alphabet = "ab".toSet
-    val pa = ParikhSolver.ParikhLanguage.Length("i").toParikhAutomaton(alphabet)
+    val pa = ParikhLanguage.Length("i").toParikhAutomaton(alphabet)
     val lang = IdentifiedPA(0, pa)
     val f = concatTransducer(2, alphabet).toParikhSST[Int, String]
     val preImage = new Transduction.ParikhTransduction(f).preImage(lang, 0)

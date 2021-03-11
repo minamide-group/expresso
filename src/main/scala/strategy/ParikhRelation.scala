@@ -1,4 +1,4 @@
-package com.github.kmn4.sst.experimental
+package com.github.kmn4.sst.strategy
 
 import com.github.kmn4.sst.math.Presburger
 import com.github.kmn4.sst.machine.ParikhSST

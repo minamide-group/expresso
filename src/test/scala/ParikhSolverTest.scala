@@ -33,7 +33,7 @@ class ParikhSolverTest extends AnyFunSuite {
   )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
     testWithInfoTime(s"test SAT\n${constraint.trim}") {
       withExecuteScript(new java.io.StringReader(constraint)) { solver =>
-        solver.checker().getModel() match {
+        solver.checker.getModel() match {
           // case Some((sModel, iModel)) => assertions(sModel, iModel)
           case Some(models) => info(models.toString())
           case None         => fail()
@@ -43,7 +43,7 @@ class ParikhSolverTest extends AnyFunSuite {
   def testUNSAT(constraint: String)(implicit pos: Position) =
     testWithInfoTime(s"test UNSAT\n${constraint.trim}") {
       withExecuteScript(new java.io.StringReader(constraint)) { solver =>
-        assert(solver.checker().models().isEmpty)
+        assert(solver.checker.getModel().isEmpty)
       }
     }
 
@@ -67,7 +67,7 @@ class ParikhSolverTest extends AnyFunSuite {
   )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
     testWithInfoTime(s"""test SAT: "$name"""") {
       withExecuteFile(name) { solver =>
-        solver.checker().getModel() match {
+        solver.checker.getModel() match {
           // case Some((sModel, iModel)) => assertions(sModel, iModel)
           case Some(models @ (sModel, iModel)) => info(models.toString())
           case None                            => fail()
@@ -76,7 +76,7 @@ class ParikhSolverTest extends AnyFunSuite {
     }
   def testFileUNSAT(name: String)(implicit pos: Position) =
     testWithInfoTime(s"""test UNSAT: "$name"""") {
-      withExecuteFile(name) { solver => assert(solver.checker().models().isEmpty) }
+      withExecuteFile(name) { solver => assert(solver.checker.getModel().isEmpty) }
     }
 
   testFileSAT("deleteall") { (_, _) => () }
