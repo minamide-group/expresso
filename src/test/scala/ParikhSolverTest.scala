@@ -216,6 +216,8 @@ class ParikhSolverTest extends AnyFunSuite {
 (assert (and (<= 0 i) (< i (str.len x))))
 (assert (= y (str.substr x i 2)))
 (assert (str.in.re y (re.comp (str.to.re "ab"))))
+
+(check-sat)
 """) {
     case (sModel, iModel) =>
       val (x, y, i) = (sModel("x"), sModel("y"), iModel("i"))
