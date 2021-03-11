@@ -1,6 +1,6 @@
 package com.github.kmn4.sst.machine
 
-import com.github.kmn4.sst.{ParikhSolver, NopLogger}
+import com.github.kmn4.sst.{Solver, NopLogger}
 import org.scalatest.funsuite.AnyFunSuite
 import com.github.kmn4.sst.math._
 import com.github.kmn4.sst.language._

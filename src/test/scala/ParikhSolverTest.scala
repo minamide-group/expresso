@@ -13,12 +13,12 @@ class ParikhSolverTest extends AnyFunSuite {
   }
   def withExecuteScript[T](print: Boolean, logger: Logger, alphabet: Set[Char])(
       reader: java.io.Reader
-  )(body: ParikhSolver => T): T = withScript(reader) { script =>
-    val solver = new ParikhSolver(print = print, logger = logger, alphabet = alphabet)
+  )(body: Solver => T): T = withScript(reader) { script =>
+    val solver = new Solver(print = print, logger = logger, alphabet = alphabet)
     solver.executeScript(script)
     body(solver)
   }
-  def withExecuteScript[T](reader: java.io.Reader)(body: ParikhSolver => T): T =
+  def withExecuteScript[T](reader: java.io.Reader)(body: Solver => T): T =
     withExecuteScript(false, logger = Logger("nop"), "ab".toSet)(reader)(body)
   def testWithInfoTime[T](testName: String, testTags: org.scalatest.Tag*)(
       testFun: => Any
@@ -57,7 +57,7 @@ class ParikhSolverTest extends AnyFunSuite {
     }
   }
 
-  def withExecuteFile[T](fname: String)(body: ParikhSolver => T): T =
+  def withExecuteFile[T](fname: String)(body: Solver => T): T =
     withFileReader(s"constraints/bench/$fname.smt2") { reader =>
       withExecuteScript(false, Logger(s"bench.$fname"), "ab".toSet)(reader)(body)
     }

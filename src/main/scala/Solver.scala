@@ -1,8 +1,6 @@
-// TODO rename this file
-
 package com.github.kmn4.sst
 
-import com.github.kmn4.sst.ParikhSolver._
+import com.github.kmn4.sst.Solver._
 import com.github.kmn4.sst.language.Constraint._
 import com.github.kmn4.sst.language._
 import com.github.kmn4.sst.machine._
@@ -27,7 +25,7 @@ import smtlib.trees.Terms.{Term => SMTTerm}
 import smtlib.trees.{Commands => SMTCommands}
 import smtlib.trees.{Terms => SMTTerms}
 
-class ParikhSolver(
+class Solver(
     print: Boolean = false,
     logger: Logger = Logger("nop"),
     alphabet: Set[Char] = Set.empty // ADDED to the alphabet of constraints
@@ -406,7 +404,7 @@ class ParikhSolver(
 
 }
 
-object ParikhSolver {
+object Solver {
   case class SolverOption(print: Boolean = true, logger: Logger = Logger("nop"))
 
 }
