@@ -1,8 +1,10 @@
-package com.github.kmn4.sst
+package com.github.kmn4.sst.machine
 
+import com.github.kmn4.sst.{Solver, NopLogger}
 import org.scalatest.funsuite.AnyFunSuite
-
-import com.github.kmn4.sst.Presburger._
+import com.github.kmn4.sst.math._
+import com.github.kmn4.sst.language._
+import com.github.kmn4.sst.language.Constraint._
 
 class ParikhSSTTest extends AnyFunSuite {
   def testEquiv[A, B, I](t1: StringIntTransducer[A, B, I], t2: StringIntTransducer[A, B, I])(
@@ -33,7 +35,7 @@ class ParikhSSTTest extends AnyFunSuite {
   }
 
   def substr(i: String, l: String) =
-    ParikhSolver.ParikhTransduction.Substr(i, l).toParikhSST("abcd".toSet)
+    ParikhTransduction.Substr(i, l).toParikhSST("abcd".toSet)
   val substr1 = substr("i", "l")
   test("substr transduction") {
     implicit def conv(t: (Int, Int)): Map[String, Int] = t match {
@@ -96,7 +98,7 @@ class ParikhSSTTest extends AnyFunSuite {
   }
 
   test("Compose replaceAll and substr") {
-    val replaceAll = Constraint.ReplaceAll("aab", "abc").toSST("abcd".toSet).toParikhSST[String, String]
+    val replaceAll = Transduction.ReplaceAll("aab", "abc").toSST("abcd".toSet).toParikhSST[String, String]
     val composed = replaceAll compose substr1
     implicit def conv(n: (Int, Int)): Map[String, Int] = n match {
       case (i, l) => Map("i" -> i, "l" -> l)
@@ -111,10 +113,10 @@ class ParikhSSTTest extends AnyFunSuite {
   }
 
   def indexOf0(word: String, i: String) =
-    ParikhSolver.ParikhLanguage.IndexOfConst(word, 0, i).toParikhAutomaton("abcd".toSet).toParikhSST
+    ParikhLanguage.IndexOfConst(word, 0, i).toParikhAutomaton("abcd".toSet).toParikhSST
 
   test("Compose replaceAll and indexOf") {
-    val replaceAll = Constraint.ReplaceAll("aab", "abc").toSST("abcd".toSet).toParikhSST[String, String]
+    val replaceAll = Transduction.ReplaceAll("aab", "abc").toSST("abcd".toSet).toParikhSST[String, String]
     val indexOfAB = indexOf0("ab", "i")
     testExamples(indexOfAB)(
       Seq(

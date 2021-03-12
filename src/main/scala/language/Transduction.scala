@@ -1,25 +1,24 @@
-package com.github.kmn4.sst
+package com.github.kmn4.sst.language
 
-import smtlib.theories.Ints.IntSort
-import smtlib.theories.experimental.Strings.StringSort
-import smtlib.trees.Terms.Sort
+import com.github.kmn4.sst._
+import com.github.kmn4.sst.machine._
+import com.github.kmn4.sst.math._
+import com.github.kmn4.sst.math.Presburger.Sugar._
 
-import Solver.{solverNsstTemplate, SolverSST, postfixDFA}
+/** Unary transduction */
+trait Transduction[C] {
+  def usedAlphabet: Set[C]
 
-object Constraint {
+  /**
+    * Construct NSST that performs this transduction and has non-empty set of variables.
+    *
+    * @param alphabet
+    * @return NSST that performs this transduction and has non-empty set of variables.
+    */
+  def toSST(alphabet: Set[C]): NSST[Int, C, C, Int]
+}
 
-  /** Unary transduction */
-  trait Transduction[C] {
-    def usedAlphabet: Set[C]
-
-    /**
-      * Construct NSST that performs this transduction and has non-empty set of variables.
-      *
-      * @param alphabet
-      * @return NSST that performs this transduction and has non-empty set of variables.
-      */
-    def toSST(alphabet: Set[C]): NSST[Int, C, C, Int]
-  }
+object Transduction {
 
   case class ReplaceAll[C](target: Seq[C], word: Seq[C]) extends Transduction[C] {
 
@@ -232,4 +231,101 @@ object Constraint {
       )
     }
   }
+
+  case class ReplacePCREAll[A, X](target: PCRE[A, X], replacement: Replacement[A, X])
+      extends Transduction[A] {
+
+    override def usedAlphabet: Set[A] = target.usedChars
+
+    override def toSST(alphabet: Set[A]): NSST[Int, A, A, Int] =
+      Compiler.replaceAllSST(target, replacement, alphabet)
+
+  }
+
+  case class ReplacePCRE[A, X](target: PCRE[A, X], replacement: Replacement[A, X]) extends Transduction[A] {
+
+    override def usedAlphabet: Set[A] = target.usedChars
+
+    override def toSST(alphabet: Set[A]): NSST[Int, A, A, Int] =
+      Compiler.replaceSST(target, replacement, alphabet)
+  }
+
+}
+
+trait ParikhTransduction[C, I] {
+  def usedAlphabet: Set[C]
+  def toParikhSST(alphabet: Set[C]): ParikhSST[Int, C, C, Int, Int, I]
+}
+
+object ParikhTransduction {
+  implicit class NSSTTransductionIsParikhTransduction[C, I](trans: Transduction[C])
+      extends ParikhTransduction[C, I] {
+    def usedAlphabet: Set[C] = trans.usedAlphabet
+
+    def toParikhSST(alphabet: Set[C]): ParikhSST[Int, C, C, Int, Int, I] =
+      trans.toSST(alphabet).toParikhSST
+
+  }
+
+  case class Substr[A, I](idxName: I, lenName: I) extends ParikhTransduction[A, I] {
+
+    def usedAlphabet: Set[A] = Set.empty
+
+    def toParikhSST(alphabet: Set[A]): ParikhSST[Int, A, A, Int, Int, I] = {
+      import Presburger._
+      val X = 0
+      type T = Term[Either[I, Int]]
+      val idx: T = Var(Left(idxName))
+      val len: T = Var(Left(lenName))
+      val input: T = Var(Right(0))
+      val taken: T = Var(Right(1))
+      val sought: T = Var(Right(2))
+      val unit @ (unitX, unitL): (Update[Int, A], ParikhSST.ParikhUpdate[Int]) =
+        (Map(X -> List(Cop1(X))), Map(0 -> 1, 1 -> 0, 2 -> 0))
+      val edges = alphabet
+        .flatMap { a =>
+          val seek = (unitX, unitL + (2 -> 1))
+          val take = (Map(X -> List(Cop1(X), Cop2(a))), unitL + (1 -> 1))
+          val ignore = unit
+          Iterable(
+            (0, a, seek, 0),
+            (0, a, take, 1),
+            (1, a, take, 1),
+            (1, a, ignore, 2),
+            (2, a, ignore, 2)
+          )
+        }
+        .map { case (q, a, (mx, mh), r) => (q, a, mx, mh, r) }
+      val acceptFormulas = {
+        val idxOutOrNegLen = idx < 0 || idx >= input || len <= 0
+        Seq(
+          idxOutOrNegLen ==> (taken === 0),
+          (!idxOutOrNegLen && len <= input - idx) ==> (sought === idx && taken === len),
+          (!idxOutOrNegLen && len > input - idx) ==> (sought === idx && taken === input - idx)
+        )
+      }
+      ParikhSST[Int, A, A, Int, Int, I](
+        Set(0, 1, 2),
+        alphabet,
+        Set(X),
+        Set(0, 1, 2),
+        Set(idxName, lenName),
+        edges,
+        0,
+        (0 to 2).map((_, List(Cop1(X)), (0 to 2).map(_ -> 0).toMap)).toSet,
+        acceptFormulas
+      )
+    }
+  }
+}
+
+case class Replacement[A, X](word: Seq[Either[A, Option[X]]]) {
+  def groupVars: Set[X] = word.collect { case Right(Some(x)) => x }.toSet
+  lazy val indexed: Seq[Either[A, (Option[X], Int)]] = word
+    .foldLeft((0, Seq.empty[Either[A, (Option[X], Int)]])) {
+      case ((cur, acc), Left(a))  => (cur, Left(a) +: acc)
+      case ((cur, acc), Right(x)) => (cur + 1, (Right(x, cur)) +: acc)
+    }
+    ._2
+    .reverse
 }

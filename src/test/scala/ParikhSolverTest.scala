@@ -13,12 +13,12 @@ class ParikhSolverTest extends AnyFunSuite {
   }
   def withExecuteScript[T](print: Boolean, logger: Logger, alphabet: Set[Char])(
       reader: java.io.Reader
-  )(body: ParikhSolver => T): T = withScript(reader) { script =>
-    val solver = new ParikhSolver(print = print, logger = logger, alphabet = alphabet)
+  )(body: Solver => T): T = withScript(reader) { script =>
+    val solver = new Solver(print = print, logger = logger, alphabet = alphabet)
     solver.executeScript(script)
     body(solver)
   }
-  def withExecuteScript[T](reader: java.io.Reader)(body: ParikhSolver => T): T =
+  def withExecuteScript[T](reader: java.io.Reader)(body: Solver => T): T =
     withExecuteScript(false, logger = Logger("nop"), "ab".toSet)(reader)(body)
   def testWithInfoTime[T](testName: String, testTags: org.scalatest.Tag*)(
       testFun: => Any
@@ -33,7 +33,7 @@ class ParikhSolverTest extends AnyFunSuite {
   )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
     testWithInfoTime(s"test SAT\n${constraint.trim}") {
       withExecuteScript(new java.io.StringReader(constraint)) { solver =>
-        solver.checker().getModel() match {
+        solver.checker.getModel() match {
           // case Some((sModel, iModel)) => assertions(sModel, iModel)
           case Some(models) => info(models.toString())
           case None         => fail()
@@ -43,7 +43,7 @@ class ParikhSolverTest extends AnyFunSuite {
   def testUNSAT(constraint: String)(implicit pos: Position) =
     testWithInfoTime(s"test UNSAT\n${constraint.trim}") {
       withExecuteScript(new java.io.StringReader(constraint)) { solver =>
-        assert(solver.checker().models().isEmpty)
+        assert(solver.checker.getModel().isEmpty)
       }
     }
 
@@ -57,7 +57,7 @@ class ParikhSolverTest extends AnyFunSuite {
     }
   }
 
-  def withExecuteFile[T](fname: String)(body: ParikhSolver => T): T =
+  def withExecuteFile[T](fname: String)(body: Solver => T): T =
     withFileReader(s"constraints/bench/$fname.smt2") { reader =>
       withExecuteScript(false, Logger(s"bench.$fname"), "ab".toSet)(reader)(body)
     }
@@ -67,7 +67,7 @@ class ParikhSolverTest extends AnyFunSuite {
   )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
     testWithInfoTime(s"""test SAT: "$name"""") {
       withExecuteFile(name) { solver =>
-        solver.checker().getModel() match {
+        solver.checker.getModel() match {
           // case Some((sModel, iModel)) => assertions(sModel, iModel)
           case Some(models @ (sModel, iModel)) => info(models.toString())
           case None                            => fail()
@@ -76,7 +76,7 @@ class ParikhSolverTest extends AnyFunSuite {
     }
   def testFileUNSAT(name: String)(implicit pos: Position) =
     testWithInfoTime(s"""test UNSAT: "$name"""") {
-      withExecuteFile(name) { solver => assert(solver.checker().models().isEmpty) }
+      withExecuteFile(name) { solver => assert(solver.checker.getModel().isEmpty) }
     }
 
   testFileSAT("deleteall") { (_, _) => () }
@@ -201,7 +201,7 @@ class ParikhSolverTest extends AnyFunSuite {
 
   implicit class AtMostSubstring(s: String) {
     def atmostSubstring(idx: Int, len: Int): String = {
-      if (0 <= idx && idx < s.length && 0 < len) s.substring(idx, idx + math.min(len, s.length - idx))
+      if (0 <= idx && idx < s.length && 0 < len) s.substring(idx, idx + scala.math.min(len, s.length - idx))
       else ""
     }
   }
@@ -216,6 +216,8 @@ class ParikhSolverTest extends AnyFunSuite {
 (assert (and (<= 0 i) (< i (str.len x))))
 (assert (= y (str.substr x i 2)))
 (assert (str.in.re y (re.comp (str.to.re "ab"))))
+
+(check-sat)
 """) {
     case (sModel, iModel) =>
       val (x, y, i) = (sModel("x"), sModel("y"), iModel("i"))

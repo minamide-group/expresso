@@ -1,5 +1,6 @@
 package com.github.kmn4
 
+import com.github.kmn4.sst.math.{Cop, Cop1, Cop2, Monoid}
 import scala.collection.immutable.Queue
 
 package object sst {

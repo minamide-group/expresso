@@ -1,6 +1,8 @@
-package com.github.kmn4.sst
+package com.github.kmn4.sst.machine
 
+import com.github.kmn4.sst._
 import scala.math.max
+import com.github.kmn4.sst.math._
 
 import org.scalatest.flatspec._
 

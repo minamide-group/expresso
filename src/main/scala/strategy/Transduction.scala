@@ -1,11 +1,11 @@
-package com.github.kmn4.sst.experimental
+package com.github.kmn4.sst.strategy
 
-import com.github.kmn4.sst.ParikhSST
 import com.github.kmn4.sst.NopLogger
 import com.github.kmn4.sst.graphToMap
-import com.github.kmn4.sst.Presburger
-import com.github.kmn4.sst.Presburger.Sugar._
-import com.github.kmn4.sst.ParikhAutomaton
+import com.github.kmn4.sst.machine.ParikhAutomaton
+import com.github.kmn4.sst.machine.ParikhSST
+import com.github.kmn4.sst.math.Presburger
+import com.github.kmn4.sst.math.Presburger.Sugar._
 
 // A*(#1)...(#k-1)A*, n1, ..., nl -> A*
 trait Transduction[A, B] {

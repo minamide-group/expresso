@@ -12,5 +12,5 @@ object Main extends App {
   val parser = new smtlib.parser.Parser(lexer)
   val script = parser.parseScript
   // Ensure that alphabet includes at least 2 letters.
-  new ParikhSolver(print = false, logger = logger, alphabet = "ab".toSet).executeScript(script)
+  new Solver(print = false, logger = logger, alphabet = "ab".toSet).executeScript(script)
 }

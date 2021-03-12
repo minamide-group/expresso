@@ -1,7 +1,7 @@
-package com.github.kmn4.sst.experimental
+package com.github.kmn4.sst.strategy
 
-import com.github.kmn4.sst.Presburger
-import com.github.kmn4.sst.ParikhSST
+import com.github.kmn4.sst.math.Presburger
+import com.github.kmn4.sst.machine.ParikhSST
 
 // parikhAutomata の要素 Seq[Parikh...] を conjunction と呼ぶ
 // 条件: conjunction は非空  (TODO unique にする)
