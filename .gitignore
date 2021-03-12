@@ -10,6 +10,8 @@ target/
 .dir-locals.el
 .sbt-hydra-history
 
+/bak/
+*.bak
 /bin/
 /bench/
 /constraints

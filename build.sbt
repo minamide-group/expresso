@@ -26,3 +26,5 @@ scalacOptions ++= Seq(
   "-language:existentials",
   "-language:postfixOps"
 )
+
+coverageEnabled := true
