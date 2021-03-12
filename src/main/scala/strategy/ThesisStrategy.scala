@@ -6,86 +6,149 @@ import com.github.kmn4.sst.machine._
 import com.github.kmn4.sst.language._
 import com.github.kmn4.sst.language.Constraint._
 import com.typesafe.scalalogging.Logger
+import collection.mutable.{Map => MMap}
 
 class ThesisStrategy(logger: Logger) extends Strategy {
+  private type SolverPSST[C, I] = ParikhSST[Int, Option[C], Option[C], Int, Int, I]
 
-  override def checkSat(constraint: Input): Boolean = ???
+  private type Memo[A] = MMap[Unit, A]
 
-  override def getModel(): Output = ???
+  private implicit class MemoOps[A](m: Memo[A]) {
+    def shouldGet: A = m(())
+    def getOr(f: => A) = m.getOrElseUpdate((), f)
+  }
 
-}
+  private var sat: Memo[Boolean] = MMap.empty
 
-object ThesisStrategy {
-  // y = f(x) の形について，f が unary な場合と連接の場合とがある．
-  private implicit class ToSolverPSST[C, I](t: ParikhTransduction[C, I]) {
-    def toSolverPSST(alphabet: Set[C], lhsStringVarIdx: Int, rhsStringVarIdx: Int): SolverPSST[C, I] = {
-      sealed trait X
-      case object XIn extends X
-      case class XJ(x: Int) extends X
-      type Q = (Int, Int)
-      type A = Option[C]
-      type UpdateX = Update[X, A]
-      type UpdateL = Map[Int, Int]
-      type Edges = Iterable[(Q, A, UpdateX, UpdateL, Q)]
-      val j = rhsStringVarIdx
-      val jsst = t.toParikhSST(alphabet)
-      val xjs: Set[X] = jsst.xs.map(XJ.apply)
-      val xj = xjs.head
-      val base =
-        solverNsstTemplate[C, X](
-          lhsStringVarIdx,
-          alphabet,
-          XIn,
-          xjs,
-          List(Cop1(XIn), Cop1(xj), Cop2(None))
-        ).toParikhSST[Int, I](jsst.ls)
-      val xs = base.xs
-      val updates: Monoid[UpdateX] = updateMonoid(xs)
-      val states: Set[Q] = base.states - ((j, 0)) ++ jsst.states.map((j, _))
-      val edges: Edges = {
-        val baseNoJ = base.edges.filter {
-          case (q, a, m, v, r) => (q._1 != j) && (r._1 != j)
+  private var witnessVector: Memo[Option[(Map[String, Int], Map[Int, Int])]] = MMap.empty
+
+  private var psst: Memo[SolverPSST[Char, String]] = MMap.empty
+
+  private var models: Memo[Output] = MMap.empty
+
+  override def checkSat(constraint: Input): Boolean =
+    sat.getOr {
+      val Input(alphabet, stringVarNumber, intVars, assignments, assertions, arithFormulas) = constraint
+      val maxVar = stringVarNumber - 1
+      psst(()) = {
+        val asgnPSSTs = assignments.map(a => assignmentToPSST(a, alphabet))
+        val idxLangs = assertions.groupMap(_.stringVar)(_.lang)
+        val lastPSST = {
+          val p = compileParikhAssertions(idxLangs, alphabet, maxVar)
+          val is = arithFormulas.flatMap(_.freeVars)
+          val formulas = arithFormulas.map(_.renameVars[Either[String, Int]](Left.apply))
+          p.copy(is = p.is ++ is, acceptFormulas = p.acceptFormulas ++ formulas)
         }
-        def unit(a: A): UpdateX = updates.unit + (XIn -> List(Cop1(XIn), Cop2(a)))
-        def reset(a: A): UpdateX = xs.map(_ -> Nil).toMap + (XIn -> List(Cop1(XIn), Cop2(a)))
-        val toJ =
-          ((j - 1, 0), None, unit(None), jsst.ls.map(_ -> 0).toMap, (j, jsst.q0))
-        def embedList(l: Cupstar[Int, C]): Cupstar[X, A] = l.map(_.map1(XJ.apply)).map(_.map2(Option.apply))
-        def embedUpdate(m: Update[Int, C]): Update[X, A] = m.map { case (x, l) => XJ(x) -> embedList(l) }
-        val withinJ: Edges = jsst.edges.map {
-          case (q, a, m, v, r) =>
-            (((j, q), Some(a), embedUpdate(m) + (XIn -> List(Cop1(XIn), Cop2(Some(a)))), v, (j, r)))
+        logger.trace("got the following PSSTs:")
+        (asgnPSSTs :+ lastPSST).zipWithIndex.foreach {
+          case (psst, i) => logger.trace(s"#$i: ${psst.sizes}")
         }
-        val fromJ: Edges =
-          for ((qf, s) <- jsst.outF; (l, v) <- s)
-            yield ((j, qf), None, reset(None) + (xj -> embedList(l)), v, (j + 1, 0))
-
-        baseNoJ + toJ ++ withinJ ++ fromJ
+        val pssts = asgnPSSTs :+ lastPSST
+        pssts.reduceLeft[SolverPSST[Char, String]] {
+          case (acc, p) =>
+            logger.trace(s"compose ${acc.sizes} and ${p.sizes}")
+            (acc compose p).renamed
+        }
       }
-
-      ParikhSST[Q, A, A, X, Int, I](
-        states,
-        base.inSet,
-        xs ++ xjs,
-        jsst.ls,
-        jsst.is,
-        edges.toSet,
-        if (j == 0) (j, jsst.q0) else (0, 0),
-        base.outGraph,
-        jsst.acceptFormulas
-      ).renamed
+      witnessVector.getOr(psst(()).ilVectorOption).nonEmpty
     }
+
+  override def getModel(): Output =
+    models.getOr {
+      val p = psst.shouldGet
+      witnessVector.shouldGet.map {
+        case (iv, lv) =>
+          val (_, output) = p.inputOutputFor(lv)
+          val ss = parseStrModel(output)
+          (ss, iv)
+      }
+    }
+
+  private def parseStrModel(output: Seq[Option[Char]]): Seq[String] = {
+    var buf = output
+    var idx = 0
+    var res = Seq.empty[String]
+    while (buf.nonEmpty) {
+      val took = buf.takeWhile(_.nonEmpty).flatten.mkString
+      buf = buf.drop(took.length + 1)
+      res :+= took
+      idx += 1
+    }
+    res
+  }
+
+  // y = f(x) の形について，f が unary な場合と連接の場合とがある．
+  private def transToSolverPSST[C, I](
+      t: ParikhTransduction[C, I],
+      alphabet: Set[C],
+      lhsStringVarIdx: Int,
+      rhsStringVarIdx: Int
+  ): SolverPSST[C, I] = {
+    sealed trait X
+    case object XIn extends X
+    case class XJ(x: Int) extends X
+    type Q = (Int, Int)
+    type A = Option[C]
+    type UpdateX = Update[X, A]
+    type UpdateL = Map[Int, Int]
+    type Edges = Iterable[(Q, A, UpdateX, UpdateL, Q)]
+    val j = rhsStringVarIdx
+    val jsst = t.toParikhSST(alphabet)
+    val xjs: Set[X] = jsst.xs.map(XJ.apply)
+    val xj = xjs.head
+    val base =
+      solverNsstTemplate[C, X](
+        lhsStringVarIdx,
+        alphabet,
+        XIn,
+        xjs,
+        List(Cop1(XIn), Cop1(xj), Cop2(None))
+      ).toParikhSST[Int, I](jsst.ls)
+    val xs = base.xs
+    val updates: Monoid[UpdateX] = updateMonoid(xs)
+    val states: Set[Q] = base.states - ((j, 0)) ++ jsst.states.map((j, _))
+    val edges: Edges = {
+      val baseNoJ = base.edges.filter {
+        case (q, a, m, v, r) => (q._1 != j) && (r._1 != j)
+      }
+      def unit(a: A): UpdateX = updates.unit + (XIn -> List(Cop1(XIn), Cop2(a)))
+      def reset(a: A): UpdateX = xs.map(_ -> Nil).toMap + (XIn -> List(Cop1(XIn), Cop2(a)))
+      val toJ =
+        ((j - 1, 0), None, unit(None), jsst.ls.map(_ -> 0).toMap, (j, jsst.q0))
+      def embedList(l: Cupstar[Int, C]): Cupstar[X, A] = l.map(_.map1(XJ.apply)).map(_.map2(Option.apply))
+      def embedUpdate(m: Update[Int, C]): Update[X, A] = m.map { case (x, l) => XJ(x) -> embedList(l) }
+      val withinJ: Edges = jsst.edges.map {
+        case (q, a, m, v, r) =>
+          (((j, q), Some(a), embedUpdate(m) + (XIn -> List(Cop1(XIn), Cop2(Some(a)))), v, (j, r)))
+      }
+      val fromJ: Edges =
+        for ((qf, s) <- jsst.outF; (l, v) <- s)
+          yield ((j, qf), None, reset(None) + (xj -> embedList(l)), v, (j + 1, 0))
+
+      baseNoJ + toJ ++ withinJ ++ fromJ
+    }
+
+    ParikhSST[Q, A, A, X, Int, I](
+      states,
+      base.inSet,
+      xs ++ xjs,
+      jsst.ls,
+      jsst.is,
+      edges.toSet,
+      if (j == 0) (j, jsst.q0) else (0, 0),
+      base.outGraph,
+      jsst.acceptFormulas
+    ).renamed
   }
 
   private def assignmentToPSST(
-      assignment: AtomicAssignment[String],
-      varIdx: Map[String, Int],
+      assignment: AtomicAssignment[Int],
       alphabet: Set[Char]
   ): SolverPSST[Char, String] = assignment match {
     case ParikhAssignment(lhsStringVar, trans, rhsStringVar) =>
-      trans.toSolverPSST(alphabet, varIdx(lhsStringVar), varIdx(rhsStringVar))
+      transToSolverPSST(trans, alphabet, lhsStringVar, rhsStringVar)
     case CatAssignment(lhsStringVar, wordAndVars) =>
-      concatNSST(varIdx(lhsStringVar), wordAndVars.map(_.map(varIdx)), alphabet).toParikhSST
+      concatNSST(lhsStringVar, wordAndVars, alphabet).toParikhSST
   }
 
   /** Returns `alphabet` to `alphabet` NSST whose state set is {(0, 0), ... (n, 0)}

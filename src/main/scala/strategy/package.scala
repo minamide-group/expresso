@@ -41,6 +41,5 @@ package object strategy {
   private[strategy] type GlobalFormulas[I] = Seq[Presburger.Formula[I]]
   // PreImage は実際のところ LazyList
   private[strategy] type PreImage[Q, A, L, I] = Seq[(Seq[IdentifiedPA[Q, A, L, I]], GlobalFormulas[I])]
-  private[strategy] type SolverPSST[C, I] = ParikhSST[Int, Option[C], Option[C], Int, Int, I]
 
 }

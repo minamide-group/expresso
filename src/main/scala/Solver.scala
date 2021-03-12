@@ -27,6 +27,7 @@ import smtlib.trees.{Commands => SMTCommands}
 import smtlib.trees.{Terms => SMTTerms}
 
 class Solver(
+    val checker: strategy.Strategy,
     print: Boolean = false,
     logger: Logger = Logger("nop"),
     alphabet: Set[Char] = Set.empty // ADDED to the alphabet of constraints
@@ -67,8 +68,6 @@ class Solver(
   }
 
   def printLine(x: Any): Unit = if (print) println(x)
-
-  val checker = new strategy.PreImageStrategy(logger)
 
   def checkSat(): Unit = {
     // FIXME Set.empty

@@ -3,8 +3,13 @@ package com.github.kmn4.sst
 import com.typesafe.scalalogging.Logger
 import org.scalactic.source.Position
 import org.scalatest.funsuite._
+import com.github.kmn4.sst.strategy.Strategy
+import com.github.kmn4.sst.strategy.ThesisStrategy
+import com.github.kmn4.sst.strategy.PreImageStrategy
 
 class ParikhSolverTest extends AnyFunSuite {
+  val strategy = (logger: Logger) => new PreImageStrategy(logger)
+
   def withScript[T](reader: java.io.Reader)(body: smtlib.trees.Commands.Script => T): T = {
     val lexer = new smtlib.lexer.Lexer(reader)
     val parser = new smtlib.parser.Parser(lexer)
@@ -14,7 +19,7 @@ class ParikhSolverTest extends AnyFunSuite {
   def withExecuteScript[T](print: Boolean, logger: Logger, alphabet: Set[Char])(
       reader: java.io.Reader
   )(body: Solver => T): T = withScript(reader) { script =>
-    val solver = new Solver(print = print, logger = logger, alphabet = alphabet)
+    val solver = new Solver(checker = strategy(logger), print = print, logger = logger, alphabet = alphabet)
     solver.executeScript(script)
     body(solver)
   }

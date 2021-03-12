@@ -1,9 +1,8 @@
-package com.github.kmn4.sst
+package com.github.kmn4.sst.strategy
 
 import org.scalatest.funsuite._
 
 import com.github.kmn4.sst.language.Constraint._
-import com.github.kmn4.sst.strategy.ThesisStrategy._
 import com.github.kmn4.sst.machine.NSST
 
 class SolverTest extends AnyFunSuite {
