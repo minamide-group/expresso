@@ -65,7 +65,7 @@ class PreImageStrategy(logger: Logger) extends Strategy {
   // TODO これは Solver 側
   def parseIntModel(iv: Map[String, Int]): Map[String, Int] =
     iv.collect { case (name, value) if name.indexOf("user_") == 0 => name.drop(5) -> value }
-  var models: Output = None
+  private var models: Output = None
   override def checkSat(constraint: Input): Boolean = {
     val config = organize(constraint)
     val relGen = iteratePreImage(config)
@@ -80,86 +80,87 @@ class PreImageStrategy(logger: Logger) extends Strategy {
   }
   override def getModel(): Output = models
 
-  type PST = ParikhSST[Int, Either[Char, Int], Char, Int, Int, String]
-  type SolverPR[C, I] = ParikhRelation[Int, C, Int, I]
+  private type PST = ParikhSST[Int, Either[Char, Int], Char, Int, Int, String]
+  private type SolverPR[C, I] = ParikhRelation[Int, C, Int, I]
 
-  def assingmentToPSST[S](assignment: AtomicAssignment[S], alphabet: Set[Char]): PST = assignment match {
-    case ParikhAssignment(_, trans, _) => {
-      val psst = trans.toParikhSST(alphabet)
-      psst.copy(
-        inSet = psst.inSet.map(Left.apply),
-        edges = psst.edges.map(e => e.copy(_2 = Left(e._2)))
-      )
-    }
-    case CatAssignment(_, wordAndVars) => {
-      // TODO wordsAndVars が少なくとも1つの文字列変数を含むことを仮定している点を緩和
-      type Q = Int
-      type A = Either[Char, Int]
-      type B = Char
-      type X = Unit
-      type E = NSST.Edge[Q, A, B, X]
-      type O = NSST.Out[Q, X, B]
-      val depSize: Int = assignment.dependeeVars.size
-      val states: Set[Q] = (0 until depSize).toSet
-      val inSet: Set[A] = alphabet.map(Left.apply) ++ (0 to depSize - 2).map(Right.apply).toSet
-      // w0 x0 w1 ... wn-1 xn-1 wn のときの w0 ... wn
-      val words: Seq[Seq[Char]] = {
-        wordAndVars.foldRight(List(Seq.empty[B])) {
-          case (Left(s), h :: rst) => (s ++ h) :: rst
-          case (Right(_), acc)     => Nil :: acc
-          case _                   => throw new Exception("This cannot be the case")
+  private def assingmentToPSST[S](assignment: AtomicAssignment[S], alphabet: Set[Char]): PST =
+    assignment match {
+      case ParikhAssignment(_, trans, _) => {
+        val psst = trans.toParikhSST(alphabet)
+        psst.copy(
+          inSet = psst.inSet.map(Left.apply),
+          edges = psst.edges.map(e => e.copy(_2 = Left(e._2)))
+        )
+      }
+      case CatAssignment(_, wordAndVars) => {
+        // TODO wordsAndVars が少なくとも1つの文字列変数を含むことを仮定している点を緩和
+        type Q = Int
+        type A = Either[Char, Int]
+        type B = Char
+        type X = Unit
+        type E = NSST.Edge[Q, A, B, X]
+        type O = NSST.Out[Q, X, B]
+        val depSize: Int = assignment.dependeeVars.size
+        val states: Set[Q] = (0 until depSize).toSet
+        val inSet: Set[A] = alphabet.map(Left.apply) ++ (0 to depSize - 2).map(Right.apply).toSet
+        // w0 x0 w1 ... wn-1 xn-1 wn のときの w0 ... wn
+        val words: Seq[Seq[Char]] = {
+          wordAndVars.foldRight(List(Seq.empty[B])) {
+            case (Left(s), h :: rst) => (s ++ h) :: rst
+            case (Right(_), acc)     => Nil :: acc
+            case _                   => throw new Exception("This cannot be the case")
+          }
         }
+        val edges: Set[E] = {
+          val loop: Iterable[E] =
+            for {
+              i <- 0 to depSize - 1
+              a <- alphabet
+            } yield {
+              val adding = List(Cop1(()), Cop2(a))
+              val m = Map(() -> adding)
+              (i, Left(a), m, i)
+            }
+          val next: Iterable[E] =
+            (0 to depSize - 2).map { i =>
+              val xbs = Cop1(()) :: words(i + 1).map(Cop2.apply).toList
+              val m = Map(() -> xbs)
+              (i, Right(i), m, i + 1)
+            }
+          (loop ++ next).toSet
+        }
+        val outGraph: Set[O] = {
+          val added: Cupstar[X, B] =
+            (words(0).map(Cop2.apply) ++ Seq(Cop1(())) ++ words.last.map(Cop2.apply)).toList
+          Set((depSize - 1, added))
+        }
+        NSST(
+          states,
+          inSet,
+          Set(()),
+          edges,
+          0,
+          graphToMap(outGraph)(identity)
+        ).renamed.toParikhSST
       }
-      val edges: Set[E] = {
-        val loop: Iterable[E] =
-          for {
-            i <- 0 to depSize - 1
-            a <- alphabet
-          } yield {
-            val adding = List(Cop1(()), Cop2(a))
-            val m = Map(() -> adding)
-            (i, Left(a), m, i)
-          }
-        val next: Iterable[E] =
-          (0 to depSize - 2).map { i =>
-            val xbs = Cop1(()) :: words(i + 1).map(Cop2.apply).toList
-            val m = Map(() -> xbs)
-            (i, Right(i), m, i + 1)
-          }
-        (loop ++ next).toSet
-      }
-      val outGraph: Set[O] = {
-        val added: Cupstar[X, B] =
-          (words(0).map(Cop2.apply) ++ Seq(Cop1(())) ++ words.last.map(Cop2.apply)).toList
-        Set((depSize - 1, added))
-      }
-      NSST(
-        states,
-        inSet,
-        Set(()),
-        edges,
-        0,
-        graphToMap(outGraph)(identity)
-      ).renamed.toParikhSST
     }
-  }
 
-  implicit class AssignmentToPSST[S](assignment: AtomicAssignment[S]) {
+  private implicit class AssignmentToPSST[S](assignment: AtomicAssignment[S]) {
     def toExpPST(alphabet: Set[Char]): PST = assingmentToPSST(assignment, alphabet)
   }
 
-  case class PreImagable(pst: PST, rhs: Seq[Int])
+  private case class PreImagable(pst: PST, rhs: Seq[Int])
 
   // 条件: transductions は lhs について昇順
   // 条件: relation の PA は lhs について昇順で，0 から順にならぶ
-  case class Configuration(
+  private case class Configuration(
       transductions: Seq[PreImagable],
       relation: ParikhRelation[Int, Char, Int, String]
   )
 
   // トランスダクション，言語，整数制約を PST と PR にまとめる
   // NOTE assignments は左辺変数でソート済みと仮定
-  def organize(constraint: Input): Configuration = {
+  private def organize(constraint: Input): Configuration = {
     // val Triple(assignments, assertions, _) = triple
     val maxVar = constraint.stringVarNumber - 1
     val alphabet = constraint.alphabet
@@ -182,7 +183,7 @@ class PreImageStrategy(logger: Logger) extends Strategy {
 
   // transductions が非空である間 relation の逆像を計算する
   // disjunction が現れると非決定的な選択をする．この非決定性は Iterator が表している．
-  def iteratePreImage(config: Configuration): Iterator[ParikhRelation[Int, Char, Int, String]] = {
+  private def iteratePreImage(config: Configuration): Iterator[ParikhRelation[Int, Char, Int, String]] = {
     import Transduction._
     val Configuration(ts, rel) = config
     ts.foldRight(LazyList(rel)) {

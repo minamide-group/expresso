@@ -6,7 +6,7 @@ import com.github.kmn4.sst.machine.ParikhSST
 // parikhAutomata の要素 Seq[Parikh...] を conjunction と呼ぶ
 // 条件: conjunction は非空  (TODO unique にする)
 // TODO あるいは, unique だと思う Strategy とそうでないものとを用意して比較する
-case class ParikhRelation[Q, A, L, I](
+private case class ParikhRelation[Q, A, L, I](
     parikhAutomata: Seq[Seq[IdentifiedPA[Q, A, L, I]]],
     globalFormulas: GlobalFormulas[I]
 ) {
@@ -26,7 +26,7 @@ case class ParikhRelation[Q, A, L, I](
   }
 }
 
-object ParikhRelation {
+private object ParikhRelation {
   type PA[A, I] = IdentifiedPA[Int, A, Int, I]
 
   // 入力: [((PA, ..., PA), phi)] -- 「右辺の変数が属すべき言語と大域整数制約の組」のリスト

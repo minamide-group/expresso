@@ -8,14 +8,14 @@ import com.github.kmn4.sst.math.Presburger
 import com.github.kmn4.sst.math.Presburger.Sugar._
 
 // A*(#1)...(#k-1)A*, n1, ..., nl -> A*
-trait Transduction[A, B] {
+private trait Transduction[A, B] {
   // pa の逆像を計算する
   // maxID がいまある最大の ID．
   // 新しく使う ID はこれよりも大きくする．
   def preImage[R, K](pa: IdentifiedPA[R, B, K, String], maxID: Int): PreImage[Int, A, Int, String]
 }
 
-object Transduction {
+private object Transduction {
   // psst の定義域は w_0 #_0 ... #_n-2 w_n-1 の形をした文字列の集合
   implicit class ParikhTransduction[Q, A, B, X, L](
       psst: ParikhSST[Q, Either[A, Int], B, X, L, String]
