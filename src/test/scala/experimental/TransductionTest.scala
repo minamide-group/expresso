@@ -3,6 +3,7 @@ package com.github.kmn4.sst.experimental
 import com.github.kmn4.sst.math._
 import com.github.kmn4.sst.machine._
 import com.github.kmn4.sst.Solver
+import com.github.kmn4.sst.language._
 import com.github.kmn4.sst.language.Constraint._
 import com.github.kmn4.sst.strategy.IdentifiedPA
 import com.github.kmn4.sst.strategy.Transduction

@@ -98,7 +98,7 @@ class ParikhSSTTest extends AnyFunSuite {
   }
 
   test("Compose replaceAll and substr") {
-    val replaceAll = Constraint.ReplaceAll("aab", "abc").toSST("abcd".toSet).toParikhSST[String, String]
+    val replaceAll = Transduction.ReplaceAll("aab", "abc").toSST("abcd".toSet).toParikhSST[String, String]
     val composed = replaceAll compose substr1
     implicit def conv(n: (Int, Int)): Map[String, Int] = n match {
       case (i, l) => Map("i" -> i, "l" -> l)
@@ -116,7 +116,7 @@ class ParikhSSTTest extends AnyFunSuite {
     ParikhLanguage.IndexOfConst(word, 0, i).toParikhAutomaton("abcd".toSet).toParikhSST
 
   test("Compose replaceAll and indexOf") {
-    val replaceAll = Constraint.ReplaceAll("aab", "abc").toSST("abcd".toSet).toParikhSST[String, String]
+    val replaceAll = Transduction.ReplaceAll("aab", "abc").toSST("abcd".toSet).toParikhSST[String, String]
     val indexOfAB = indexOf0("ab", "i")
     testExamples(indexOfAB)(
       Seq(

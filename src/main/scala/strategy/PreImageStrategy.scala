@@ -4,7 +4,6 @@ import com.microsoft.z3
 import com.github.kmn4.sst._
 import com.github.kmn4.sst.math._
 import com.github.kmn4.sst.machine._
-import com.github.kmn4.sst.language._
 import com.github.kmn4.sst.language.Constraint._
 import com.typesafe.scalalogging.Logger
 

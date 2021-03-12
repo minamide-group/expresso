@@ -2,6 +2,7 @@ package com.github.kmn4.sst
 
 import com.github.kmn4.sst.Solver._
 import com.github.kmn4.sst.language.Constraint._
+import com.github.kmn4.sst.language.RegExp._
 import com.github.kmn4.sst.language._
 import com.github.kmn4.sst.machine._
 import com.github.kmn4.sst.math.Presburger.Sugar._
@@ -133,8 +134,8 @@ class Solver(
 
   type SolverOption = Unit
 
-  def expectPCRE(t: SMTTerm): Replacer.PCRE[Char, Int] = {
-    type RE = Replacer.PCRE[Char, Int]
+  def expectPCRE(t: SMTTerm): PCRE[Char, Int] = {
+    type RE = PCRE[Char, Int]
     var group = 0
     def nextGroup(): Int = {
       group += 1
@@ -142,27 +143,27 @@ class Solver(
     }
     def aux(t: SMTTerm): RE = t match {
       case SimpleApp("str.to_pcre", Seq(SString(w))) =>
-        w.map[RE](c => Replacer.PCRE.Chars(Set(c)))
-          .fold[Replacer.PCRE[Char, Int]](Replacer.PCRE.Eps())(Replacer.PCRE.Cat.apply)
-      case SimpleApp("pcre.alt", ts)   => ts.map(aux).reduce[RE](Replacer.PCRE.Alt.apply)
-      case SimpleApp("pcre.++", ts)    => ts.map(aux).reduce[RE](Replacer.PCRE.Cat.apply)
-      case SimpleApp("pcre.*", Seq(t)) => Replacer.PCRE.Greedy(aux(t))
+        w.map[RE](c => PCRE.Chars(Set(c)))
+          .fold[PCRE[Char, Int]](PCRE.Eps())(PCRE.Cat.apply)
+      case SimpleApp("pcre.alt", ts)   => ts.map(aux).reduce[RE](PCRE.Alt.apply)
+      case SimpleApp("pcre.++", ts)    => ts.map(aux).reduce[RE](PCRE.Cat.apply)
+      case SimpleApp("pcre.*", Seq(t)) => PCRE.Greedy(aux(t))
       case SimpleApp("pcre.+", Seq(t)) =>
         val pcre = aux(t)
-        Replacer.PCRE.Cat(pcre, Replacer.PCRE.Greedy(pcre))
-      case SimpleApp("pcre.*?", Seq(t)) => Replacer.PCRE.NonGreedy(aux(t))
+        PCRE.Cat(pcre, PCRE.Greedy(pcre))
+      case SimpleApp("pcre.*?", Seq(t)) => PCRE.NonGreedy(aux(t))
       case SimpleApp("pcre.group", Seq(t)) =>
         val group = nextGroup()
-        Replacer.PCRE.Group(aux(t), group)
-      case SimpleQualID("pcre.allchar") => Replacer.PCRE.AllChar()
+        PCRE.Group(aux(t), group)
+      case SimpleQualID("pcre.allchar") => PCRE.AllChar()
       case _                            => throw new Exception(s"${t.getPos}: PCRE expected but found: $t")
     }
     aux(t)
   }
 
-  def expectReplacement(t: SMTTerm): Replacer.Replacement[Char, Int] = t match {
+  def expectReplacement(t: SMTTerm): Replacement[Char, Int] = t match {
     case SimpleApp("pcre.replacement", ts) =>
-      Replacer.Replacement(
+      Replacement(
         ts.flatMap {
           case SString(w)            => w.map(Left.apply)
           case SNumeral(i) if i == 0 => Seq(Right(None))
@@ -172,6 +173,8 @@ class Solver(
       )
     case _ => throw new Exception(s"${t.getPos}: PCRE Replacement expected but found: $t")
   }
+
+  implicit def formula2constraint(f: Presburger.Formula[String]): ParikhConstraint = PureIntConstraint(f)
 
   // arbitrary int expression.
   // ex. (+ (str.indexof x "a" 0) 1) => Add(temp_i, 1), [x ∈ IndexOfFromZero("a", temp_i)]
@@ -231,10 +234,11 @@ class Solver(
       val (pt1, cs1) = expectInt(t1)
       val (pt2, cs2) = expectInt(t2)
       val (from, len) = (freshTemp(), freshTemp())
+      val intc = Seq[ParikhConstraint](pt1 === Presburger.Var(from), pt2 === Presburger.Var(len))
       (
         rhsVar,
         ParikhTransduction.Substr(from, len),
-        cs1 ++ cs2 ++ Seq(pt1 === Presburger.Var(from), pt2 === Presburger.Var(len))
+        cs1 ++ cs2 ++ intc
       )
     case _ => throw new Exception(s"${t.getPos}: Cannot interpret given S-expression ${t} as transduction")
   }
@@ -261,23 +265,23 @@ class Solver(
     def unapply(e: SMTTerm): Option[(String, Transduction[Char])] =
       e match {
         case SimpleApp("str.replaceall", Seq(SimpleQualID(name), SString(target), SString(word))) =>
-          Some((name, ReplaceAll(target, word)))
+          Some((name, Transduction.ReplaceAll(target, word)))
         case SimpleApp("str.replace_all", Seq(SimpleQualID(name), SString(target), SString(word))) =>
-          Some((name, ReplaceAll(target, word)))
+          Some((name, Transduction.ReplaceAll(target, word)))
         case SimpleApp("str.replace_some", Seq(SimpleQualID(name), SString(target), SString(word))) =>
-          Some((name, ReplaceSome(target, word)))
+          Some((name, Transduction.ReplaceSome(target, word)))
         case Strings.At(SimpleQualID(name), SimpleQualID(pos)) =>
-          Some((name, At(pos.toInt)))
+          Some((name, Transduction.At(pos.toInt)))
         case SimpleApp("str.replace_pcre", Seq(SimpleQualID(name), pcre, replacement)) =>
-          Some((name, Replacer.ReplacePCRE(expectPCRE(pcre), expectReplacement(replacement))))
+          Some((name, Transduction.ReplacePCRE(expectPCRE(pcre), expectReplacement(replacement))))
         case SimpleApp("str.replace_pcre_all", Seq(SimpleQualID(name), pcre, replacement)) =>
-          Some((name, Replacer.ReplacePCREAll(expectPCRE(pcre), expectReplacement(replacement))))
+          Some((name, Transduction.ReplacePCREAll(expectPCRE(pcre), expectReplacement(replacement))))
         case SimpleApp("str.insert", Seq(SimpleQualID(name), SNumeral(pos), SString(word))) =>
-          Some((name, Insert(pos.toInt, word)))
+          Some((name, Transduction.Insert(pos.toInt, word)))
         case SimpleApp("str.reverse", Seq(SimpleQualID(name))) =>
-          Some((name, Reverse()))
+          Some((name, Transduction.Reverse()))
         case Strings.Substring(SimpleQualID(name), SNumeral(from), SNumeral(len)) =>
-          Some((name, Substr(from.toInt, len.toInt)))
+          Some((name, Transduction.Substr(from.toInt, len.toInt)))
         case _ => None
       }
   }
@@ -295,7 +299,7 @@ class Solver(
       (Ints.GreaterThan, Presburger.Gt _),
       (Ints.GreaterEquals, Presburger.Ge _)
     )
-    def unapply(t: SMTTerm): Option[(PureIntConstraint, Seq[ParikhConstraint])] = {
+    def unapply(t: SMTTerm): Option[(Presburger.Formula[String], Seq[ParikhConstraint])] = {
       val binOpt = binary.find { case (op, _) => op.unapply(t).nonEmpty }.map {
         case (op, constructor) =>
           val Some((t1, t2)) = op.unapply(t)
@@ -353,7 +357,7 @@ class Solver(
     case IntConstraint(f, cs) => (f, cs)
     case Strings.InRegex(SimpleQualID(name), t) =>
       val re = expectRegExp(t)
-      (ParikhAssertion(name, re), Seq.empty)
+      (ParikhAssertion(name, ParikhLanguage.FromRegExp(re)), Seq.empty)
     case _ => throw new Exception(s"${t.getPos}: Unsupported assertion: ${t}")
   }
 
@@ -389,9 +393,9 @@ class Solver(
       val used = constraints.flatMap(_.usedAlphabet).toSet
       used ++ additionalAlphabet
     }
-    val assignments = constraints.collect { case a: AtomicAssignment[String]         => a.renameVars(varIdx) }
-    val assertions = constraints.collect { case a: ParikhAssertion[String]           => a.renameVars(varIdx) }
-    val arithFormula = constraints.collect { case IntConstraintIsParikhConstraint(f) => f }
+    val assignments = constraints.collect { case a: AtomicAssignment[String] => a.renameVars(varIdx) }
+    val assertions = constraints.collect { case a: ParikhAssertion[String]   => a.renameVars(varIdx) }
+    val arithFormula = constraints.collect { case PureIntConstraint(f)       => f }
     strategy.Input(
       alphabet,
       stringVars.length,
@@ -401,10 +405,5 @@ class Solver(
       arithFormula
     )
   }
-
-}
-
-object Solver {
-  case class SolverOption(print: Boolean = true, logger: Logger = Logger("nop"))
 
 }

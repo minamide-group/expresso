@@ -1,11 +1,13 @@
-package com.github.kmn4.sst
+package com.github.kmn4.sst.language
 
 import org.scalatest.funsuite._
 
-import com.github.kmn4.sst.language.Replacer.PCRE._
-import com.github.kmn4.sst.language.Replacer._
+import com.github.kmn4.sst.language.PCRE._
 
 class ReplacerTest extends AnyFunSuite {
+  private type ParsedChar[A, X] = PCRE[A, X]#ParsedChar
+  private type Parsed[A, X] = PCRE[A, X]#Parsed
+
   def empty: PCRE[Char, String] = Empty()
   def eps: PCRE[Char, String] = Eps()
   implicit def chars(s: String): PCRE[Char, String] = Chars(s.toSet)

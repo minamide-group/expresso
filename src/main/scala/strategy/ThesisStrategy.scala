@@ -227,7 +227,7 @@ object ThesisStrategy {
     val idxRegularsParikhs = {
       assertions.map {
         case (i, langs) =>
-          val rs = langs.collect { case (l: ParikhLanguage.FromRegExp[Char, String]) => l.re }
+          val rs = langs.collect { case ParikhLanguage.FromRegExp(re) => re }
           val ps = langs.filterNot(_.isInstanceOf[ParikhLanguage.FromRegExp[Char, String]])
           i -> (rs, ps)
       }
