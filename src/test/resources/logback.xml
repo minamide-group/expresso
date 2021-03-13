@@ -8,7 +8,7 @@
     <appender name="file" class="ch.qos.logback.core.FileAppender">
         <file>./constraints/bench/log</file>
         <encoder>
-            <pattern>%date{MM-dd HH:mm:ss.SSS} %logger{0} - %msg%n</pattern>
+            <pattern>%date{MM-dd HH:mm:ss.SSS} %class{0} %logger{0} - %msg%n</pattern>
         </encoder>
     </appender>
 

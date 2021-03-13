@@ -6,113 +6,129 @@ import org.scalatest.funsuite._
 import com.github.kmn4.sst.strategy.Strategy
 import com.github.kmn4.sst.strategy.ThesisStrategy
 import com.github.kmn4.sst.strategy.PreImageStrategy
+import java.io.Reader
 
 class ParikhSolverTest extends AnyFunSuite {
-  val strategy = (logger: Logger) => new PreImageStrategy(logger)
+  val strategySpecs = Seq(
+    // ("thesis", new ThesisStrategy(_)),
+    ("preimage", new PreImageStrategy(_))
+  )
 
-  def withScript[T](reader: java.io.Reader)(body: smtlib.trees.Commands.Script => T): T = {
-    val lexer = new smtlib.lexer.Lexer(reader)
-    val parser = new smtlib.parser.Parser(lexer)
-    val script = parser.parseScript
-    body(script)
+  for ((name, constr) <- strategySpecs) {
+    runTests(name, constr)
   }
-  def withExecuteScript[T](print: Boolean, logger: Logger, alphabet: Set[Char])(
-      reader: java.io.Reader
-  )(body: Solver => T): T = withScript(reader) { script =>
-    val solver = new Solver(checker = strategy(logger), print = print, logger = logger, alphabet = alphabet)
-    solver.executeScript(script)
-    body(solver)
-  }
-  def withExecuteScript[T](reader: java.io.Reader)(body: Solver => T): T =
-    withExecuteScript(false, logger = Logger("nop"), "ab".toSet)(reader)(body)
-  def testWithInfoTime[T](testName: String, testTags: org.scalatest.Tag*)(
-      testFun: => Any
-  )(implicit pos: Position): Unit = test(testName, testTags: _*) {
-    val started = System.nanoTime()
-    testFun
-    val finished = System.nanoTime()
-    info(s"Took ${(finished - started) / 1000000} ms")
-  }
-  def testSAT(
-      constraint: String
-  )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
-    testWithInfoTime(s"test SAT\n${constraint.trim}") {
-      withExecuteScript(new java.io.StringReader(constraint)) { solver =>
-        solver.checker.getModel() match {
-          // case Some((sModel, iModel)) => assertions(sModel, iModel)
-          case Some(models) => info(models.toString())
-          case None         => fail()
+
+  def runTests(strategyName: String, strategyConstructor: Logger => Strategy) = {
+
+    def withScript[T](reader: java.io.Reader)(body: smtlib.trees.Commands.Script => T): T = {
+      val lexer = new smtlib.lexer.Lexer(reader)
+      val parser = new smtlib.parser.Parser(lexer)
+      val script = parser.parseScript
+      body(script)
+    }
+    def withExecuteScript[T](strategy: Strategy, print: Boolean, logger: Logger, alphabet: Set[Char])(
+        reader: java.io.Reader
+    )(body: Solver => T): T = withScript(reader) { script =>
+      val solver = new Solver(checker = strategy, print = print, logger = logger, alphabet = alphabet)
+      solver.executeScript(script)
+      body(solver)
+    }
+    def withExecuteScriptNoPrint[T](reader: java.io.Reader)(body: Solver => T): T = {
+
+      val logger = Logger("nop")
+      val strategy = strategyConstructor(logger)
+      withExecuteScript(strategy, false, logger = logger, "ab".toSet)(reader)(body)
+    }
+    def testWithInfoTime[T](testName: String, testTags: org.scalatest.Tag*)(
+        testFun: => Any
+    )(implicit pos: Position): Unit = test(testName, testTags: _*) {
+      val started = System.nanoTime()
+      testFun
+      val finished = System.nanoTime()
+      info(s"Took ${(finished - started) / 1000000} ms")
+    }
+    def testSAT(
+        constraint: String
+    )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
+      testWithInfoTime(s"[$strategyName] test SAT\n${constraint.trim}") {
+        withExecuteScriptNoPrint(new java.io.StringReader(constraint)) { solver =>
+          solver.checker.getModel() match {
+            // case Some((sModel, iModel)) => assertions(sModel, iModel)
+            case Some(models) => info(models.toString())
+            case None         => fail()
+          }
         }
       }
-    }
-  def testUNSAT(constraint: String)(implicit pos: Position) =
-    testWithInfoTime(s"test UNSAT\n${constraint.trim}") {
-      withExecuteScript(new java.io.StringReader(constraint)) { solver =>
-        assert(solver.checker.getModel().isEmpty)
-      }
-    }
-
-  def withFileReader[T](fname: String)(body: java.io.FileReader => T): T = {
-    val path = java.nio.file.FileSystems.getDefault().getPath(fname)
-    val reader = new java.io.FileReader(path.toFile())
-    try {
-      body(reader)
-    } finally {
-      reader.close()
-    }
-  }
-
-  def withExecuteFile[T](fname: String)(body: Solver => T): T =
-    withFileReader(s"constraints/bench/$fname.smt2") { reader =>
-      withExecuteScript(false, Logger(s"bench.$fname"), "ab".toSet)(reader)(body)
-    }
-
-  def testFileSAT(
-      name: String
-  )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
-    testWithInfoTime(s"""test SAT: "$name"""") {
-      withExecuteFile(name) { solver =>
-        solver.checker.getModel() match {
-          // case Some((sModel, iModel)) => assertions(sModel, iModel)
-          case Some(models @ (sModel, iModel)) => info(models.toString())
-          case None                            => fail()
+    def testUNSAT(constraint: String)(implicit pos: Position) =
+      testWithInfoTime(s"[$strategyName] test UNSAT\n${constraint.trim}") {
+        withExecuteScriptNoPrint(new java.io.StringReader(constraint)) { solver =>
+          assert(solver.checker.getModel().isEmpty)
         }
       }
+
+    def withFileReader[T](fname: String)(body: java.io.FileReader => T): T = {
+      val path = java.nio.file.FileSystems.getDefault().getPath(fname)
+      val reader = new java.io.FileReader(path.toFile())
+      try {
+        body(reader)
+      } finally {
+        reader.close()
+      }
     }
-  def testFileUNSAT(name: String)(implicit pos: Position) =
-    testWithInfoTime(s"""test UNSAT: "$name"""") {
-      withExecuteFile(name) { solver => assert(solver.checker.getModel().isEmpty) }
+
+    def withExecuteFile[T](fname: String)(body: Solver => T): T =
+      withFileReader(s"constraints/bench/$fname.smt2") { reader =>
+        val logger = Logger(s"bench.$strategyName.$fname")
+        val strategy = strategyConstructor(logger)
+        withExecuteScript(strategy, false, logger, "ab".toSet)(reader)(body)
+      }
+
+    def testFileSAT(
+        name: String
+    )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
+      testWithInfoTime(s"""[$strategyName] test SAT: "$name"""") {
+        withExecuteFile(name) { solver =>
+          solver.checker.getModel() match {
+            // case Some((sModel, iModel)) => assertions(sModel, iModel)
+            case Some(models @ (sModel, iModel)) => info(models.toString())
+            case None                            => fail()
+          }
+        }
+      }
+    def testFileUNSAT(name: String)(implicit pos: Position) =
+      testWithInfoTime(s"""[$strategyName] test UNSAT: "$name"""") {
+        withExecuteFile(name) { solver => assert(solver.checker.getModel().isEmpty) }
+      }
+
+    testFileSAT("deleteall") { (_, _) => () }
+
+    testFileUNSAT("concat_unsat_03")
+
+    testFileSAT("concat_delete") { (m, _) =>
+      val (xy, x, y, z) = (m("xy"), m("x"), m("y"), m("z"))
+      assert(xy == x ++ y)
+      assert(z == xy.replaceAll("<script>", ""))
+      assert("<script>".r.matches(z))
     }
 
-  testFileSAT("deleteall") { (_, _) => () }
+    testFileSAT("replace_some_1") { (m, _) =>
+      val (x, y) = (m("x"), m("y"))
+      assert("a+".r.matches(x))
+      assert("(ab)+".r.matches(y))
+    }
 
-  testFileUNSAT("concat_unsat_03")
+    testFileUNSAT("replace_some_2")
 
-  testFileSAT("concat_delete") { (m, _) =>
-    val (xy, x, y, z) = (m("xy"), m("x"), m("y"), m("z"))
-    assert(xy == x ++ y)
-    assert(z == xy.replaceAll("<script>", ""))
-    assert("<script>".r.matches(z))
-  }
+    testFileSAT("replaceall_int") { (m, _) =>
+      val (x, y, z) = (m("x"), m("y"), m("z"))
+      assert("[ab]*".r.matches(x))
+      assert(y == x.replaceAll("ab", "c"))
+      assert(z == y.replaceAll("ac", "aaaa"))
+      assert(x.length + 5 <= z.length)
+    }
 
-  testFileSAT("replace_some_1") { (m, _) =>
-    val (x, y) = (m("x"), m("y"))
-    assert("a+".r.matches(x))
-    assert("(ab)+".r.matches(y))
-  }
-
-  testFileUNSAT("replace_some_2")
-
-  testFileSAT("replaceall_int") { (m, _) =>
-    val (x, y, z) = (m("x"), m("y"), m("z"))
-    assert("[ab]*".r.matches(x))
-    assert(y == x.replaceAll("ab", "c"))
-    assert(z == y.replaceAll("ac", "aaaa"))
-    assert(x.length + 5 <= z.length)
-  }
-
-  // Simple replace_pcre_all (match constant)
-  testSAT("""
+    // Simple replace_pcre_all (match constant)
+    testSAT("""
 (declare-const x String)
 (declare-const y String)
 
@@ -121,14 +137,14 @@ class ParikhSolverTest extends AnyFunSuite {
 (check-sat)
 (get-model)
 """) { (sModel, iModel) =>
-    val (x, y) = (sModel("x"), sModel("y"))
-    assert(y == x.replaceAll("aab", "b"))
-    assert(".*aab.*".r.matches(y))
-    ()
-  }
+      val (x, y) = (sModel("x"), sModel("y"))
+      assert(y == x.replaceAll("aab", "b"))
+      assert(".*aab.*".r.matches(y))
+      ()
+    }
 
-  // Delete all b+. Should be equivalent to (replace_all x "b" "")
-  testSAT("""
+    // Delete all b+. Should be equivalent to (replace_all x "b" "")
+    testSAT("""
 (declare-const x String)
 (declare-const y String)
 
@@ -139,9 +155,9 @@ class ParikhSolverTest extends AnyFunSuite {
 (get-model)
 """) { (_, _) => () }
 
-  // Unsat case.
-  testUNSAT(
-    """
+    // Unsat case.
+    testUNSAT(
+      """
 (declare-const x String)
 (declare-const y String)
 
@@ -150,11 +166,11 @@ class ParikhSolverTest extends AnyFunSuite {
 (assert (str.in.re y (re.comp (str.to.re ""))))
 (check-sat)
 """
-  )
+    )
 
-  // Ensure replace_pcre replaces only first match
-  testSAT(
-    """
+    // Ensure replace_pcre replaces only first match
+    testSAT(
+      """
 (declare-const x String)
 (declare-const y String)
 
@@ -163,15 +179,15 @@ class ParikhSolverTest extends AnyFunSuite {
 (assert (str.in.re y (re.comp (str.to.re ""))))
 (check-sat)
 """
-  ) { (sm, im) =>
-    val (x, y) = (sm("x"), sm("y"))
-    assert("(ab)*".r.matches(x))
-    assert(y == x.replaceFirst("ab", ""))
-    assert(y != "")
-  }
+    ) { (sm, im) =>
+      val (x, y) = (sm("x"), sm("y"))
+      assert("(ab)*".r.matches(x))
+      assert(y == x.replaceFirst("ab", ""))
+      assert(y != "")
+    }
 
-  // Ensure replace_pcre_all matches the longest match if many exist
-  testUNSAT("""
+    // Ensure replace_pcre_all matches the longest match if many exist
+    testUNSAT("""
 (declare-const x String)
 (declare-const y String)
 
@@ -181,13 +197,13 @@ class ParikhSolverTest extends AnyFunSuite {
 (check-sat)
 """)
 
-  // The following two tests shows order in PCRE alternation matters for some situations.
-  testFileSAT("pcre_precedence_sat") { (sm, _) => info(sm.toString) }
+    // The following two tests shows order in PCRE alternation matters for some situations.
+    testFileSAT("pcre_precedence_sat") { (sm, _) => info(sm.toString) }
 
-  testFileUNSAT("pcre_precedence_unsat")
+    testFileUNSAT("pcre_precedence_unsat")
 
-  // pcre.group
-  testUNSAT("""
+    // pcre.group
+    testUNSAT("""
 (declare-const x String)
 (declare-const y String)
 
@@ -202,17 +218,17 @@ class ParikhSolverTest extends AnyFunSuite {
 (check-sat)
 """)
 
-  testFileSAT("group_sc") { (sm, _) => info(sm.toString) }
+    testFileSAT("group_sc") { (sm, _) => info(sm.toString) }
 
-  implicit class AtMostSubstring(s: String) {
-    def atmostSubstring(idx: Int, len: Int): String = {
-      if (0 <= idx && idx < s.length && 0 < len) s.substring(idx, idx + scala.math.min(len, s.length - idx))
-      else ""
+    implicit class AtMostSubstring(s: String) {
+      def atmostSubstring(idx: Int, len: Int): String = {
+        if (0 <= idx && idx < s.length && 0 < len) s.substring(idx, idx + scala.math.min(len, s.length - idx))
+        else ""
+      }
     }
-  }
 
-  // Simple substr test (sat case)
-  testSAT("""
+    // Simple substr test (sat case)
+    testSAT("""
 (declare-const x String)
 (declare-const y String)
 (declare-const i Int)
@@ -224,28 +240,28 @@ class ParikhSolverTest extends AnyFunSuite {
 
 (check-sat)
 """) {
-    case (sModel, iModel) =>
-      val (x, y, i) = (sModel("x"), sModel("y"), iModel("i"))
-      assert("(ab)+".r.matches(x))
-      assert(0 <= i && i < x.length)
-      assert(y == x.atmostSubstring(i, 2))
-      assert(!"ab".r.matches(y))
-  }
+      case (sModel, iModel) =>
+        val (x, y, i) = (sModel("x"), sModel("y"), iModel("i"))
+        assert("(ab)+".r.matches(x))
+        assert(0 <= i && i < x.length)
+        assert(y == x.atmostSubstring(i, 2))
+        assert(!"ab".r.matches(y))
+    }
 
-  testFileSAT("indexof_sat") { (m, _) =>
-    val (x, y) = (m("x"), m("y"))
-    assert(y == x.atmostSubstring(x.indexOf("aab"), x.length))
-    assert(!"aab.*".r.matches(y))
-  }
+    testFileSAT("indexof_sat") { (m, _) =>
+      val (x, y) = (m("x"), m("y"))
+      assert(y == x.atmostSubstring(x.indexOf("aab"), x.length))
+      assert(!"aab.*".r.matches(y))
+    }
 
-  testFileUNSAT("indexof")
+    testFileUNSAT("indexof")
 
-  testFileSAT("substr_zip_sat") { (sm, _) => info(sm.toString) }
+    testFileSAT("substr_zip_sat") { (sm, _) => info(sm.toString) }
 
-  testFileUNSAT("substr_zip_unsat")
+    testFileUNSAT("substr_zip_unsat")
 
-  // ???
-  testSAT("""
+    // ???
+    testSAT("""
 (declare-const x String)
 (declare-const y String)
 (declare-const z String)
@@ -258,21 +274,16 @@ class ParikhSolverTest extends AnyFunSuite {
 (get-model)
 """) { (m, _) => () }
 
-  testFileUNSAT("concat_prefix_suffix")
+    testFileUNSAT("concat_prefix_suffix")
 
-  testFileSAT("insert_script") { (m, _) => info(m.toString) }
+    testFileSAT("insert_script") { (m, _) => info(m.toString) }
 
-  testFileSAT("reverse_indexof_sat") { (m, _) => info(m.toString) }
+    testFileSAT("reverse_indexof_sat") { (m, _) => info(m.toString) }
 
-  testFileUNSAT("reverse_indexof_unsat")
+    testFileUNSAT("reverse_indexof_unsat")
 
-  testFileUNSAT("substr_equiv")
+    testFileUNSAT("substr_equiv")
 
-  testFileSAT("for_slide") { (sm, im) => info(s"$sm, $im") }
-
-  // Using isFunctional, the following property will be provable:
-  // 1. (str.replace_all x "a" "") and (str.replace_pcre_all x (pcre.+ (str.to_pcre "a")) (pcre.replacement ""))
-  //    is equivalent for any x.
-  // 2. (str.replace_all x "a" "b") and (str.replace_pcre_all x (pcre.+ (str.to_pcre "a")) (pcre.replacement "b"))
-  //    is NOT equivalent, e.g. when x = "aa" the former is "bb" while the latter is "b".
+    testFileSAT("for_slide") { (sm, im) => info(s"$sm, $im") }
+  }
 }

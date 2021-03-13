@@ -16,7 +16,6 @@ class PreImageStrategy(logger: Logger) extends Strategy {
   // sat なら x_0, x_1, ... の値と i_0, i_1, ... の値を返す
   // 等式の左辺に現れる変数の値は返さないことに注意
   private def checkClause(pr: SolverPR[Char, String]): Option[(Seq[String], Map[String, Int])] = {
-    println("start checking clause")
     // 共通部分をとる
     // 異なる文字列変数に対応する PA のログ変数がかぶらないようにする
     val psts: Seq[ParikhSST[Int, Char, Char, Unit, (Int /* index */, Int /* l */ ), String]] =
