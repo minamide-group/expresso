@@ -1,7 +1,8 @@
 package com.github.kmn4.sst
 
-import java.nio.file.{FileSystems, Files}
+import com.github.kmn4.sst.strategy.PreImageStrategy
 
+import java.nio.file.{FileSystems, Files}
 import com.typesafe.scalalogging.Logger
 
 object Main extends App {
@@ -13,8 +14,8 @@ object Main extends App {
   val script = parser.parseScript
   // Ensure that alphabet includes at least 2 letters.
   new Solver(
-    checker = new strategy.PreImageStrategy(logger),
-    print = false,
+    checker = new PreImageStrategy(logger),
+    print = true,
     logger = logger,
     alphabet = "ab".toSet
   ).executeScript(script)

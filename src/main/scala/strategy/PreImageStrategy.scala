@@ -199,7 +199,7 @@ class PreImageStrategy(logger: Logger) extends Strategy {
             choose(
               langs.map { lang =>
                 mxid += idInc
-                new Transduction.ParikhTransduction(pst).preImage(lang, mxid)
+                pst.preImage(lang, mxid)
               }
             ).iterator
           }

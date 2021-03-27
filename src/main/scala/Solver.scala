@@ -73,7 +73,6 @@ class Solver(
     // FIXME Set.empty
     val input = transform(constraints, alphabet, Set.empty)
     val sat = checker.checkSat(input)
-    logger.trace(s"checking done, ${if (sat) "SAT" else "UNSAT"}")
     if (sat) printLine("sat")
     else printLine("unsat")
   }
@@ -82,7 +81,6 @@ class Solver(
     checker.getModel() match {
       case Some((sModel, iModel)) =>
         val stringVars = sortStringVars(constraints)
-        logger.trace(s"got model ${(sModel, iModel)}")
         for ((value, idx) <- sModel.zipWithIndex)
           printLine(s"""(define-fun ${stringVars(idx)} () String "${value}")""")
         for ((name, value) <- iModel) printLine(s"(define-fun $name () Int ${value})")
