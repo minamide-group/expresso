@@ -59,14 +59,16 @@ private object Transduction {
         .optimized
 
       // lcp を受理状態ごとに PA へ分割
-      val pas: LazyList[ParikhAutomaton[Int, Either[A, Int], Int, String]] = {
-        val qf = lcp.states.maxOption.getOrElse(0) + 1 // 存在しなかったら LazyList が空
+      // NOTE 分割しないと遅くなる場合がある．
+      //      例えば 'group_sc' では 2 倍の差がある．
+      val pas: Iterator[ParikhAutomaton[Int, Either[A, Int], Int, String]] = {
+        val qf = lcp.states.maxOption.getOrElse(0) + 1 // 存在しなかったら Iterator が空
         val states = lcp.states + qf
         val lastSharp = Right(arity - 1)
         val zero = lcp.ls.map(_ -> 0).toMap
         // TODO 到達性で状態を減らす
         // TODO 不要な L を削除
-        LazyList.from(lcp.outGraph).map {
+        lcp.outGraph.iterator.map {
           case (q, _, v, phi) =>
             ParikhAutomaton(
               states,
@@ -86,7 +88,7 @@ private object Transduction {
 
       def split[Q, L](
           pa: ParikhAutomaton[Q, Either[A, Int], L, String]
-      ): LazyList[(Seq[IdentifiedPA[Q, A, L, String]], Seq[Presburger.Formula[String]])] = {
+      ): Iterator[(Seq[IdentifiedPA[Q, A, L, String]], Seq[Presburger.Formula[String]])] = {
         type Edge = (Q, Either[A, Int], Map[L, Int], Q)
 
         // cache
@@ -144,7 +146,7 @@ private object Transduction {
         def splitAux(
             pa: ParikhAutomaton[Q, Either[A, Int], L, String],
             i: Int
-        ): LazyList[(Seq[IdentifiedPA[Q, A, L, String]], Seq[Presburger.Formula[String]])] = {
+        ): Iterator[(Seq[IdentifiedPA[Q, A, L, String]], Seq[Presburger.Formula[String]])] = {
           val sharpEdge: Map[Int, Iterable[Edge]] = graphToMap(pa.edges.filter(_._2.isRight)) {
             case e @ (_, Right(i), _, _) => i -> e
             case _                       => throw new Exception("This cannot be the case.")
@@ -154,7 +156,7 @@ private object Transduction {
 
           if (i == 0) {
             for {
-              sharp0 @ (q0, _, v, _) <- LazyList.from(sharpEdge(0))
+              sharp0 @ (q0, _, v, _) <- sharpEdge(0).iterator
               pa0 <- pruneBackward(q0).map { pa => pa.copy(acceptRelation = Set((q0, v))) }
             } yield {
               import Presburger._
@@ -167,7 +169,7 @@ private object Transduction {
             }
           } else if (i > 0) {
             for {
-              sharp1 @ (q1, _, _, r1) <- LazyList.from(sharpEdge(i - 1))
+              sharp1 @ (q1, _, _, r1) <- sharpEdge(i - 1).iterator
               sharpI @ (qi, _, v, _) <- sharpEdge(i)
               paI <- prune(r1, qi).map { pa => pa.copy(q0 = r1, acceptRelation = Set((qi, v))) }.toList
               pa1 <- pruneBackward(q1).map { pa =>

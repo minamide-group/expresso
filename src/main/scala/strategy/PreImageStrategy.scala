@@ -180,18 +180,33 @@ class PreImageStrategy(logger: Logger) extends Strategy {
     Configuration(transes, rel)
   }
 
+  def choose[A](ll: Seq[Seq[A]]): Seq[Seq[A]] =
+    if (ll.isEmpty) Seq(Seq.empty)
+    else
+      for {
+        l <- ll
+        a <- l
+        rec <- choose(ll.tail)
+      } yield a +: rec
+
+  def choose[A](si: Seq[Iterator[A]]): Iterator[Seq[A]] = {
+    if (si.isEmpty) return Iterator.empty
+    if (si.size == 1) return si.head.map(a => Seq(a))
+    choose(si.map(iter => LazyList.from(iter))).iterator
+  }
+
   // transductions が非空である間 relation の逆像を計算する
   // disjunction が現れると非決定的な選択をする．この非決定性は Iterator が表している．
   private def iteratePreImage(config: Configuration): Iterator[ParikhRelation[Int, Char, Int, String]] = {
     import Transduction._
     val Configuration(ts, rel) = config
-    ts.foldRight(LazyList(rel)) {
+    ts.foldRight(Iterator(rel)) {
         case (PreImagable(pst, rhs), acc) =>
           type PA = IdentifiedPA[Int, Char, Int, String]
           // next() すると pst^-1(lang) から1つずつ選んだ組を返す
           // TODO PR において各変数の言語が単一の PA で表されればにここは不要になる
           def clauseChoices(
-              langs: LazyList[PA],
+              langs: Seq[PA],
               maxID: Int
           ): Iterator[Seq[(Seq[PA], GlobalFormulas[String])]] = {
             val idInc = rhs.length // maxID は逆像をとるたび idInc 分だけ増える
@@ -201,13 +216,13 @@ class PreImageStrategy(logger: Logger) extends Strategy {
                 mxid += idInc
                 pst.preImage(lang, mxid)
               }
-            ).iterator
+            )
           }
           for {
             rel <- acc
             choice <- {
               val lhs = rel.parikhAutomata.length - 1
-              val automata = LazyList.from(rel.parikhAutomata(lhs))
+              val automata = rel.parikhAutomata(lhs)
               clauseChoices(automata, rel.maxID)
             }
           } yield {

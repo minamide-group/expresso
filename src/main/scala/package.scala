@@ -143,12 +143,4 @@ package object sst {
     def apply[T](f: => T) = new Cacher(f)
   }
 
-  def choose[A](ll: Seq[Seq[A]]): Seq[Seq[A]] =
-    if (ll.isEmpty) Seq(Seq.empty)
-    else
-      for {
-        l <- ll
-        a <- l
-        rec <- choose(ll.tail)
-      } yield a +: rec
 }
