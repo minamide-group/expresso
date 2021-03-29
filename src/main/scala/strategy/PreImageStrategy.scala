@@ -167,7 +167,16 @@ class PreImageStrategy(logger: Logger) extends Strategy {
     val transes = constraint.assignments.map { a => PreImagable(a.toExpPST(alphabet), a.dependeeVars) }
     // assertions と arithFormulas から PR が得られる
     val rel = {
-      val paMap = constraint.assertions.groupMap(_.stringVar)(_.lang.toParikhAutomaton(alphabet))
+      val langMap = constraint.assertions.groupMap(_.stringVar)(_.lang)
+      val paMap = langMap.view.mapValues { langs =>
+        langs.map(
+          _ match {
+            case language.ParikhLanguage.FromRegExp(re) =>
+              re.toNFA(alphabet).toDFA.minimized.toParikhAutomaton[Int, String]
+            case lang => lang.toParikhAutomaton(alphabet)
+          }
+        )
+      }
       val pas = (0 to maxVar).map { idx =>
         val all = ParikhAutomaton.universal[Int, Char, Int, String](0, alphabet)
         paMap.getOrElse(idx, Seq.empty).foldLeft(all) {
