@@ -346,6 +346,13 @@ class Solver(
         case SimpleTransduction(rhsStringVar, trans) =>
           (ParikhAssignment(name, trans, rhsStringVar), Seq.empty)
         case Concat(wordAndVars) => (CatAssignment(name, wordAndVars), Seq.empty)
+        case SimpleApp("str.insert", Seq(SimpleQualID(insertion), SimpleQualID(devided), t)) =>
+          val (pt, cs) = expectInt(t)
+          val idx = freshTemp()
+          (
+            InsertAssignment(name, insertion, devided, idx),
+            cs :+ (Presburger.Eq(Presburger.Var(idx), pt))
+          )
         case _ =>
           val (rhs, trans, cs) = expectParikhTransduction(t)
           (ParikhAssignment(name, trans, rhs), cs)

@@ -54,6 +54,15 @@ object Constraint {
 
     override def usedAlphabet: Set[Char] = wordAndVars.flatMap(_.left.getOrElse(Set.empty)).toSet
   }
+  case class InsertAssignment[S](lhsStringVar: S, insertionVar: S, dividedVar: S, indexVar: String)
+      extends AtomicAssignment[S] {
+    override def renameVars[T](f: S => T): AtomicAssignment[T] =
+      copy(lhsStringVar = f(lhsStringVar), insertionVar = f(insertionVar), dividedVar = f(dividedVar))
+    override def dependerVars: Seq[S] = Seq(lhsStringVar)
+    override def dependeeVars: Seq[S] = Seq(insertionVar, dividedVar)
+    override def usedAlphabet: Set[Char] = Set.empty
+  }
+
   case class ParikhAssertion[S](stringVar: S, lang: ParikhLanguage[Char, String])
       extends ParikhConstraint[S] {
 

@@ -1,10 +1,12 @@
 package com.github.kmn4.sst.strategy
 
 import org.scalatest.funsuite._
+import org.scalatest.Ignore
 
 import com.github.kmn4.sst.language.Constraint._
 import com.github.kmn4.sst.machine.NSST
 
+@Ignore
 class SolverTest extends AnyFunSuite {
 //   def toOptionList(s: String): List[Option[Char]] = s.toList.map(c => if (c == '#') None else Some(c))
 //   def fromOptionList(l: List[Option[Char]]): String = l.map(_.getOrElse('#')).mkString

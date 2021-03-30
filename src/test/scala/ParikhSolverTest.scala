@@ -285,5 +285,7 @@ class ParikhSolverTest extends AnyFunSuite {
     testFileUNSAT("substr_equiv")
 
     testFileSAT("for_slide") { (sm, im) => info(s"$sm, $im") }
+
+    testFileSAT("insert_opt") { (sm, im) => info(s"$sm, $im") }
   }
 }

@@ -142,6 +142,61 @@ class PreImageStrategy(logger: Logger) extends Strategy {
           graphToMap(outGraph)(identity)
         ).renamed.toParikhSST
       }
+      case InsertAssignment(lhs, ins, div, idx) => {
+        import Presburger._
+        import Presburger.Sugar._
+        val ls @ Seq(index, length) = Seq(0, 1)
+        val states @ Seq(collect, seek, append) = Seq(0, 1, 2)
+        val xs @ Seq(x, y) = Seq(0, 1)
+        type M = Map[Int, List[Cop[Int, Char]]]
+        val unit: M = Map(x -> List(Cop1(x)), y -> List(Cop1(y)))
+        val appendX = alphabet.map(a => a -> (unit + (x -> List(Cop1(x), Cop2(a))))).toMap
+        val appendY = alphabet.map(a => a -> (unit + (y -> List(Cop1(y), Cop2(a))))).toMap
+        val (zz, oo, zo) = (
+          Map(index -> 0, length -> 0),
+          Map(index -> 1, length -> 1),
+          Map(index -> 0, length -> 1)
+        )
+        type Q = Int
+        type A = Either[Char, Int]
+        type V = Map[Int, Int]
+        type E = (Q, A, M, V, Q)
+        val edges: Iterable[E] = {
+          val collecting: Iterable[E] = alphabet.map(a => (collect, Left(a), appendX(a), zz, collect))
+          val toSeek: E = (collect, Right(0), unit, zz, seek)
+          val seeking: Iterable[E] = alphabet.map(a => (seek, Left(a), appendY(a), oo, seek))
+          val toAppend: Iterable[E] = alphabet.map { a =>
+            val yxa = List(Cop1(y), Cop1(x), Cop2(a))
+            val m = Map(x -> Nil, y -> yxa)
+            (seek, Left(a), m, zo, append)
+          }
+          val appending: Iterable[E] = alphabet.map(a => (append, Left(a), appendY(a), zo, append))
+          Iterable(toSeek) ++ (collecting ++ seeking ++ toAppend ++ appending)
+        }
+        val outGraph = Set(
+          (seek, List(Cop1(y), Cop1(x)), zz),
+          (append, List(Cop1(y)), zz)
+        )
+        type IVar = Either[String, Int]
+        val Seq(idxVar, indexVar, lengthVar): Seq[Var[IVar]] =
+          Seq(Var(Left(idx)), Var(Right(index)), Var(Right(length)))
+        val formulas = Seq[Presburger.Formula[IVar]](
+          idxVar < 0 ==> (indexVar === 0),
+          (const(0) <= idxVar && idxVar <= lengthVar) ==> (indexVar === idxVar),
+          idxVar >= lengthVar ==> (indexVar === lengthVar)
+        )
+        ParikhSST(
+          states.toSet,
+          alphabet.map[Either[Char, Int]](Left.apply) + Right(0),
+          xs.toSet,
+          ls.toSet,
+          Set(idx),
+          edges.toSet,
+          collect,
+          outGraph.toSet,
+          formulas
+        )
+      }
     }
 
   private implicit class AssignmentToPSST[S](assignment: AtomicAssignment[S]) {

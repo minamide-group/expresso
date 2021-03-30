@@ -149,6 +149,7 @@ class ThesisStrategy(logger: Logger) extends Strategy {
       transToSolverPSST(trans, alphabet, lhsStringVar, rhsStringVar)
     case CatAssignment(lhsStringVar, wordAndVars) =>
       concatNSST(lhsStringVar, wordAndVars, alphabet).toParikhSST
+    case InsertAssignment(_, _, _, _) => throw new Exception("Not Implemented")
   }
 
   /** Returns `alphabet` to `alphabet` NSST whose state set is {(0, 0), ... (n, 0)}
