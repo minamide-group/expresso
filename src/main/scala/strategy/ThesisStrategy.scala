@@ -28,7 +28,7 @@ class ThesisStrategy(logger: Logger) extends Strategy {
 
   override def checkSat(constraint: Input): Boolean =
     sat.getOr {
-      val Input(alphabet, stringVarNumber, intVars, assignments, assertions, arithFormulas) = constraint
+      val Input(alphabet, stringVarNumber, assignments, assertions, arithFormulas) = constraint
       val maxVar = stringVarNumber - 1
       psst(()) = {
         val asgnPSSTs = assignments.map(a => assignmentToPSST(a, alphabet))

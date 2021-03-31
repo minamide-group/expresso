@@ -9,7 +9,6 @@ import com.typesafe.scalalogging.Logger
 
 /**
   * 逆像計算に基づくアルゴリズム．
-  * TODO intVars に含まれるもののみを返すようにする
   */
 class PreImageStrategy(logger: Logger) extends Strategy {
   // pr の satisfialibity を確認
@@ -61,9 +60,6 @@ class PreImageStrategy(logger: Logger) extends Strategy {
       } else None
     }
   }
-  // TODO これは Solver 側
-  def parseIntModel(iv: Map[String, Int]): Map[String, Int] =
-    iv.collect { case (name, value) if name.indexOf("user_") == 0 => name.drop(5) -> value }
   private var models: Output = None
   override def checkSat(constraint: Input): Boolean = {
     val config = organize(constraint)

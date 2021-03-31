@@ -47,12 +47,16 @@ class Solver(
 
   var env = Map.empty[String, Sort]
   var constraints = Seq.empty[ParikhConstraint]
+  var userIntVars = Set.empty[String]
 
   def declareConst(name: SMTTerms.SSymbol, sort: SMTTerms.Sort): Unit = {
     val SMTTerms.SSymbol(s) = name
     sort match {
-      case Ints.IntSort() | Strings.StringSort() => env += (s -> sort)
-      case _                                     => throw new Exception(s"${sort.getPos}: Unsupported sort: ${sort}")
+      case Ints.IntSort() =>
+        userIntVars += s
+        env += (s -> sort)
+      case Strings.StringSort() => env += (s -> sort)
+      case _                    => throw new Exception(s"${sort.getPos}: Unsupported sort: ${sort}")
     }
   }
 
@@ -67,24 +71,45 @@ class Solver(
     constraints ++= (cs :+ c)
   }
 
-  def printLine(x: Any): Unit = if (print) println(x)
+  private def printLine(x: Any): Unit = if (print) println(x)
+
+  private def withLogging[T](op: String)(body: => T): T = {
+    logger.info(s"start $op")
+    val res = body
+    logger.info(s"$op done")
+    res
+  }
 
   def checkSat(): Unit = {
-    // FIXME Set.empty
-    val input = transform(constraints, alphabet, Set.empty)
-    val sat = checker.checkSat(input)
+    val input = transform(constraints, alphabet)
+    val sat = withLogging("checkSat()")(checker.checkSat(input))
     if (sat) printLine("sat")
     else printLine("unsat")
   }
 
-  def getModel(): Unit = {
-    checker.getModel() match {
-      case Some((sModel, iModel)) =>
+  private def parseIntModel(iv: Map[String, Int], intVars: Set[String]): Map[String, Int] = {
+    iv.flatMap {
+      case (name, value) if name.indexOf("user_") == 0 =>
+        val i = name.drop(5)
+        if (intVars(i)) Some(name.drop(5) -> value)
+        else None
+      case _ => None
+    }
+  }
+
+  def getModel(): Option[Map[String, Any]] = {
+    withLogging("getModel()")(checker.getModel()) match {
+      case Some((sm, im)) =>
         val stringVars = sortStringVars(constraints)
-        for ((value, idx) <- sModel.zipWithIndex)
-          printLine(s"""(define-fun ${stringVars(idx)} () String "${value}")""")
+        val iModel = parseIntModel(im, userIntVars)
+        val sModel = sm.zipWithIndex.map { case (value, idx) => stringVars(idx) -> value }.toMap
+        for ((sVar, value) <- sModel)
+          printLine(s"""(define-fun ${sVar} () String "${value}")""")
         for ((name, value) <- iModel) printLine(s"(define-fun $name () Int ${value})")
-      case None => printLine("Cannot get model")
+        Some(sModel ++ iModel)
+      case None =>
+        printLine("Cannot get model")
+        None
     }
   }
 
@@ -388,8 +413,7 @@ class Solver(
   // output: strategy.Input
   def transform(
       constraints: Seq[ParikhConstraint],
-      additionalAlphabet: Set[Char],
-      userIntVars: Set[String]
+      additionalAlphabet: Set[Char]
   ): strategy.Input = {
     val stringVars = sortStringVars(constraints)
     val varIdx = stringVars.zipWithIndex.toMap
@@ -403,7 +427,6 @@ class Solver(
     strategy.Input(
       alphabet,
       stringVars.length,
-      userIntVars,
       assignments,
       assertions,
       arithFormula
