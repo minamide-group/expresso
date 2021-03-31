@@ -62,13 +62,30 @@ class PreImageStrategy(logger: Logger) extends Strategy {
   }
   private var models: Output = None
   override def checkSat(constraint: Input): Boolean = {
-    val config = organize(constraint)
-    val relGen = iteratePreImage(config)
+    val config @ Configuration(trans, _) = organize(constraint)
+    val relIter = iteratePreImage(config)
     models = {
       val iter = for {
-        rel <- relGen
-        models <- checkClause(rel)
-      } yield models
+        rel <- relIter
+        (sm, im) <- checkClause(rel)
+      } yield {
+        // trans を使って左辺の文字列変数を計算
+        def lhs(strModel: Seq[String], p: PST, rs: Seq[Int]): String = {
+          type A = Either[Char, Int] // こういうのは型メンバーを使うと楽そう
+          val words = rs.zipWithIndex.foldLeft(Seq.empty[A]) {
+            case (acc, (x, i)) =>
+              val w = strModel(x)
+              acc ++ w.map(Left.apply) :+ Right(i)
+          }
+          val input = words.dropRight(1)
+          val set = p.transduce(input, im)
+          // NOTE 関数的であることを要求
+          if (set.size != 1) throw new Exception("Not functional transduction")
+          set.head.mkString
+        }
+        val sm2 = trans.foldLeft(sm) { case (acc, PreImagable(pst, rhs)) => acc :+ lhs(acc, pst, rhs) }
+        (sm2, im)
+      }
       iter.nextOption()
     }
     models.nonEmpty
@@ -203,6 +220,7 @@ class PreImageStrategy(logger: Logger) extends Strategy {
 
   // 条件: transductions は lhs について昇順
   // 条件: relation の PA は lhs について昇順で，0 から順にならぶ
+  // 条件: transductions の最大 lhs == relation の最大 lhs
   private case class Configuration(
       transductions: Seq[PreImagable],
       relation: ParikhRelation[Int, Char, Int, String]
