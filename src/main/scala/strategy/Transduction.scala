@@ -1,6 +1,5 @@
 package com.github.kmn4.sst.strategy
 
-import com.github.kmn4.sst.NopLogger
 import com.github.kmn4.sst.graphToMap
 import com.github.kmn4.sst.machine.ParikhAutomaton
 import com.github.kmn4.sst.machine.ParikhSST
@@ -52,7 +51,7 @@ private object Transduction {
 
       // PSST 同士の合成をする (LC-PA まで)
       val lcp = psst
-        .composeNsstsToMsst[R, Nothing, Nothing, K](psst, langPST)(NopLogger)
+        .composeNsstsToMsst[R, Nothing, Nothing, K](psst, langPST)
         .toLocallyConstrainedAffineParikhSST
         .toLocallyConstrainedParikhSST
         .renamed

@@ -7,7 +7,6 @@ import com.github.kmn4.sst.math._
 import org.scalatest.flatspec._
 
 class CompositionTest extends AnyFlatSpec {
-  implicit val logger = NopLogger
   val nsst = NSST(
     Set(0, 1),
     Set('X', 'Y'),

@@ -3,9 +3,10 @@ package com.github.kmn4.sst.strategy
 import com.github.kmn4.sst.math.Presburger
 import com.github.kmn4.sst.machine.ParikhSST
 
-// parikhAutomata の要素 Seq[Parikh...] を conjunction と呼ぶ
-// 条件: conjunction は非空  (TODO unique にする)
-// TODO あるいは, unique だと思う Strategy とそうでないものとを用意して比較する
+// parikhAutomata の要素 Seq[Parikh...] を conjunction と呼ぶ．
+// 条件: conjunction は非空
+// TODO 現在，各 conjunction はシングルトンなもののみ考えている．
+//      そうでない Strategy を用意して比較する
 private case class ParikhRelation[Q, A, L, I](
     parikhAutomata: Seq[Seq[IdentifiedPA[Q, A, L, I]]],
     globalFormulas: GlobalFormulas[I]

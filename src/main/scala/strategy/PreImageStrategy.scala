@@ -281,8 +281,9 @@ class PreImageStrategy(logger: Logger) extends Strategy {
     ts.foldRight(Iterator(rel)) {
         case (PreImagable(pst, rhs), acc) =>
           type PA = IdentifiedPA[Int, Char, Int, String]
-          // next() すると pst^-1(lang) から1つずつ選んだ組を返す
-          // TODO PR において各変数の言語が単一の PA で表されればにここは不要になる
+          // next() すると pst^-1(lang) から1つずつ選んだ組を返す.
+          // PR において各変数の言語が単一の PA で表されれているので不要だが，
+          // そうでない場合も考えるかもしれないので残しておく．
           def clauseChoices(
               langs: Seq[PA],
               maxID: Int

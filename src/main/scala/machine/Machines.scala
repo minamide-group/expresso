@@ -72,7 +72,7 @@ object MSST {
 
   def convertMsstToNsst[Q, A, B, X, Y](
       msst: MSST[Q, A, B, X, Y]
-  )(implicit logger: CompositionLogger): NSST[(Q, Map[X, M1[Y]]), A, B, (X, Y, Boolean)] = {
+  ): NSST[(Q, Map[X, M1[Y]]), A, B, (X, Y, Boolean)] = {
     type S = Map[X, M1[Y]]
     type NQ = (Q, S)
     type Z = (X, Y, Boolean)

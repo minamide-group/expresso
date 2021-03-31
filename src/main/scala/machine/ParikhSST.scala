@@ -173,24 +173,6 @@ case class ParikhSST[Q, A, B, X, L, I](
     ParikhSST(newStates, inSet, xs, ls, is, newEdges, (q0, None), newOutGraph, acceptFormulas)
   }
 
-  // TODO 不要
-  // ParikhAutomaton shares inSet (input alphabet), ls (log variables), is (integer variables),
-  // and acceptFormulas with PSST.
-  // This ParikhAutomaton has non-standard semantics specialized to decide whether a PSST is functional.
-  case class ParikhAutomaton[Q](
-      states: Set[Q],
-      edges: Set[(Q, A, Int, Map[L, Int], Q)],
-      q0: Q,
-      finalStates: Set[Q]
-  ) {
-    val trans = graphToMap(edges) { case (q, a, n, lv, r) => (q, a) -> (n, lv, r) }
-
-    def diff[R](that: ParikhAutomaton[R]): ParikhAutomaton[(Q, R)] = {
-      val newQ0 = (q0, that.q0)
-      ???
-    }
-  }
-
   lazy val nonEmptyVarsAt: Map[Q, Set[X]] = {
     import scala.collection.mutable.{Map => MMap, Set => MSet}
     val res: MMap[Q, MSet[X]] = MMap.empty.withDefault(_ => MSet.empty)
@@ -246,7 +228,7 @@ case class ParikhSST[Q, A, B, X, L, I](
   def composeNsstsToMsst[R, C, Y, K](
       n1: ParikhSST[Q, A, B, X, L, I],
       n2: ParikhSST[R, B, C, Y, K, I]
-  )(implicit logger: CompositionLogger): MonoidSST[Option[(Q, Map[X, (R, R)])], C, Y, K] = {
+  ): MonoidSST[Option[(Q, Map[X, (R, R)])], C, Y, K] = {
     // logger.start(n1, n2)
 
     type UpdateY = Update[Y, C]
@@ -422,7 +404,7 @@ case class ParikhSST[Q, A, B, X, L, I](
   }
 
   def compose[R, C, Y, K](that: ParikhSST[R, B, C, Y, K, I]): ParikhSST[Int, A, C, Int, Int, I] =
-    composeNsstsToMsst(this, that)(NopLogger).toLocallyConstrainedAffineParikhSST.toAffineParikhSST.toParikhSST.renamed.removeRedundantVars.removeRedundantLogVars
+    composeNsstsToMsst(this, that).toLocallyConstrainedAffineParikhSST.toAffineParikhSST.toParikhSST.renamed.removeRedundantVars.removeRedundantLogVars
 
   case class MonoidSST[Q, C, Y, K](
       states: Set[Q],

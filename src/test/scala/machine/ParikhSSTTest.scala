@@ -1,6 +1,5 @@
 package com.github.kmn4.sst.machine
 
-import com.github.kmn4.sst.{Solver, NopLogger}
 import org.scalatest.funsuite.AnyFunSuite
 import com.github.kmn4.sst.math._
 import com.github.kmn4.sst.language._
@@ -55,7 +54,7 @@ class ParikhSSTTest extends AnyFunSuite {
   }
   val substr2 = substr("j", "k")
   test("Compose two substr") {
-    val doubled = substr1.composeNsstsToMsst(substr1, substr2)(NopLogger)
+    val doubled = substr1.composeNsstsToMsst(substr1, substr2)
     implicit def conv(t: (Int, Int, Int, Int)): Map[String, Int] = t match {
       case (i, l, j, k) => Map("i" -> i, "l" -> l, "j" -> j, "k" -> k)
     }

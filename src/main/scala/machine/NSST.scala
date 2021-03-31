@@ -197,9 +197,7 @@ case class NSST[Q, A, B, X](
   }
 
   /** Construct NSST that transduce w to that.transduce(this.transduce(w)). */
-  def compose[R, C, Y](
-      that: NSST[R, B, C, Y]
-  )(implicit logger: CompositionLogger = NopLogger): NSST[Int, A, C, Int] = {
+  def compose[R, C, Y](that: NSST[R, B, C, Y]): NSST[Int, A, C, Int] = {
     if (!this.isCopyless) {
       throw new Exception(s"Tried to compose NSST, but first NSST was copyfull: ${this.edges}")
     }
@@ -208,9 +206,9 @@ case class NSST[Q, A, B, X](
     }
     val msst = NSST.composeNsstsToMsst(this, that)
     val nsst = MSST.convertMsstToNsst(msst)
-    logger.nsstConstructed(nsst)
+    // logger.nsstConstructed(nsst)
     val res = nsst.renamed.removeRedundantVars
-    logger.redundantVarsRemoved(res)
+    // logger.redundantVarsRemoved(res)
     res
   }
 
@@ -431,8 +429,8 @@ object NSST {
   def composeNsstsToMsst[Q1, Q2, A, B, C, X, Y](
       n1: NSST[Q1, A, B, X],
       n2: NSST[Q2, B, C, Y]
-  )(implicit logger: CompositionLogger): MSST[Option[(Q1, Map[X, (Q2, Q2)])], A, C, X, Y] = {
-    logger.start(n1, n2)
+  ): MSST[Option[(Q1, Map[X, (Q2, Q2)])], A, C, X, Y] = {
+    // logger.start(n1, n2)
 
     type NQ = (Q1, Map[X, (Q2, Q2)])
 
@@ -484,7 +482,7 @@ object NSST {
         .toMap
         .withDefaultValue(Map.empty.withDefault { case (q2, _) => Set(q2) })
     }
-    logger.invTransX(invTransX)
+    // logger.invTransX(invTransX)
 
     def previousStates(nq: NQ, a: A): Set[(NQ, Update[X, Update[Y, C]])] = {
       val (r, kt) = nq
@@ -536,11 +534,11 @@ object NSST {
 
     val initialStates =
       states.filter { case (q, kt) => q == n1.q0 && kt.forall { case (_, (k, t)) => k == t } }
-    logger.backwardFinished(states, edges, initialStates)
+    // logger.backwardFinished(states, edges, initialStates)
 
     // Remove all unreachable states.
     val reachables = closure[NQ](initialStates, graphToMap(edges) { case (q, _, _, r) => q -> r })
-    logger.unreachablesRemoved(reachables)
+    // logger.unreachablesRemoved(reachables)
 
     // Wrap states with Option so initial state be unique.
     type NWQ = Option[NQ]
@@ -573,7 +571,7 @@ object NSST {
       None,
       newOutF
     )
-    logger.msstConstructed(res)
+    // logger.msstConstructed(res)
     res
   }
   // End of composeNsstsToMsst
