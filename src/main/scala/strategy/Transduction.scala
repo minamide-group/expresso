@@ -1,10 +1,10 @@
-package com.github.kmn4.sst.strategy
+package com.github.kmn4.expresso.strategy
 
-import com.github.kmn4.sst.graphToMap
-import com.github.kmn4.sst.machine.ParikhAutomaton
-import com.github.kmn4.sst.machine.ParikhSST
-import com.github.kmn4.sst.math.Presburger
-import com.github.kmn4.sst.math.Presburger.Sugar._
+import com.github.kmn4.expresso.graphToMap
+import com.github.kmn4.expresso.machine.ParikhAutomaton
+import com.github.kmn4.expresso.machine.ParikhSST
+import com.github.kmn4.expresso.math.Presburger
+import com.github.kmn4.expresso.math.Presburger.Sugar._
 
 // A*(#1)...(#k-1)A*, n1, ..., nl -> A*
 private trait Transduction[A, B] {
@@ -98,13 +98,13 @@ private object Transduction {
 
         // pa 上で qf から戻れないものを刈る
         def pruneStatesBack(qf: Q): (Set[Q], Set[Edge]) =
-          com.github.kmn4.sst.searchStates(Set(qf), pa.inSet) {
+          com.github.kmn4.expresso.searchStates(Set(qf), pa.inSet) {
             case (r, a) => backTrans((r, a))
           }(_._1, { case (r, a, (q, v)) => (q, a, v, r) })
 
         // pa 上で q0 から到達できないものを刈る
         def pruneStatesForward(q0: Q): (Set[Q], Set[Edge]) =
-          com.github.kmn4.sst.searchStates(Set(q0), pa.inSet) {
+          com.github.kmn4.expresso.searchStates(Set(q0), pa.inSet) {
             case (q, a) => trans((q, a))
           }(_._1, { case (q, a, (r, v)) => (q, a, v, r) })
 

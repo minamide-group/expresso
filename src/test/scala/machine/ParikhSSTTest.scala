@@ -1,9 +1,9 @@
-package com.github.kmn4.sst.machine
+package com.github.kmn4.expresso.machine
 
 import org.scalatest.funsuite.AnyFunSuite
-import com.github.kmn4.sst.math._
-import com.github.kmn4.sst.language._
-import com.github.kmn4.sst.language.Constraint._
+import com.github.kmn4.expresso.math._
+import com.github.kmn4.expresso.language._
+import com.github.kmn4.expresso.language.Constraint._
 
 class ParikhSSTTest extends AnyFunSuite {
   def testEquiv[A, B, I](t1: StringIntTransducer[A, B, I], t2: StringIntTransducer[A, B, I])(

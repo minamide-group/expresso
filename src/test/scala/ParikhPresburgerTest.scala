@@ -1,7 +1,7 @@
-package com.github.kmn4.sst
+package com.github.kmn4.expresso
 
-import com.github.kmn4.sst.machine.{NSST}
-import com.github.kmn4.sst.math._
+import com.github.kmn4.expresso.machine.{NSST}
+import com.github.kmn4.expresso.math._
 import org.scalatest.flatspec._
 import org.scalatest.Ignore
 

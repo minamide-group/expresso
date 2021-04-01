@@ -1,7 +1,7 @@
-package com.github.kmn4.sst.machine
+package com.github.kmn4.expresso.machine
 
-import com.github.kmn4.sst._
-import com.github.kmn4.sst.math._
+import com.github.kmn4.expresso._
+import com.github.kmn4.expresso.math._
 
 /** Nondeterministic streaming string transducer */
 case class NSST[Q, A, B, X](

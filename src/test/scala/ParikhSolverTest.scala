@@ -1,11 +1,11 @@
-package com.github.kmn4.sst
+package com.github.kmn4.expresso
 
 import com.typesafe.scalalogging.Logger
 import org.scalactic.source.Position
 import org.scalatest.funsuite._
-import com.github.kmn4.sst.strategy.Strategy
-import com.github.kmn4.sst.strategy.ThesisStrategy
-import com.github.kmn4.sst.strategy.PreImageStrategy
+import com.github.kmn4.expresso.strategy.Strategy
+import com.github.kmn4.expresso.strategy.ThesisStrategy
+import com.github.kmn4.expresso.strategy.PreImageStrategy
 import java.io.Reader
 
 class ParikhSolverTest extends AnyFunSuite {

@@ -1,9 +1,9 @@
 package com.github.kmn4
 
-import com.github.kmn4.sst.math.{Cop, Cop1, Cop2, Monoid}
+import com.github.kmn4.expresso.math.{Cop, Cop1, Cop2, Monoid}
 import scala.collection.immutable.Queue
 
-package object sst {
+package object expresso {
 
   type SeqEnv[X, B] = Map[X, Seq[B]]
   type Cupstar[X, B] = List[Cop[X, B]]

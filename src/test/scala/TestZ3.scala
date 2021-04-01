@@ -1,4 +1,4 @@
-package com.github.kmn4.sst
+package com.github.kmn4.expresso
 
 import com.microsoft.z3._
 import org.scalatest.flatspec._

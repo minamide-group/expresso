@@ -1,9 +1,9 @@
-package com.github.kmn4.sst.machine
+package com.github.kmn4.expresso.machine
 
 import com.microsoft.z3
 
-import com.github.kmn4.sst._
-import com.github.kmn4.sst.math.Presburger._
+import com.github.kmn4.expresso._
+import com.github.kmn4.expresso.math.Presburger._
 
 object Parikh {
   type Image[A] = Map[A, Int]

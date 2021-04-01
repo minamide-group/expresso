@@ -1,12 +1,12 @@
-package com.github.kmn4.sst.strategy
+package com.github.kmn4.expresso.strategy
 
-import com.github.kmn4.sst.math._
-import com.github.kmn4.sst.machine._
-import com.github.kmn4.sst.Solver
-import com.github.kmn4.sst.language._
-import com.github.kmn4.sst.language.Constraint._
-import com.github.kmn4.sst.strategy.IdentifiedPA
-import com.github.kmn4.sst.strategy.Transduction
+import com.github.kmn4.expresso.math._
+import com.github.kmn4.expresso.machine._
+import com.github.kmn4.expresso.Solver
+import com.github.kmn4.expresso.language._
+import com.github.kmn4.expresso.language.Constraint._
+import com.github.kmn4.expresso.strategy.IdentifiedPA
+import com.github.kmn4.expresso.strategy.Transduction
 import org.scalatest.funsuite.AnyFunSuite
 
 class TransductionTest extends AnyFunSuite {

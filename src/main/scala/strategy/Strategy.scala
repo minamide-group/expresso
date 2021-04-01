@@ -1,6 +1,6 @@
-package com.github.kmn4.sst.strategy
+package com.github.kmn4.expresso.strategy
 
-import com.github.kmn4.sst.language.Constraint.ParikhConstraint
+import com.github.kmn4.expresso.language.Constraint.ParikhConstraint
 
 trait Strategy {
   // 最初の呼び出し時のみ計算を行う．

@@ -1,8 +1,8 @@
-package com.github.kmn4.sst.machine
+package com.github.kmn4.expresso.machine
 
-import com.github.kmn4.sst._
+import com.github.kmn4.expresso._
 import scala.math.max
-import com.github.kmn4.sst.math._
+import com.github.kmn4.expresso.math._
 
 import org.scalatest.flatspec._
 

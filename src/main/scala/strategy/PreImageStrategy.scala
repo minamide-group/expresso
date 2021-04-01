@@ -1,10 +1,10 @@
-package com.github.kmn4.sst.strategy
+package com.github.kmn4.expresso.strategy
 
 import com.microsoft.z3
-import com.github.kmn4.sst._
-import com.github.kmn4.sst.math._
-import com.github.kmn4.sst.machine._
-import com.github.kmn4.sst.language.Constraint._
+import com.github.kmn4.expresso._
+import com.github.kmn4.expresso.math._
+import com.github.kmn4.expresso.machine._
+import com.github.kmn4.expresso.language.Constraint._
 import com.typesafe.scalalogging.Logger
 
 /**

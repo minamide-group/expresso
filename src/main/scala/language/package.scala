@@ -1,6 +1,6 @@
-package com.github.kmn4.sst
+package com.github.kmn4.expresso
 
-import com.github.kmn4.sst.machine._
+import com.github.kmn4.expresso.machine._
 
 /**
   * 対象とする文字列制約の構文と，計算モデルへの変換方法を提供する．

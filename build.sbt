@@ -1,6 +1,6 @@
-name := "sst-composition"
+name := "expresso"
 
-version := "0.2"
+version := "0.3.0-SNAPSHOT"
 
 scalaVersion := "2.13.3"
 

@@ -1,9 +1,9 @@
-package com.github.kmn4.sst
+package com.github.kmn4.expresso
 
-import com.github.kmn4.sst.math.Presburger
-import com.github.kmn4.sst.machine.ParikhSST
-import com.github.kmn4.sst.language.Constraint.ParikhConstraint
-import com.github.kmn4.sst.language.Constraint
+import com.github.kmn4.expresso.math.Presburger
+import com.github.kmn4.expresso.machine.ParikhSST
+import com.github.kmn4.expresso.language.Constraint.ParikhConstraint
+import com.github.kmn4.expresso.language.Constraint
 
 /**
   * 制約を解くアルゴリズムを表現するクラス Strategy を提供する．

@@ -1,8 +1,8 @@
-package com.github.kmn4.sst.language
+package com.github.kmn4.expresso.language
 
-import com.github.kmn4.sst._
-import com.github.kmn4.sst.math._
-import com.github.kmn4.sst.machine._
+import com.github.kmn4.expresso._
+import com.github.kmn4.expresso.math._
+import com.github.kmn4.expresso.machine._
 
 sealed trait RegExp[+A] {
   import RegExp._

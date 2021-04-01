@@ -1,10 +1,10 @@
-package com.github.kmn4.sst
+package com.github.kmn4.expresso
 
-import com.github.kmn4.sst.strategy.PreImageStrategy
+import com.github.kmn4.expresso.strategy.PreImageStrategy
 
 import java.nio.file.{FileSystems, Files}
 import com.typesafe.scalalogging.Logger
-import com.github.kmn4.sst.strategy.ThesisStrategy
+import com.github.kmn4.expresso.strategy.ThesisStrategy
 
 // command line arguments:
 // - 0 : constraint file name (.smt2 file)

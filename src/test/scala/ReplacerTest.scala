@@ -1,8 +1,8 @@
-package com.github.kmn4.sst.language
+package com.github.kmn4.expresso.language
 
 import org.scalatest.funsuite._
 
-import com.github.kmn4.sst.language.PCRE._
+import com.github.kmn4.expresso.language.PCRE._
 
 class ReplacerTest extends AnyFunSuite {
   private type ParsedChar[A, X] = PCRE[A, X]#ParsedChar

@@ -1,10 +1,10 @@
-package com.github.kmn4.sst.machine
+package com.github.kmn4.expresso.machine
 
 import com.microsoft.z3
 
-import com.github.kmn4.sst._
-import com.github.kmn4.sst.machine.ParikhSST.Implicits._
-import com.github.kmn4.sst.math._
+import com.github.kmn4.expresso._
+import com.github.kmn4.expresso.machine.ParikhSST.Implicits._
+import com.github.kmn4.expresso.math._
 
 trait StringIntTransducer[A, B, I] {
   def transduce(w: Seq[A], n: Map[I, Int]): Set[Seq[B]]

@@ -1,4 +1,4 @@
-package com.github.kmn4.sst.math
+package com.github.kmn4.expresso.math
 
 trait MonadPlus[M[_]] {
   def empty[T]: M[T]

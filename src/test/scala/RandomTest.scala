@@ -1,7 +1,7 @@
-package com.github.kmn4.sst
+package com.github.kmn4.expresso
 
-import com.github.kmn4.sst.machine.{MSST, NSST}
-import com.github.kmn4.sst.math._
+import com.github.kmn4.expresso.machine.{MSST, NSST}
+import com.github.kmn4.expresso.math._
 import org.scalatest.flatspec._
 
 object RandomTest {

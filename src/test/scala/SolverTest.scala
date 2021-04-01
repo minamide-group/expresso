@@ -1,10 +1,10 @@
-package com.github.kmn4.sst.strategy
+package com.github.kmn4.expresso.strategy
 
 import org.scalatest.funsuite._
 import org.scalatest.Ignore
 
-import com.github.kmn4.sst.language.Constraint._
-import com.github.kmn4.sst.machine.NSST
+import com.github.kmn4.expresso.language.Constraint._
+import com.github.kmn4.expresso.machine.NSST
 
 @Ignore
 class SolverTest extends AnyFunSuite {

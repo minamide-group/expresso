@@ -1,8 +1,8 @@
-package com.github.kmn4.sst.machine
+package com.github.kmn4.expresso.machine
 
 import scala.collection.immutable.Queue
-import com.github.kmn4.sst._
-import com.github.kmn4.sst.math._
+import com.github.kmn4.expresso._
+import com.github.kmn4.expresso.math._
 
 /** Nondeterministic monoid SST */
 class MSST[Q, A, B, X, Y](
@@ -330,7 +330,7 @@ case class CounterMachine[Q](
 
     val postMap = graphToMap(postEdges) { case (q, a, r) => (q, Option(a)) -> r }
     finalStates.exists { qf =>
-      val nfa = new com.github.kmn4.sst.machine.NFA[NQ, G](
+      val nfa = new com.github.kmn4.expresso.machine.NFA[NQ, G](
         postStates,
         Set(Z, P, M),
         postMap,
