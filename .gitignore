@@ -10,7 +10,7 @@
 /target/*
 !/target/scala-2.13
 /target/scala-2.13/*
-!target/scala-2.13/expresso_*.jar
+!target/scala-2.13/expresso-assembly*.jar
 
 .dir-locals.el
 .sbt-hydra-history
