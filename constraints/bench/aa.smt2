@@ -1,0 +1,25 @@
+;; 2021-04-02T12:36+09:00
+;; preimage : 25.92 s, 278 clauses
+(declare-const u String)
+(declare-const v String)
+(declare-const x String)
+(declare-const p String)
+(declare-const s String)
+(declare-const y String)
+(declare-const z String)
+(declare-const j Int)
+
+(assert (str.in.re y (re.* (str.to.re "b"))))
+(assert (= x (str.replace_all u "a" "aa")))
+(assert (and (<= 0 j) (< j (str.len u))))
+(assert (= p (str.substr x 0 j)))
+(assert (= s (str.substr x j (- (str.len x) j))))
+(assert (= z (str.++ p y s)))
+(assert (= v (str.replace_all z "aa" "a")))
+(assert (not (= (+ (str.len u) (str.len y)) (str.len v))))
+(declare-const c String)
+(assert (= c (str.substr x (- j 1) 2)))
+(assert (str.in.re c (re.comp (str.to.re "aa"))))
+
+(check-sat)
+(get-model)

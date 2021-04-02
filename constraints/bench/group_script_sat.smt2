@@ -1,7 +1,8 @@
-;; キャプチャグループを含む sat な例
+;; group_sc の大きいバージョン
 (declare-const x String)
 (declare-const y String)
 
+(assert (str.in.re x (re.comp (re.++ re.all (str.to.re "<script>") re.all))))
 (assert (= y (str.replace_pcre x
                                (pcre.++
                                 (str.to_pcre "{")
@@ -10,6 +11,6 @@
                                 (pcre.group (pcre.*? pcre.allchar))
                                 (str.to_pcre "}"))
                                (pcre.replacement "<" 1 ">" 2 "</" 1 ">"))))
-(assert (str.in.re y (re.++ re.all (str.to.re "<sc>") (re.* re.allchar) (str.to.re "</sc>") re.all)))
+(assert (str.in.re y (re.++ re.all (str.to.re "<script>") (re.+ re.allchar) (str.to.re "</script>") re.all)))
 (check-sat)
 (get-model)

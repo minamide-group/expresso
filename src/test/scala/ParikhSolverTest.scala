@@ -10,7 +10,7 @@ import java.io.Reader
 
 class ParikhSolverTest extends AnyFunSuite {
   val strategySpecs = Seq(
-    // ("thesis", new ThesisStrategy(_)),
+    ("thesis", new ThesisStrategy(_)),
     ("preimage", new PreImageStrategy(_))
   )
 
@@ -276,6 +276,8 @@ class ParikhSolverTest extends AnyFunSuite {
 """) { (m, _) => () }
 
     testFileUNSAT("concat_prefix_suffix")
+
+    testFileUNSAT("cat_pre_suf")
 
     testFileSAT("insert_script") { (m, _) => info(m.toString) }
 

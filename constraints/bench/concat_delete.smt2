@@ -1,7 +1,4 @@
-;; Slow for both left assoc and right assoc
-;; because concat (resp. replaceall) causes variable (resp. states) blow-up.
-;; (set-logic QF_S)
-
+;; 連接してから replaceall
 (declare-const x String)
 (declare-const y String)
 (declare-const xy String)

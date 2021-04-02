@@ -12,6 +12,7 @@ trait StringIntTransducer[A, B, I] {
 
 /**
   * Parikh SST.
+  *
   * `ls` should not appear as bound variables in acceptFormulas.
   */
 case class ParikhSST[Q, A, B, X, L, I](
@@ -41,7 +42,7 @@ case class ParikhSST[Q, A, B, X, L, I](
     (l ++ i).toMap
   }
 
-  val sst: NSST[Q, A, B, X] = NSST(
+  lazy val sst: NSST[Q, A, B, X] = NSST(
     states,
     inSet,
     xs,
@@ -49,9 +50,9 @@ case class ParikhSST[Q, A, B, X, L, I](
     q0,
     graphToMap(outGraph) { case (q, xbs, _) => q -> xbs }
   )
-  val mxMonoid: Monoid[UpdateX] = updateMonoid(xs)
-  val mlMonoid: Monoid[UpdateL] = ParikhSST.parikhMonoid(ls)
-  val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
+  private val mxMonoid: Monoid[UpdateX] = updateMonoid(xs)
+  private val mlMonoid: Monoid[UpdateL] = ParikhSST.parikhMonoid(ls)
+  private val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
 
   def transition(qs: Set[Q], w: Seq[A]): Set[(Q, UpdateXL)] =
     Monoid.transition(qs, w.toList, (q: Q, a: A) => trans(q, a))(mxlMonoid)
@@ -119,61 +120,7 @@ case class ParikhSST[Q, A, B, X, L, I](
   def sizes: (Int, Int, Int, Int, Int, Int) =
     (states.size, xs.size, ls.size, edges.size, outGraph.size, acceptFormulas.size)
 
-  def endWith(bs: Set[B]): ParikhSST[(Q, Option[X]), A, B, X, L, I] = {
-    val newOutGraph = outGraph.flatMap {
-      case (q, xbs, v) =>
-        xbs.zipWithIndex.flatMap {
-          case (Cop1(x), i)          => Some((q, Some(x)), xbs.take(i + 1), v)
-          case (Cop2(b), i) if bs(b) => Some((q, None), xbs.take(i + 1), v)
-          case _                     => None
-        }
-    }
-    type NQ = (Q, Option[X])
-    val backTrans = graphToMap(edges) { case (q, a, mx, mh, r) => (r, a) -> (q, mx, mh) }
-    def prevStates(nq: NQ, a: A): Iterable[(NQ, Update[X, B], ParikhSST.ParikhUpdate[L])] = {
-      // q -[a / (mx, mh)]-> r
-      val (r, x) = nq
-      x match {
-        case Some(x) => {
-          // If q -[a / (mx, mh)]-> r and mx(x) = u y v, then
-          // (q, y) -[a / (m[x mapsto u y], mh)]-> (r, x)
-          val assignY =
-            for {
-              (q, mx, mh) <- backTrans((r, a))
-              (y, uy) <- {
-                val mxx = mx(x)
-                mxx.zipWithIndex.flatMap {
-                  case (Cop1(y), i) => Some((y, mxx.take(i + 1)))
-                  case _            => None
-                }
-              }
-            } yield ((q, Some(y)), mx + (x -> uy), mh)
-          // Also, if q -[a / (mx, mh)]-> r and mx(x) = u b v and b is in bs,
-          // then (q, _) -[a / (m[x mapsto u b], mh)]-> (r, x)
-          val assignB =
-            for {
-              (q, mx, mh) <- backTrans(r, a)
-              ub <- {
-                val mxx = mx(x)
-                mxx.zipWithIndex.flatMap {
-                  case (Cop2(b), i) if bs(b) => Some(mxx.take(i + 1))
-                  case _                     => None
-                }
-              }
-            } yield ((q, None), mx + (x -> ub), mh)
-          assignY ++ assignB
-        }
-        case None => backTrans((r, a)).map { case (q, mx, mh) => ((q, None), mx, mh) }
-      }
-    }
-    val (newStates, newEdges) = searchStates(newOutGraph.map(_._1), inSet)(prevStates)(
-      { case (q, _, _)           => q },
-      { case (r, a, (q, mx, mh)) => (q, a, mx, mh, r) }
-    )
-    ParikhSST(newStates, inSet, xs, ls, is, newEdges, (q0, None), newOutGraph, acceptFormulas)
-  }
-
-  lazy val nonEmptyVarsAt: Map[Q, Set[X]] = {
+  private lazy val nonEmptyVarsAt: Map[Q, Set[X]] = {
     import scala.collection.mutable.{Map => MMap, Set => MSet}
     val res: MMap[Q, MSet[X]] = MMap.empty.withDefault(_ => MSet.empty)
     def charExistsIn(xbs: XBS): Boolean = xbs.exists(_.is2)
@@ -197,7 +144,7 @@ case class ParikhSST[Q, A, B, X, L, I](
   }
 
   /** Returns a PSST with redundant variables removed. */
-  def removeRedundantVars: ParikhSST[Q, A, B, X, L, I] = {
+  private def removeRedundantVars: ParikhSST[Q, A, B, X, L, I] = {
     val newVars = states.flatMap(nonEmptyVarsAt)
     def deleteNotUsed(alpha: XBS): XBS =
       alpha.filter { case Cop1(x) => newVars contains x; case _ => true }
@@ -209,7 +156,7 @@ case class ParikhSST[Q, A, B, X, L, I](
     this.copy(xs = newVars, edges = newEdges, outGraph = newOutGraph)
   }
 
-  def removeRedundantLogVars: ParikhSST[Q, A, B, X, L, I] = {
+  private def removeRedundantLogVars: ParikhSST[Q, A, B, X, L, I] = {
     val zeroVars = ls.filter(l =>
       edges.forall { case (q, a, m, v, r) => v(l) == 0 } && outGraph.forall { case (q, m, v) => v(l) == 0 }
     )
@@ -231,10 +178,7 @@ case class ParikhSST[Q, A, B, X, L, I](
   ): MonoidSST[Option[(Q, Map[X, (R, R)])], C, Y, K] = {
     // logger.start(n1, n2)
 
-    type UpdateY = Update[Y, C]
-    type UpdateK = ParikhSST.ParikhUpdate[K]
-    type UpdateXL = (UpdateX, UpdateL)
-    type UpdateYK = (UpdateY, UpdateK)
+    type UpdateYK = n2.UpdateXL
     type NQ = (Q, Map[X, (R, R)])
 
     val invTransA: Map[(Q, A), Set[(Q, UpdateXL)]] =
@@ -243,7 +187,7 @@ case class ParikhSST[Q, A, B, X, L, I](
     val invTransB: Map[(R, B), Set[(R, UpdateYK)]] =
       graphToMap(n2.edges) { case (q, b, my, mk, r) => (r, b) -> (q, (my, mk)) }
 
-    // Consider product construction of two NSSTs.
+    // Think of product construction of two NSSTs.
     // invTransX(p)(r, x) is a set of state `q`s where q may transition to r by reading
     // a content of x at state p.
     val invTransX: Map[Q, Map[(R, X), Set[R]]] = {
@@ -581,6 +525,7 @@ case class ParikhSST[Q, A, B, X, L, I](
             type FormulaVar = Either[I, Cop[L, (X, K)]]
             val x = xs.head // Here xs should not be empty
             // TODO ここで Conj をとる意味がわからない
+            //      状態ごとの制約として Seq を許せば Conj は要らないはず
             val formulaK = Presburger.Conj(acceptFormulasK.map(_.renameVars(_.map[Cop[L, K]](Cop2.apply))))
             val renamed: Presburger.Formula[FormulaVar] = formulaK.renameVars(_.map {
               case Cop1(l) => Cop1(l)

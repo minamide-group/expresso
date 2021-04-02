@@ -1,3 +1,4 @@
+;; str.++ のテスト
 (declare-const x0 String)
 (declare-const x1 String)
 (declare-const x2 String)
