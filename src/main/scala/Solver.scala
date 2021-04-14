@@ -80,11 +80,13 @@ class Solver(
     res
   }
 
-  def checkSat(): Unit = {
-    val input = transform(constraints, alphabet)
-    val sat = withLogging("checkSat()")(checker.checkSat(input))
-    if (sat) printLine("sat")
-    else printLine("unsat")
+  def checkSat(): Unit = transform(constraints, alphabet) match {
+    case Some(input) =>
+      val sat = withLogging("checkSat()")(checker.checkSat(input))
+      if (sat) printLine("sat")
+      else printLine("unsat")
+    case None =>
+      printLine("unknown  ; input is not straight-line")
   }
 
   private def parseIntModel(iv: Map[String, Int], intVars: Set[String]): Map[String, Int] = {
@@ -98,9 +100,8 @@ class Solver(
   }
 
   def getModel(): Option[Map[String, Any]] = {
-    withLogging("getModel()")(checker.getModel()) match {
-      case Some((sm, im)) =>
-        val stringVars = sortStringVars(constraints)
+    withLogging("getModel()")(checker.getModel() zip sortStringVars(constraints)) match {
+      case Some(((sm, im), stringVars)) =>
         val iModel = parseIntModel(im, userIntVars)
         val sModel = sm.zipWithIndex.map { case (value, idx) => stringVars(idx) -> value }.toMap
         for ((sVar, value) <- sModel)
@@ -402,35 +403,49 @@ class Solver(
 
   def executeScript(script: smtlib.trees.Commands.Script): Unit = script.commands.foreach(execute)
 
-  def sortStringVars(constraints: Seq[ParikhConstraint]): Seq[String] = {
-    val dependers = constraints.flatMap(_.dependerVars).distinct
-    val dependees = constraints.flatMap(_.dependeeVars).distinct
-    val independents = dependees.diff(dependers)
-    (independents ++ dependers).distinct
+  def sortStringVars(constraints: Seq[ParikhConstraint]): Option[Seq[String]] = {
+    // 重複する定義の存在を確認
+    val dependers = constraints.flatMap(_.dependerVars)
+    if (dependers.zipWithIndex.groupMap(_._1)(_._2).exists(_._2.length > 1))
+      return None
+    val dependees = constraints.flatMap(_.dependeeVars)
+    val vars = (dependers.iterator ++ dependees).toSet
+    val edges = for {
+      c <- constraints
+      er <- c.dependerVars
+    } yield er -> c.dependeeVars.distinct
+    val dependencyGraph = TopSort.Graph(vars, edges.toMap.withDefaultValue(Seq.empty))
+    TopSort.sort(dependencyGraph).map { sorted =>
+      // 代入文の左辺が後半に連続して現れるようにする
+      // ThesisStrategy, PreImageStrategy はこの仮定に依存している
+      val independent = vars -- dependers
+      val (_, dependent) = sorted.partition(independent)
+      independent.toSeq ++ dependent
+    }
   }
 
-  // input: Seq[ParikhConstraint[String]], Set[Char], Set[String]
-  // output: strategy.Input
   def transform(
       constraints: Seq[ParikhConstraint],
       additionalAlphabet: Set[Char]
-  ): strategy.Input = {
-    val stringVars = sortStringVars(constraints)
-    val varIdx = stringVars.zipWithIndex.toMap
-    val alphabet = {
-      val used = constraints.flatMap(_.usedAlphabet).toSet
-      used ++ additionalAlphabet
+  ): Option[strategy.Input] = // SL でなければ None
+    sortStringVars(constraints) map { stringVars =>
+      val varIdx = stringVars.zipWithIndex.toMap
+      val alphabet = {
+        val used = constraints.flatMap(_.usedAlphabet).toSet
+        used ++ additionalAlphabet
+      }
+      val assignments = constraints
+        .collect { case a: AtomicAssignment[String] => a.renameVars(varIdx) }
+        .sortBy(_.dependerVars.head)
+      val assertions = constraints.collect { case a: ParikhAssertion[String] => a.renameVars(varIdx) }
+      val arithFormula = constraints.collect { case PureIntConstraint(f)     => f }
+      strategy.Input(
+        alphabet,
+        stringVars.length,
+        assignments,
+        assertions,
+        arithFormula
+      )
     }
-    val assignments = constraints.collect { case a: AtomicAssignment[String] => a.renameVars(varIdx) }
-    val assertions = constraints.collect { case a: ParikhAssertion[String]   => a.renameVars(varIdx) }
-    val arithFormula = constraints.collect { case PureIntConstraint(f)       => f }
-    strategy.Input(
-      alphabet,
-      stringVars.length,
-      assignments,
-      assertions,
-      arithFormula
-    )
-  }
 
 }
