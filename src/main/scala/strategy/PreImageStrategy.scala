@@ -238,13 +238,15 @@ class PreImageStrategy(logger: Logger) extends Strategy {
     val rel = {
       val langMap = constraint.assertions.groupMap(_.stringVar)(_.lang)
       val paMap = langMap.view.mapValues { langs =>
-        langs.map(
-          _ match {
-            case language.ParikhLanguage.FromRegExp(re) =>
-              re.toNFA(alphabet).toDFA.minimized.toParikhAutomaton[Int, String]
-            case lang => lang.toParikhAutomaton(alphabet)
-          }
-        )
+        val (dfas, pas) = langs partitionMap {
+          case language.ParikhLanguage.FromRegExp(re) =>
+            Left { re.toNFA(alphabet).toDFA.minimized }
+          case lang => Right(lang.toParikhAutomaton(alphabet))
+        }
+        val dfa: Option[DFA[Int, Char]] = dfas.reduceOption[DFA[Int, Char]] {
+          case (acc, d) => acc.intersect(d).minimized
+        }
+        pas ++ dfa.map(_.toParikhAutomaton[Int, String])
       }
       val pas = (0 to maxVar).map { idx =>
         val all = ParikhAutomaton.universal[Int, Char, Int, String](0, alphabet)

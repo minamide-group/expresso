@@ -300,61 +300,31 @@ class DFA[Q, A](
       case e: NoSuchElementException => false
     }
 
-  // precondition: transition table must be filled
-  def minimized: DFA[Int, A] = {
-    def isFinal(p: Q) = finalStates contains p
+  lazy val edges: Set[(Q, A, Q)] = for {
+    q <- states
+    a <- alpha
+    r <- transition.get((q, a))
+  } yield (q, a, r)
 
-    def getStates(pair: Set[Q]) = {
-      val ls = pair.toList
-      if (ls.length == 1) (ls(0), ls(0))
-      else (ls(0), ls(1))
-    }
-
-    val allPairs = for (p <- states; q <- states) yield Set(p, q)
-    var notEquiv = allPairs.filter(pair => {
-      val (p, q) = getStates(pair)
-      isFinal(p) ^ isFinal(q)
-    })
-    var save: Set[Set[Q]] = Set()
-    while (notEquiv != save) {
-      save = notEquiv
-      for (pair <- allPairs -- notEquiv) {
-        val (p, q) = getStates(pair)
-        if (alpha.exists(a => notEquiv contains Set(transition(p, a), transition(q, a)))) {
-          notEquiv += pair
-        }
-      }
-    }
-    val eqPairs = allPairs -- notEquiv
-    var equivs: List[Set[Q]] = List()
-    var rest = states
-
-    def eqClass(p: Q): Set[Q] = states.filter(q => eqPairs contains Set(p, q))
-
-    while (rest.nonEmpty) {
-      val p = rest.toList.head
-      val eqP = eqClass(p)
-      equivs ::= eqP
-      rest --= eqP
-    }
-    val newStates = equivs.indices.toSet
-    val eq2st: Map[Set[Q], Int] =
-      equivs.zipWithIndex.toMap
-    val st2eq: Map[Int, Set[Q]] = eq2st.map({ case (s, i) => (i, s) })
-    val newTransition: Map[(Int, A), Int] = (for (i <- newStates; a <- alpha) yield {
-      val e = st2eq(i)
-      val p = e.head
-      val d = transition(p, a)
-      (i, a) -> eq2st(eqClass(d))
-    }).toMap
+  def reversed: DFA[Int, A] = {
+    val revMap = graphToMap(edges) { case (q, a, r) => (r, a) -> q }
+    val (newStates, newEdges) = searchStates(Set(finalStates), alpha) {
+      case (qs, a) =>
+        val rs = qs.flatMap(q => revMap((q, a)))
+        Iterable(rs)
+    }(identity, { case (qs, a, rs) => (qs, a, rs) })
+    val newEdgeMap =
+      newEdges.iterator.map { case (q, a, r) => (q, a) -> r }.toMap[(Set[Q], A), Set[Q]]
     new DFA(
       newStates,
       alpha,
-      newTransition,
-      eq2st(eqClass(q0)),
-      finalStates.map(eqClass).map(eq2st)
-    )
+      newEdgeMap,
+      finalStates,
+      newStates.filter(_ contains q0)
+    ).renamed
   }
+
+  def minimized: DFA[Int, A] = reversed.reversed
 
   def asNFA: NFA[Q, A] = new NFA(
     states,
