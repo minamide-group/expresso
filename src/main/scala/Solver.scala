@@ -18,7 +18,7 @@ import smtlib.trees.Terms
 import smtlib.trees.Terms.FunctionApplication
 import smtlib.trees.Terms.QualifiedIdentifier
 import smtlib.trees.Terms.SNumeral
-import smtlib.trees.Terms.SString
+// import smtlib.trees.Terms.SString
 import smtlib.trees.Terms.SSymbol
 import smtlib.trees.Terms.SimpleIdentifier
 import smtlib.trees.Terms.Sort
@@ -253,6 +253,14 @@ class Solver(
   def expectParikhTransduction(
       t: SMTTerm
   ): (String, ParikhTransduction[Char, String], Seq[ParikhConstraint]) = t match {
+    case Strings.At(SimpleQualID(rhsVar), t) =>
+      val (pt, cs) = expectInt(t)
+      val (idx, len) = (freshTemp(), freshTemp())
+      val intc = Seq[ParikhConstraint](
+        pt === Presburger.Var(idx),
+        Presburger.Const(1) === Presburger.Var(len)
+      )
+      (rhsVar, ParikhTransduction.Substr(idx, len), cs ++ intc)
     case Strings.Substring(SimpleQualID(rhsVar), t1, t2) =>
       val (pt1, cs1) = expectInt(t1)
       val (pt2, cs2) = expectInt(t2)
@@ -287,13 +295,15 @@ class Solver(
     // (rhs, transduction)
     def unapply(e: SMTTerm): Option[(String, Transduction[Char])] =
       e match {
+        case Strings.Experimental.Replace(SimpleQualID(name), SString(target), SString(word)) =>
+          Some((name, Transduction.Replace(target, word)))
         case SimpleApp("str.replaceall", Seq(SimpleQualID(name), SString(target), SString(word))) =>
           Some((name, Transduction.ReplaceAll(target, word)))
         case SimpleApp("str.replace_all", Seq(SimpleQualID(name), SString(target), SString(word))) =>
           Some((name, Transduction.ReplaceAll(target, word)))
         case SimpleApp("str.replace_some", Seq(SimpleQualID(name), SString(target), SString(word))) =>
           Some((name, Transduction.ReplaceSome(target, word)))
-        case Strings.At(SimpleQualID(name), SimpleQualID(pos)) =>
+        case Strings.At(SimpleQualID(name), SNumeral(pos)) =>
           Some((name, Transduction.At(pos.toInt)))
         case SimpleApp("str.replace_pcre", Seq(SimpleQualID(name), pcre, replacement)) =>
           Some((name, Transduction.ReplacePCRE(expectPCRE(pcre), expectReplacement(replacement))))
@@ -361,6 +371,12 @@ class Solver(
         Some(wordAndVars)
       case _ => None
     }
+  }
+
+  object SString {
+    private val unescape = Unescaper.unescape _
+    def unapply(term: Terms.SString): Option[String] =
+      Terms.SString.unapply(term).map(unescape)
   }
 
   // (assert t)
@@ -448,4 +464,32 @@ class Solver(
       )
     }
 
+}
+
+object Unescaper {
+  private val hexCode = {
+    val pat = raw"\\x([\dabcdef]{2})".r
+    val fromHex = (s: String) => Integer.parseInt(s, 16).toChar.toString
+    (w: String) => pat.replaceAllIn(w, m => fromHex(m.group(1)))
+  }
+  private val backslashesSeq: Seq[(Char, Char)] = Seq(
+    ('f', '\f'),
+    ('v', 11),
+    ('r', '\r'),
+    ('n', '\n'),
+    ('t', '\t'),
+    ('"', '"'),
+    ('\\', '\\')
+  )
+  private val backslashes = backslashesSeq
+    .map {
+      case (target, replacement) =>
+        val t = "\\" + target
+        val r = replacement.toString
+        (w: String) => w.replace(t, r)
+    }
+  private val func = (Seq(hexCode) ++ backslashes)
+    .reduce[String => String] { case (acc, f) => acc andThen f }
+
+  def unescape(w: String): String = func(w)
 }

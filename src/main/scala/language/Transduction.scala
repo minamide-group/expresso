@@ -20,6 +20,45 @@ trait Transduction[C] {
 
 object Transduction {
 
+  case class Replace[C](target: Seq[C], word: Seq[C]) extends Transduction[C] {
+
+    override def usedAlphabet: Set[C] = (target.iterator ++ word.iterator).toSet
+
+    override def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
+      type Q = Int
+      type X = Int
+      type UpdateX = Update[X, C]
+      type Edges = Iterable[(Q, C, UpdateX, Q)]
+      val x = 0
+      val dfa = postfixDFA(target, alphabet)
+      val states = dfa.states -- dfa.finalStates
+      val edges: Edges = {
+        // In each transition, DFA discards some prefix string (possibly empty one).
+        // SST should store it in variable.
+        for (q <- states; a <- alphabet)
+          yield {
+            val t = dfa.transition((q, a))
+            val (r, append) =
+              if (dfa.finalStates contains t) (t, word)
+              else {
+                val qStored = target.take(q) ++ List(a)
+                (t, qStored.take(qStored.length - t).toList)
+              }
+            val m = Map(x -> (Cop1(x) +: append.map[Cop[X, C]](Cop2.apply)).toList)
+            (q, a, m, r)
+          }
+      }
+      val outF: Map[Q, Set[Cupstar[X, C]]] = graphToMap {
+        // On each state q, DFA has partially matched prefix of target string.
+        states.toList.map(q => {
+          val stored = target.take(q)
+          q -> (List(Cop1(x)) ++ stored.toList.map(Cop2.apply))
+        })
+      }(identity)
+      NSST[Q, C, C, X](states, alphabet, Set(x), edges.toSet, dfa.q0, outF)
+    }
+
+  }
   case class ReplaceAll[C](target: Seq[C], word: Seq[C]) extends Transduction[C] {
 
     override def usedAlphabet: Set[C] = target.toSet ++ word.toSet
