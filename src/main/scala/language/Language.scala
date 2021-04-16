@@ -131,7 +131,7 @@ object ParikhLanguage {
         val trans = graphToMap(edges) { case (q, a, v, r) => (q, a) -> (r, v) }
         alphabet.flatMap { a =>
           trans(dfa.q0, a).map { case (r, v) => (skipState, a, v + (2 -> 0), r) } +
-            ((skipState, a, Map(0 -> 1, 1 -> 1, 2 -> 1), dfa.q0))
+            ((skipState, a, Map(0 -> 1, 1 -> 1, 2 -> 1), skipState))
         }
       }
       ParikhAutomaton[Q, A, L, I](
