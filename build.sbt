@@ -13,6 +13,7 @@ libraryDependencies ++= Seq(
 fork in run := true
 fork in Test := true
 cancelable in Global := true
+test in assembly := {}
 
 scalacOptions ++= Seq(
   "-encoding",

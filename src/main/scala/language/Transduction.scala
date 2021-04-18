@@ -24,6 +24,29 @@ private case class NGSM[Q, A, B](
   )
 }
 
+private case class ParikhNGSM[Q, A, B, L](
+    states: Set[Q],
+    inSet: Set[A],
+    ls: Set[L],
+    edges: Set[(Q, A, Seq[B], Map[L, Int], Q)],
+    q0: Q,
+    outGraph: Set[(Q, Seq[B], Map[L, Int])]
+) {
+  private def lift(bs: Seq[B]): Map[Unit, List[Cop[Unit, B]]] =
+    Map(() -> (Cop1(()) +: bs.map(Cop2.apply)).toList)
+  def toParikhSST[I]: ParikhSST[Q, A, B, Unit, L, I] = ParikhSST(
+    states,
+    inSet,
+    Set(()),
+    ls,
+    Set.empty,
+    edges.map(e => e.copy(_3 = lift(e._3))),
+    q0,
+    outGraph.map(o => o.copy(_2 = lift(o._2)(()))),
+    Seq.empty
+  )
+}
+
 /** Unary transduction */
 trait Transduction[C] {
   def usedAlphabet: Set[C]
@@ -46,8 +69,8 @@ object Transduction {
     override def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
       val dfa = postfixDFA(target, alphabet)
       val edges = {
-        // In each transition, DFA discards some prefix string (possibly empty one).
-        // SST should store it in variable.
+        // In each transition, DFA discards some prefix string (possibly empty one),
+        // which is output by the transducer.
         for {
           q <- dfa.states
           a <- alphabet
@@ -75,37 +98,24 @@ object Transduction {
 
     /** Construct NSST which replaces `target` input string with `word` */
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
-      type Q = Int
-      type X = Int
-      type UpdateX = Update[X, C]
-      type Edges = Iterable[(Q, C, UpdateX, Q)]
-      val x = 0
       val dfa = postfixDFA(target, alphabet)
       val states = dfa.states -- dfa.finalStates
-      val edges: Edges = {
-        // In each transition, DFA discards some prefix string (possibly empty one).
-        // SST should store it in variable.
-        for (q <- states; a <- alphabet)
-          yield {
-            val t = dfa.transition((q, a))
-            val (r, append) =
-              if (dfa.finalStates contains t) (dfa.q0, word)
-              else {
-                val qStored = target.take(q) ++ List(a)
-                (t, qStored.take(qStored.length - t).toList)
-              }
-            val m = Map(x -> (Cop1(x) +: append.map[Cop[X, C]](Cop2.apply)).toList)
-            (q, a, m, r)
-          }
-      }
-      val outF: Map[Q, Set[Cupstar[X, C]]] = graphToMap {
-        // On each state q, DFA has partially matched prefix of target string.
-        states.toList.map(q => {
-          val stored = target.take(q)
-          q -> (List(Cop1(x)) ++ stored.toList.map(Cop2.apply))
-        })
-      }(identity)
-      NSST[Q, C, C, X](states, alphabet, Set(x), edges.toSet, dfa.q0, outF)
+      val edges =
+        for {
+          q <- states
+          a <- alphabet
+        } yield {
+          val r = dfa.transition((q, a))
+          val append =
+            if (dfa.finalStates(r)) word
+            else {
+              val qStored = target.take(q) :+ a
+              qStored.take(qStored.length - r)
+            }
+          (q, a, append, r % target.length)
+        }
+      val outGraph = states.map(q => (q, target.take(q)))
+      NGSM(states, alphabet, edges.toSet, dfa.q0, outGraph).toNSST.renamed
     }
 
   }
@@ -116,41 +126,21 @@ object Transduction {
     override def usedAlphabet: Set[C] = target.toSet ++ word.toSet
 
     def toSST(alphabet: Set[C]): NSST[Int, C, C, Int] = {
-      type Q = Int
-      type X = Int
-      type UpdateX = Update[X, C]
-      type Edges = Iterable[(Q, C, UpdateX, Q)]
-      val x = 0
       val dfa = postfixDFA(target, alphabet)
       val states = dfa.states -- dfa.finalStates
-      val edges: Edges = {
-        // In each transition, DFA discards some prefix string (possibly empty one).
-        // SST should store it in variable.
-        states.flatMap { q =>
-          alphabet.flatMap { a =>
-            val t = dfa.transition((q, a))
-            // Difference from ReplaceAll
-            val (r, appends) =
-              if (dfa.finalStates contains t) (dfa.q0, (Seq(word, target)))
-              else {
-                val qStored = target.take(q) ++ List(a)
-                (t, Seq(qStored.take(qStored.length - t).toList))
-              }
-            appends.map(append => {
-              val m = Map(x -> (Cop1(x) +: append.map[Cop[X, C]](Cop2.apply)).toList)
-              (q, a, m, r)
-            })
+      val edges =
+        for {
+          q <- states
+          a <- alphabet
+          r <- dfa.transition.get(q, a).iterator
+          append <- {
+            val qStored = target.take(q) :+ a
+            val opt = if (dfa.finalStates(r)) Some(word) else None
+            Seq(qStored.take(qStored.length - (r % target.length))) ++ opt
           }
-        }
-      }
-      val outF: Map[Q, Set[Cupstar[X, C]]] = graphToMap {
-        // On each state q, DFA has partially matched prefix of target string.
-        states.toList.map(q => {
-          val stored = target.take(q)
-          q -> (List(Cop1(x)) ++ stored.toList.map(Cop2.apply))
-        })
-      }(identity)
-      NSST[Q, C, C, X](states, alphabet, Set(x), edges.toSet, dfa.q0, outF)
+        } yield (q, a, append, r % target.length)
+      val outGraph = states.map(q => (q, target.take(q)))
+      NGSM(states, alphabet, edges, dfa.q0, outGraph).toNSST.renamed
     }
   }
 

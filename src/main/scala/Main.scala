@@ -16,16 +16,16 @@ object Main extends App {
   val lexer = new smtlib.lexer.Lexer(new java.io.FileReader(path.toFile()))
   val parser = new smtlib.parser.Parser(lexer)
   val script = parser.parseScript
-  val checker = args.applyOrElse(1, "preimage") match {
+  val checker = args.applyOrElse(1, (_: Int) => "preimage") match {
     case "preimage" => new PreImageStrategy(logger)
     case "thesis"   => new ThesisStrategy(logger)
-    case s          => throw new Exception(s"Invalid strategy: ${s}\nPossible values are: preimage or thesis")
+    case s          => throw new Exception(s"Invalid strategy: ${s}\nPossible values are: preimage, thesis")
   }
-  // Ensure that alphabet includes at least 2 letters.
+
   new Solver(
     checker = checker,
     print = true,
     logger = logger,
-    alphabet = "ab".toSet
+    alphabet = "ab".toSet // Ensure that alphabet includes at least 2 letters.
   ).executeScript(script)
 }
