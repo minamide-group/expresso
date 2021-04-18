@@ -7,24 +7,41 @@ import com.github.kmn4.expresso.language._
 import com.github.kmn4.expresso.machine._
 import com.github.kmn4.expresso.math.Presburger.Sugar._
 import com.github.kmn4.expresso.math._
+import com.github.kmn4.expresso.smttool.Strings
+import com.github.kmn4.expresso.smttool.Strings.{StringSort}
+import com.github.kmn4.expresso.smttool.{SimpleQualID, SimpleApp}
 import com.microsoft.z3
 import com.typesafe.scalalogging.Logger
 import smtlib.theories.Ints
-import smtlib.theories.experimental.Strings
-import smtlib.theories.experimental.Strings.StringSort
 import smtlib.theories.{Core => CoreTheory}
 import smtlib.trees.Commands.{Command => SMTCommand}
 import smtlib.trees.Terms
-import smtlib.trees.Terms.FunctionApplication
-import smtlib.trees.Terms.QualifiedIdentifier
 import smtlib.trees.Terms.SNumeral
 // import smtlib.trees.Terms.SString
 import smtlib.trees.Terms.SSymbol
-import smtlib.trees.Terms.SimpleIdentifier
 import smtlib.trees.Terms.Sort
 import smtlib.trees.Terms.{Term => SMTTerm}
 import smtlib.trees.{Commands => SMTCommands}
 import smtlib.trees.{Terms => SMTTerms}
+import smtlib.trees.TreeTransformer
+import smtlib.trees.Tree
+
+// 変数にプレフィックスを加えるのは Preprocessor (一時変数の導入をするから).
+// Solver は変数にプレフィックスがついた制約を解き，そのモデルからプレフィックスをはずして出力する．
+// VarProvider は両方から依存されるので独立したクラスとして定義する.
+class VarProvider(tempPrefix: String, userPrefix: String) {
+  private var c = 0
+  def freshTemp(): String = {
+    c += 1
+    s"${tempPrefix}_$c"
+  }
+  val TempVar = s"${tempPrefix}_(.*)".r
+  object UserVar {
+    def apply(x: String): String = s"${userPrefix}_$x"
+    val pat = s"${userPrefix}_(.*)".r
+    def unapplySeq(w: String) = pat.unapplySeq(w)
+  }
+}
 
 class Solver(
     val checker: strategy.Strategy,
@@ -36,14 +53,9 @@ class Solver(
 
   def setLogic(logic: SMTCommands.Logic): Unit = ()
 
-  // temp_*, len_*, user_*
-  val freshTemp = {
-    var varID = 0
-    () => {
-      varID += 1
-      s"temp_$varID"
-    }
-  }
+  // temp_*, user_*
+  private val provider = new VarProvider("t", "u")
+  val freshTemp = () => provider.freshTemp()
 
   var env = Map.empty[String, Sort]
   var constraints = Seq.empty[ParikhConstraint]
@@ -80,7 +92,7 @@ class Solver(
     res
   }
 
-  def checkSat(): Unit = transform(constraints, alphabet) match {
+  private[expresso] def checkSat(): Unit = transform(constraints, alphabet) match {
     case Some(input) =>
       val sat = withLogging("checkSat()")(checker.checkSat(input))
       if (sat) printLine("sat")
@@ -89,23 +101,14 @@ class Solver(
       printLine("unknown  ; input is not straight-line")
   }
 
-  private def parseIntModel(iv: Map[String, Int], intVars: Set[String]): Map[String, Int] = {
-    iv.flatMap {
-      case (name, value) if name.indexOf("user_") == 0 =>
-        val i = name.drop(5)
-        if (intVars(i)) Some(name.drop(5) -> value)
-        else None
-      case _ => None
-    }
-  }
-
-  def getModel(): Option[Map[String, Any]] = {
+  private[expresso] def getModel(): Option[Map[String, Any]] = {
     withLogging("getModel()")(checker.getModel() zip sortStringVars(constraints)) match {
-      case Some(((sm, im), stringVars)) =>
-        val iModel = parseIntModel(im, userIntVars)
-        val sModel = sm.zipWithIndex.map { case (value, idx) => stringVars(idx) -> value }.toMap
-        for ((sVar, value) <- sModel)
-          printLine(s"""(define-fun ${sVar} () String "${value}")""")
+      case Some(((ss, im), stringVars)) =>
+        val sm = ss.zipWithIndex.map { case (value, idx) => stringVars(idx) -> value }.toMap
+        // FIXME Proprocessor により一部のユーザ変数が等価な一時変数に置き換えられている
+        val sModel = for ((provider.UserVar(name), value) <- sm) yield name -> value
+        val iModel = for ((provider.UserVar(name), value) <- im) yield name -> value
+        for ((name, value) <- sModel) printLine(s"""(define-fun ${name} () String "${value}")""")
         for ((name, value) <- iModel) printLine(s"(define-fun $name () Int ${value})")
         Some(sModel ++ iModel)
       case None =>
@@ -233,14 +236,14 @@ class Solver(
         val (pt1, cs1) = expectInt(t1)
         val (pt2, cs2) = expectInt(t2)
         (Presburger.Sub(pt1, pt2), cs1 ++ cs2)
-      case Strings.Experimental.IndexOf(SimpleQualID(name), SString(w), SNumeral(c)) if c == 0 =>
+      case Strings.IndexOf(SimpleQualID(name), SString(w), SNumeral(c)) if c == 0 =>
         val newVar = freshTemp()
         val constr = ParikhAssertion(name, ParikhLanguage.IndexOfConst(w, c.toInt, newVar))
         (Presburger.Var(newVar), Seq(constr))
       case Ints.Mul(SNumeral(c), t) =>
         val (pt, cs) = expectInt(t)
         (Presburger.Mult(Presburger.Const(c.toInt), pt), cs)
-      case Strings.Experimental.IndexOf(SimpleQualID(name), SString(w), t) =>
+      case Strings.IndexOf(SimpleQualID(name), SString(w), t) =>
         val (i, cs) = parseAndAbstract(t)
         val j = freshTemp()
         (Presburger.Var(j), cs :+ ParikhAssertion(name, ParikhLanguage.IndexOf(w, i, j)))
@@ -274,28 +277,11 @@ class Solver(
     case _ => throw new Exception(s"${t.getPos}: Cannot interpret given S-expression ${t} as transduction")
   }
 
-  object SimpleQualID {
-    def apply(name: String): QualifiedIdentifier =
-      QualifiedIdentifier(SimpleIdentifier(SSymbol(name)), None)
-    def unapply(term: SMTTerm): Option[String] = term match {
-      case QualifiedIdentifier(SimpleIdentifier(SSymbol(name)), None) => Some(name)
-      case _                                                          => None
-    }
-  }
-
-  object SimpleApp {
-    def apply(name: String, args: SMTTerm*): SMTTerm = FunctionApplication(SimpleQualID(name), args)
-    def unapply(term: SMTTerm): Option[(String, Seq[SMTTerm])] = term match {
-      case FunctionApplication(SimpleQualID(name), terms) => Some((name, terms))
-      case _                                              => None
-    }
-  }
-
   object SimpleTransduction {
     // (rhs, transduction)
     def unapply(e: SMTTerm): Option[(String, Transduction[Char])] =
       e match {
-        case Strings.Experimental.Replace(SimpleQualID(name), SString(target), SString(word)) =>
+        case Strings.Replace(SimpleQualID(name), SString(target), SString(word)) =>
           Some((name, Transduction.Replace(target, word)))
         case SimpleApp("str.replaceall", Seq(SimpleQualID(name), SString(target), SString(word))) =>
           Some((name, Transduction.ReplaceAll(target, word)))
@@ -417,7 +403,10 @@ class Solver(
     case _                                                    => throw new Exception(s"${cmd.getPos}: Unsupported command: ${cmd}")
   }
 
-  def executeScript(script: smtlib.trees.Commands.Script): Unit = script.commands.foreach(execute)
+  def executeScript(script: smtlib.trees.Commands.Script): Unit = {
+    val processed = new Preprocessor(provider).preprocess(script.commands)
+    processed.foreach(execute)
+  }
 
   def sortStringVars(constraints: Seq[ParikhConstraint]): Option[Seq[String]] = {
     // 重複する定義の存在を確認
@@ -466,6 +455,9 @@ class Solver(
 
 }
 
+// \f, \v, \r, \n, \t, \", \\, \xdd
+// NOTE 最新仕様ではエスケープ文字ではないが，PyEx では "\x61" == "a" と考えている
+//      Z3 でも 4.8.8 だとエスケープ文字扱いだが 4.11 では新しい仕様に基づき通常の文字扱いする
 object Unescaper {
   private val hexCode = {
     val pat = raw"\\x([\dabcdef]{2})".r
