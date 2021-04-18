@@ -181,7 +181,18 @@ class Preprocessor(provider: VarProvider) {
     assertions.flatMap(assertion => Optimizer.optimize(assertion))
 
   // PyEx-{td,z3,zz} を EXPRESSO が解ける形に変換する
-  def preprocess(argCommands: Seq[Commands.Command]): Seq[Commands.Command] = {
+  // NOTE 一部のユーザ変数が等価な一時変数に置き換えられる
+  // (= user_x (f user_x))
+  // ==> (= user_x temp_1), (= temp_1 (f user_x))
+  // ==> 代表元は temp_1 で，user_x が temp_1 に置き換えられる
+  // ==> (= temp_1 (f temp_1)), user_x -> temp_1
+  // なので，ユーザ変数とその代表元のペア全体もプリプロセス結果に含める必要がある.
+  // Solver はこれを使って全てのユーザ変数を出力する．
+  def preprocess(argCommands: Seq[Commands.Command]): (
+      Seq[Commands.Command],
+      // 全てのユーザ変数からその置き換え先へのマップ (置き換えてないなら自分)
+      Map[String, String]
+  ) = {
     var commands = argCommands
     // (check-sat), (get-model) が最後以外に現れるものは考えない
     val getModel = commands.indexWhere(_.isInstanceOf[Commands.GetModel])
@@ -264,9 +275,7 @@ class Preprocessor(provider: VarProvider) {
     // (= x (f x))
     // =[flatten]=> assign: (= x1 (f x)), literal: (= x x1)
     // =[union-find]=> x -> x1
-    val substVars = subst {
-      case SimpleQualID(name) if uf.isDefinedAt(name) => SimpleQualID(uf(name))
-    }
+    val substVars = subst { case SimpleQualID(name) if uf.isDefinedAt(name) => SimpleQualID(uf(name)) }
     val literalBools = literals.flatMap {
       case Core.Equals(StringVariable(x), StringVariable(y)) => None
       case term                                              => Some(substVars(term))
@@ -274,13 +283,14 @@ class Preprocessor(provider: VarProvider) {
     val assignBools = assigns.map { case (x, t) => substVars(Core.Equals(SimpleQualID(x), t)) }
     bools = assignBools ++ literalBools
 
-    val decls = sorts.map.iterator.map {
-      case (x, sort) =>
-        Commands.DeclareConst(Terms.SSymbol(x), sort)
-    }
+    val decls = sorts.map.iterator.map { case (x, sort) => Commands.DeclareConst(Terms.SSymbol(x), sort) }
     val check = if (checkSat >= 0) Some(Commands.CheckSat()) else None
     val get = if (getModel >= 0) Some(Commands.GetModel()) else None
-    (decls ++ bools.distinct.map(Commands.Assert.apply) ++ check ++ get).toSeq
+    val resCommands = (decls ++ bools.distinct.map(Commands.Assert.apply) ++ check ++ get).toSeq
+    val userRepr =
+      for ((x @ provider.UserVar(_), Strings.StringSort()) <- sorts.map)
+        yield (x, uf.applyOrElse(x, (_: String) => x))
+    (resCommands, userRepr)
   }
   // def preprocess
 

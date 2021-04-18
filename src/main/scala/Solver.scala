@@ -33,12 +33,12 @@ class VarProvider(tempPrefix: String, userPrefix: String) {
   private var c = 0
   def freshTemp(): String = {
     c += 1
-    s"${tempPrefix}_$c"
+    s"${tempPrefix}$c"
   }
-  val TempVar = s"${tempPrefix}_(.*)".r
+  val TempVar = s"${tempPrefix}(.*)".r
   object UserVar {
-    def apply(x: String): String = s"${userPrefix}_$x"
-    val pat = s"${userPrefix}_(.*)".r
+    def apply(x: String): String = s"${userPrefix}$x"
+    val pat = s"${userPrefix}(.*)".r
     def unapplySeq(w: String) = pat.unapplySeq(w)
   }
 }
@@ -60,6 +60,8 @@ class Solver(
   var env = Map.empty[String, Sort]
   var constraints = Seq.empty[ParikhConstraint]
   var userIntVars = Set.empty[String]
+  // プリプロセスによりユーザ変数が一時変数に置き換えられる場合がある (Preprocessor のコメント参照)
+  private var userRepr: Map[String, String] = Map.empty
 
   def declareConst(name: SMTTerms.SSymbol, sort: SMTTerms.Sort): Unit = {
     val SMTTerms.SSymbol(s) = name
@@ -101,16 +103,17 @@ class Solver(
       printLine("unknown  ; input is not straight-line")
   }
 
-  private[expresso] def getModel(): Option[Map[String, Any]] = {
+  private[expresso] def getModel(): Option[(Map[String, String], Map[String, Int])] = {
     withLogging("getModel()")(checker.getModel() zip sortStringVars(constraints)) match {
       case Some(((ss, im), stringVars)) =>
         val sm = ss.zipWithIndex.map { case (value, idx) => stringVars(idx) -> value }.toMap
-        // FIXME Proprocessor により一部のユーザ変数が等価な一時変数に置き換えられている
-        val sModel = for ((provider.UserVar(name), value) <- sm) yield name -> value
+        val sModel =
+          for ((provider.UserVar(x), representative) <- userRepr)
+            yield x -> sm.getOrElse(representative, "")
         val iModel = for ((provider.UserVar(name), value) <- im) yield name -> value
         for ((name, value) <- sModel) printLine(s"""(define-fun ${name} () String "${value}")""")
         for ((name, value) <- iModel) printLine(s"(define-fun $name () Int ${value})")
-        Some(sModel ++ iModel)
+        Some((sModel, iModel))
       case None =>
         printLine("Cannot get model")
         None
@@ -217,12 +220,12 @@ class Solver(
     }
     t match {
       case SNumeral(i)        => (Presburger.Const(i.toInt), Seq.empty)
-      case SimpleQualID(name) => (Presburger.Var(s"user_$name"), Seq.empty)
+      case SimpleQualID(name) => (Presburger.Var(name), Seq.empty)
       case Ints.Neg(t) =>
         val (pt, cs) = expectInt(t)
         (Presburger.Const(0) - pt, cs)
       case Strings.Length(SimpleQualID(name)) =>
-        val lenVar = s"len_${name}"
+        val lenVar = provider.freshTemp()
         (Presburger.Var(lenVar), Seq(ParikhAssertion(name, ParikhLanguage.Length(lenVar))))
       case CodeAt(SimpleQualID(name), i) if env.get(name).exists(_ == StringSort()) =>
         val c = freshTemp()
@@ -403,12 +406,18 @@ class Solver(
     case _                                                    => throw new Exception(s"${cmd.getPos}: Unsupported command: ${cmd}")
   }
 
-  def executeScript(script: smtlib.trees.Commands.Script): Unit = {
-    val processed = new Preprocessor(provider).preprocess(script.commands)
-    processed.foreach(execute)
+  private def preprocess(commands: Seq[SMTCommands.Command]): Seq[SMTCommands.Command] = {
+    val (res, varMap) = new Preprocessor(provider).preprocess(commands)
+    userRepr = varMap
+    res
   }
 
-  def sortStringVars(constraints: Seq[ParikhConstraint]): Option[Seq[String]] = {
+  def executeScript(script: SMTCommands.Script): Unit = {
+    val cmds = preprocess(script.commands)
+    cmds.foreach(execute)
+  }
+
+  private def sortStringVars(constraints: Seq[ParikhConstraint]): Option[Seq[String]] = {
     // 重複する定義の存在を確認
     val dependers = constraints.flatMap(_.dependerVars)
     if (dependers.zipWithIndex.groupMap(_._1)(_._2).exists(_._2.length > 1))
@@ -429,7 +438,7 @@ class Solver(
     }
   }
 
-  def transform(
+  private def transform(
       constraints: Seq[ParikhConstraint],
       additionalAlphabet: Set[Char]
   ): Option[strategy.Input] = // SL でなければ None

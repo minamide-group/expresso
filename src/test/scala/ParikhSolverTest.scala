@@ -53,9 +53,8 @@ class ParikhSolverTest extends AnyFunSuite {
       testWithInfoTime(s"[$strategyName] test SAT\n${constraint.trim}") {
         withExecuteScriptNoPrint(new java.io.StringReader(constraint)) { solver =>
           solver.getModel() match {
-            // case Some((sModel, iModel)) => assertions(sModel, iModel)
-            case Some(models) => info(models.toString())
-            case None         => fail()
+            case Some((sModel, iModel)) => assertions(sModel, iModel)
+            case None                   => fail()
           }
         }
       }
@@ -89,9 +88,8 @@ class ParikhSolverTest extends AnyFunSuite {
       testWithInfoTime(s"""[$strategyName] test SAT: "$name"""") {
         withExecuteFile(name) { solver =>
           solver.getModel() match {
-            // case Some((sModel, iModel)) => assertions(sModel, iModel)
-            case Some(m) => info(m.toString())
-            case None    => fail()
+            case Some((sModel, iModel)) => assertions(sModel, iModel)
+            case None                   => fail()
           }
         }
       }
