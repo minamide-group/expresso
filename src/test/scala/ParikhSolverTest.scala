@@ -47,6 +47,7 @@ class ParikhSolverTest extends AnyFunSuite {
       val finished = System.nanoTime()
       info(s"Took ${(finished - started) / 1000000} ms")
     }
+    // TODO assertions の自動導出
     def testSAT(
         constraint: String
     )(assertions: (Map[String, String], Map[String, Int]) => Unit)(implicit pos: Position) =
@@ -98,7 +99,13 @@ class ParikhSolverTest extends AnyFunSuite {
         withExecuteFile(name) { solver => assert(solver.getModel().isEmpty) }
       }
 
-    testFileSAT("deleteall") { (_, _) => () }
+    testFileSAT("deleteall") { (sm, _) =>
+      val (x0, x1, y0, y1, xy) = (sm("x0"), sm("x1"), sm("y0"), sm("y1"), sm("xy"))
+      assert(x1 == x0.replaceAll("<script>", ""))
+      assert(y1 == y0.replaceAll("<script>", ""))
+      assert(xy == x1 ++ y1)
+      assert(xy == "<script>")
+    }
 
     testFileUNSAT("concat_unsat_03")
 
@@ -152,7 +159,12 @@ class ParikhSolverTest extends AnyFunSuite {
 (assert (str.in.re y (re.* (str.to.re "a"))))
 (check-sat)
 (get-model)
-""") { (_, _) => () }
+""") { (sm, _) =>
+      val (x, y) = (sm("x"), sm("y"))
+      assert(x.matches("^a*$"))
+      assert(y == x.replaceAll("b+", ""))
+      assert(y.matches("^a*$"))
+    }
 
     // Unsat case.
     testUNSAT(
@@ -180,7 +192,7 @@ class ParikhSolverTest extends AnyFunSuite {
 """
     ) { (sm, im) =>
       val (x, y) = (sm("x"), sm("y"))
-      assert("(ab)*".r.matches(x))
+      assert("^(ab)*$".r.matches(x))
       assert(y == x.replaceFirst("ab", ""))
       assert(y != "")
     }
@@ -197,7 +209,12 @@ class ParikhSolverTest extends AnyFunSuite {
 """)
 
     // The following two tests shows order in PCRE alternation matters for some situations.
-    testFileSAT("pcre_precedence_sat") { (sm, _) => info(sm.toString) }
+    testFileSAT("pcre_precedence_sat") { (sm, _) =>
+      val (x, y) = (sm("x"), sm("y"))
+      assert(x.matches("^(ab|abb)*$"))
+      assert(y == x.replaceFirst("(ab|abb)+", ""))
+      assert(y != "")
+    }
 
     testFileUNSAT("pcre_precedence_unsat")
 
@@ -217,7 +234,11 @@ class ParikhSolverTest extends AnyFunSuite {
 (check-sat)
 """)
 
-    testFileSAT("group_sc") { (sm, _) => info(sm.toString) }
+    testFileSAT("group_sc") { (sm, _) =>
+      val (x, y) = (sm("x"), sm("y"))
+      assert(y == x.replaceFirst("\\{(.*?):(.*?)\\}", "<$1>$2</$1>"))
+      assert(y.matches("^.*<sc>.*</sc>.*$"))
+    }
 
     implicit class AtMostSubstring(s: String) {
       def atmostSubstring(idx: Int, len: Int): String = {
@@ -255,7 +276,11 @@ class ParikhSolverTest extends AnyFunSuite {
 
     testFileUNSAT("indexof")
 
-    testFileSAT("substr_zip_sat") { (sm, _) => info(sm.toString) }
+    testFileSAT("substr_zip_sat") { (sm, _) =>
+      val (x, y, z) = (sm("x"), sm("y"), sm("z"))
+      assert(z == x.atmostSubstring(0, y.length))
+      assert(z.length != x.length)
+    }
 
     testFileUNSAT("substr_zip_unsat")
 
@@ -277,16 +302,46 @@ class ParikhSolverTest extends AnyFunSuite {
 
     testFileUNSAT("cat_pre_suf")
 
-    testFileSAT("insert_script") { (m, _) => info(m.toString) }
+    testFileSAT("insert_script") { (sm, im) =>
+      val (x, y, z, p, s, l) = (sm("x"), sm("y"), sm("z"), sm("p"), sm("s"), im("l"))
+      assert(x != "<script>")
+      assert(p == x.atmostSubstring(0, l))
+      assert(s == x.atmostSubstring(l, x.length - l))
+      assert(z == p ++ y ++ s)
+      assert(0 < y.length && y.length <= 6)
+      assert(z == "<script>")
+    }
 
-    testFileSAT("reverse_indexof_sat") { (m, _) => info(m.toString) }
+    testFileSAT("reverse_indexof_sat") { (sm, _) =>
+      val (x, y) = (sm("x"), sm("y"))
+      assert(x.matches("^b*a*$"))
+      assert(y == x.reverse)
+      assert(!(y.indexOf("a") < y.indexOf("b")))
+    }
 
     testFileUNSAT("reverse_indexof_unsat")
 
     testFileUNSAT("substr_equiv")
 
-    testFileSAT("for_slide") { (sm, im) => info(s"$sm, $im") }
+    testFileSAT("for_slide") { (sm, im) =>
+      val (x, p, s, y, z, i, j) = (sm("x"), sm("p"), sm("s"), sm("y"), sm("z"), im("i"), im("j"))
+      assert(x.matches("^(ab)*$"))
+      assert(y.matches("^(ab)*$"))
+      assert(j == i)
+      assert(p == x.atmostSubstring(0, j))
+      assert(s == x.atmostSubstring(j, x.length - j))
+      assert(z == p ++ y ++ s)
+      assert(!z.matches("^(ab)*$"))
+    }
 
-    testFileSAT("insert_opt") { (sm, im) => info(s"$sm, $im") }
+    testFileSAT("insert_opt") { (sm, im) =>
+      val (x, y, z, i) = (sm("x"), sm("y"), sm("z"), im("i"))
+      def insert(x: String, y: String, i: Int): String =
+        y.substring(0, i) ++ x ++ y.substring(i, y.length)
+      assert(x.matches("^(ab)*$"))
+      assert(y.matches("^(ab)*$"))
+      assert(z == insert(x, y, i))
+      assert(!z.matches("^(ab)*$"))
+    }
   }
 }
