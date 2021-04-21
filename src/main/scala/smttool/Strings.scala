@@ -3,6 +3,7 @@ package com.github.kmn4.expresso.smttool
 import smtlib.theories.experimental.{Strings => ExpStrings}
 import smtlib.theories.Operations
 import smtlib.trees.Terms.{Term, FunctionApplication, QualifiedIdentifier, Identifier, SSymbol}
+import smtlib.trees.Terms
 
 object Strings {
   val StringSort = ExpStrings.StringSort
@@ -38,18 +39,19 @@ object Strings {
     }
 
     private val RegexPower = "re.^"
+    // Power(r, rep) == ((_ re.^ rep), r)
     object Power {
-      def apply(r: Term, repetitions: Term): Term =
+      def apply(r: Term, repetition: Terms.SExpr): Term =
         FunctionApplication(
-          QualifiedIdentifier(Identifier(SSymbol(RegexPower))),
-          Seq(r, repetitions)
+          QualifiedIdentifier(Identifier(SSymbol(RegexPower), Seq(repetition))),
+          Seq(r)
         )
-      def unapply(term: Term): Option[(Term, Term)] = term match {
+      def unapply(term: Term): Option[(Term, Terms.SExpr)] = term match {
         case FunctionApplication(
-            QualifiedIdentifier(Identifier(SSymbol(RegexPower), Seq()), None),
-            Seq(r, repetitions)
+            QualifiedIdentifier(Identifier(SSymbol(RegexPower), Seq(repetition)), None),
+            Seq(r)
             ) =>
-          Some((r, repetitions))
+          Some((r, repetition))
         case _ => None
       }
     }

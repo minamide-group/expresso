@@ -153,6 +153,9 @@ class Solver(
         ts.tail.foldLeft(expectRegExp(ts.head)) { case (acc, t) => CatExp(acc, expectRegExp(t)) }
       case Strings.Regex.Union(ts @ _*) =>
         ts.tail.foldLeft(expectRegExp(ts.head)) { case (acc, t) => OrExp(acc, expectRegExp(t)) }
+      case Strings.Regex.Power(e, SNumeral(n)) =>
+        val re = expectRegExp(e)
+        (BigInt(1) to n).foldLeft(re) { case (acc, _) => CatExp(acc, re) }
       case Strings.Regex.Range(SString(c1), SString(c2)) if c1.length == 1 && c2.length == 1 =>
         throw new NotImplementedError("re.range is not implemented")
       case SimpleApp("re.comp", Seq(e)) => CompExp(expectRegExp(e))

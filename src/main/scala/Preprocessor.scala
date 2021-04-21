@@ -129,7 +129,12 @@ class Preprocessor(provider: VarProvider) {
       case Ints.Add(`numeralZero`, t) => t
       case Ints.Add(t, `numeralZero`) => t
       case Ints.Sub(t, `numeralZero`) => t
-      case _                          => term
+      case Strings.Concat(ts @ _*) if ts.forall(_.isInstanceOf[Terms.SString]) =>
+        val ws = ts.iterator.map(_.asInstanceOf[Terms.SString]).map(_.value)
+        val w = ws.reduceOption[String](_ ++ _).getOrElse("")
+        Terms.SString(w)
+      case Strings.Length(Terms.SString(w)) => Terms.SNumeral(w.length)
+      case _                                => term
     }
 
     private val transformer = new BottomUpTermTransformer {
@@ -141,20 +146,19 @@ class Preprocessor(provider: VarProvider) {
 
     def fold(term: Terms.Term): Terms.Term = transformer.transform(term, ())._1
   }
-  def fold(terms: Seq[Terms.Term]): Seq[Terms.Term] =
+  private[expresso] def foldConstant(terms: Seq[Terms.Term]): Seq[Terms.Term] =
     terms.map(term => Folder.fold(term))
 
+  // TODO 逆に遅くなりがち
   private object Optimizer {
     private val zeroNumeral = Terms.SNumeral(BigInt(0))
-    private def optimizeRoot(term: Terms.Term): Seq[Terms.Term] = term match {
-      // (str.at t n) = c ==> t ∈ Σ^n c Σ^*
+    private val AtConstEqChar: PartialFunction[Terms.Term, Terms.Term] = {
       case Core.Equals(Strings.At(t, Terms.SNumeral(n)), Terms.SString(c)) if n >= 0 && c.length == 1 =>
         val pre =
           Strings.Regex.Power(Strings.Regex.AllChar(), Terms.SNumeral(n))
         val cr = Strings.ToRegex(Terms.SString(c))
         val post = Strings.Regex.All()
-        Seq(Strings.InRegex(t, Strings.Regex.Concat(pre, cr, post)))
-      // (str.at t (- (str.len t) n)) = c ==> t ∈ Σ^* c Σ^{n-1}
+        Strings.InRegex(t, Strings.Regex.Concat(pre, cr, post))
       case Core.Equals(
           Strings.At(t1, Ints.Sub(t2, Terms.SNumeral(n))),
           Terms.SString(c)
@@ -163,8 +167,15 @@ class Preprocessor(provider: VarProvider) {
         val cr = Strings.ToRegex(Terms.SString(c))
         val post =
           Strings.Regex.Power(Strings.Regex.AllChar(), Terms.SNumeral(n - 1))
-        Seq(Strings.InRegex(t1, Strings.Regex.Concat(pre, cr, post)))
-      case _ => Seq(term)
+        Strings.InRegex(t1, Strings.Regex.Concat(pre, cr, post))
+    }
+    // ツリー構造のルートからトラバースする必要のない最適化
+    private def optimizeRoot(term: Terms.Term): Seq[Terms.Term] = term match {
+      // (str.at t n) = c ==> t ∈ Σ^n c Σ^*,
+      // (str.at t (- (str.len t) n)) = c ==> t ∈ Σ^* c Σ^{n-1}
+      case AtConstEqChar(t)           => Seq(t)
+      case Core.Not(AtConstEqChar(t)) => Seq(Core.Not(t))
+      case _                          => Seq(term)
     }
     private def optimizeOnce(term: Terms.Term): Terms.Term = term match {
       // FIXME optimize をボトムアップ化
@@ -172,12 +183,11 @@ class Preprocessor(provider: VarProvider) {
         t1
       case _ => term
     }
-    private def optimize(term: Terms.Term): Seq[Terms.Term] = ???
     // TODO optimizeOnce
-    def optimize(assertion: Commands.Assert): Seq[Commands.Assert] =
-      optimize(assertion.term).map(Commands.Assert.apply)
+    def optimize(term: Terms.Term): Seq[Terms.Term] = optimizeRoot(term)
   }
-  def optimize(assertions: Seq[Commands.Assert]): Seq[Commands.Assert] =
+  // bool-sorted タームを最適化
+  private def optimize(assertions: Seq[Terms.Term]): Seq[Terms.Term] =
     assertions.flatMap(assertion => Optimizer.optimize(assertion))
 
   // PyEx-{td,z3,zz} を EXPRESSO が解ける形に変換する
@@ -232,6 +242,8 @@ class Preprocessor(provider: VarProvider) {
         andToTerms(simpl)
       case cmd => Seq()
     }
+    bools = foldConstant(bools)
+    // bools = optimize(bools)
 
     // declare-{const,fun} の宣言を覚えておく
     val sorts = SortStore(commands: _*)
@@ -243,6 +255,8 @@ class Preprocessor(provider: VarProvider) {
     }
 
     // 制約に現れる文字列操作を変数に置き換える．
+    // assigns  : y = f(x_1, x_2, ...)
+    // literals : x_i = x_j, x_k = x_l, ...
     val (assigns, literals, newSorts) = flatten(bools)
     newSorts.foreach { case (name, sort) => sorts.register(name, sort) }
 

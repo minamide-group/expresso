@@ -106,6 +106,7 @@ package object smttool {
     def apply(term: Terms.Term, re: Term): Term =
       Strings.InRegex(term, re)
     def unapply(term: Term): Option[(Terms.Term, Term)] = term match {
+      case Strings.InRegex(term, re) => Some((term, re))
       case Strings.Contains(t, StringConst(w)) =>
         val wre = Strings.ToRegex(Terms.SString(w))
         val re =
