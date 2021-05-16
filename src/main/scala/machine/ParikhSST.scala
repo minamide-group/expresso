@@ -850,6 +850,14 @@ case class ParikhSST[Q, A, B, X, L, I](
     }
   }
 
+  // (p1: PST) * (p2: PST) -> (l: Iterator[PST])
+  // where p2(p1(w, n), n) = l.flatMap(_(w, n))
+  def lazyCompose[R, C, Y, K](
+      that: ParikhSST[R, B, C, Y, K, I]
+  ): Iterator[ParikhSST[Int, A, C, Int, Int, I]] = {
+    ???
+  }
+
   def toLogVectorEpsNFT: ENFT[Option[Q], A, Map[L, Int]] = {
     implicit val mon: Monoid[ParikhSST.ParikhUpdate[L]] = Monoid.vectorMonoid(ls)
     ENFT(

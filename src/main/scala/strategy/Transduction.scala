@@ -81,6 +81,10 @@ private object Transduction {
         }
       }
 
+      // val pas: Iterator[ParikhAutomaton[Int, Either[A, Int], Int, String]] = {
+      //   ???
+      // }
+
       def copyVar[L](paID: Int, l: L) = s"copy_${paID}_${l}"
       def sumVar[L](paID: Int, l: L) = s"sum_${paID}_${l}"
 

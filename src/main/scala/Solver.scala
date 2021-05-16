@@ -116,6 +116,22 @@ class Solver(
     }
   }
 
+  // TODO expectConstraint を TreeTransformer で書き直す
+  // (assert t) の t を受け取って ParikhConstraint の Seq を返す.
+  private object BoolToConstraintTransformer extends TreeTransformer {
+
+    type C = Unit
+
+    type R = (ParikhConstraint, Seq[ParikhConstraint])
+
+    override def combine(tree: Tree, context: C, results: Seq[R]): R = ???
+
+  }
+  private def boolToConstraint(term: SMTTerm): Seq[ParikhConstraint] = {
+    val (_, (r, s)) = BoolToConstraintTransformer.transform(term, ())
+    r +: s
+  }
+
   def expandMacro(t: SMTTerm): SMTTerm = t match {
     case CoreTheory.Not(CoreTheory.Equals(SimpleQualID(s1), SimpleQualID(s2)))
         if env.get(s1).exists(_ == StringSort()) && env.get(s2).exists(_ == StringSort()) =>
@@ -276,7 +292,9 @@ class Solver(
         ParikhTransduction.Substr(from, len),
         cs1 ++ cs2 ++ intc
       )
-    case _ => throw new Exception(s"${t.getPos}: Cannot interpret given S-expression ${t} as transduction")
+    // TODO プリプロセス後は getPos できないので，他も修正
+    // case _ => throw new Exception(s"${t.getPos}: Cannot interpret given S-expression ${t} as transduction")
+    case _ => throw new Exception(s"Cannot interpret given S-expression ${t} as transduction")
   }
 
   object SimpleTransduction {
@@ -413,6 +431,7 @@ class Solver(
 
   def executeScript(script: SMTCommands.Script): Unit = {
     val cmds = preprocess(script.commands)
+    cmds.foreach(c => logger.trace(c.toString))
     cmds.foreach(execute)
   }
 
