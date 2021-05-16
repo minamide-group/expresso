@@ -15,7 +15,9 @@
 .dir-locals.el
 .sbt-hydra-history
 
+/archive
 /constraints/nondet/
+/constraints/pyex-*
 /constraints/bench/log
 /dump/
 /bak/
@@ -25,3 +27,7 @@
 *.org
 *.fish
 *.log
+
+/doc/*
+!/doc/*.tex
+!/doc/*.pdf

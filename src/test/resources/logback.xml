@@ -18,7 +18,7 @@
 
     <logger name="nop" level="OFF" />
 
-    <logger name="bench" level="ALL" additivity="false">
-        <appender-ref ref="file" />
+    <logger name="bench" level="INFO" additivity="false">
+        <appender-ref ref="console" />
     </logger>
 </configuration>

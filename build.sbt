@@ -10,11 +10,6 @@ libraryDependencies ++= Seq(
   "ch.qos.logback" % "logback-classic" % "1.2.3"
 )
 
-fork in run := true
-fork in Test := true
-cancelable in Global := true
-test in assembly := {}
-
 scalacOptions ++= Seq(
   "-encoding",
   "utf8",
@@ -22,8 +17,18 @@ scalacOptions ++= Seq(
   "-deprecation",
   "-feature",
   "-unchecked",
-  "-language:implicitConversions",
-  "-language:higherKinds",
-  "-language:existentials",
-  "-language:postfixOps"
+  // "-Xlint",
+  // "Wdead-code",
+  "-language:implicitConversions"
 )
+
+Compile / console / scalacOptions --= Seq(
+  "-Xlint",
+  "-Xfatal-warnings"
+)
+
+fork in run := true
+fork in Test := true
+cancelable in Global := true
+test in assembly := {}
+run / javaOptions += "-Xss8m"
