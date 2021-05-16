@@ -50,7 +50,7 @@ object RandomTest {
     var stack = List(q0)
     var outF = Map.empty[Q, Set[Cupstar[X, B]]]
     var edges = List.empty[(Q, A, Update[X, B], Q)]
-    while (stack nonEmpty) {
+    while (stack.nonEmpty) {
       val q = stack.head
       stack = stack.tail
       val fAtQ = for (_ <- 0 until R.nextInt(maxFNum + 1)) yield randomF(vars, out, maxRepeatB)

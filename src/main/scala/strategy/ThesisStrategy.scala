@@ -18,13 +18,13 @@ class ThesisStrategy(logger: Logger) extends Strategy {
     def getOr(f: => A) = m.getOrElseUpdate((), f)
   }
 
-  private var sat: Memo[Boolean] = MMap.empty
+  private val sat: Memo[Boolean] = MMap.empty
 
-  private var witnessVector: Memo[Option[(Map[String, Int], Map[Int, Int])]] = MMap.empty
+  private val witnessVector: Memo[Option[(Map[String, Int], Map[Int, Int])]] = MMap.empty
 
-  private var psst: Memo[SolverPSST[Char, String]] = MMap.empty
+  private val psst: Memo[SolverPSST[Char, String]] = MMap.empty
 
-  private var models: Memo[Output] = MMap.empty
+  private val models: Memo[Output] = MMap.empty
 
   override def checkSat(constraint: Input): Boolean =
     sat.getOr {
@@ -200,7 +200,6 @@ class ThesisStrategy(logger: Logger) extends Strategy {
   /** Construct NSST which output concatenation of `rhs`.
     * Right(j) in `rhs` is `j`-th input delemited by #. */
   def concatNSST[C](i: Int, rhs: Seq[Either[Seq[C], Int]], alphabet: Set[C]): SolverSST[C] = {
-    type Q = (Int, Int)
     trait X
     case object XIn extends X
     case class XJ(j: Int, id: Int) extends X
@@ -310,7 +309,6 @@ class ThesisStrategy(logger: Logger) extends Strategy {
         (dfa.toParikhAutomaton intersect pa).renamed
     }
     // (i, j) -- state j of a PSST of i-th string variable
-    val inSet = addNone(alphabet)
     val universalPA = ParikhAutomaton.universal[Int, Char, Int, String](0, alphabet)
     solverPA((0 to lastVarIdx).map(idxPA.getOrElse(_, universalPA)), 0).toParikhSST.renamed
   }

@@ -6,7 +6,6 @@ import org.scalatest.funsuite._
 import com.github.kmn4.expresso.strategy.Strategy
 import com.github.kmn4.expresso.strategy.ThesisStrategy
 import com.github.kmn4.expresso.strategy.PreImageStrategy
-import java.io.Reader
 
 class ParikhSolverTest extends AnyFunSuite {
   val strategySpecs = Seq(

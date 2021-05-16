@@ -1,6 +1,5 @@
 package com.github.kmn4.expresso.machine
 
-import scala.collection.immutable.Queue
 import com.github.kmn4.expresso._
 import com.github.kmn4.expresso.math._
 
@@ -335,7 +334,7 @@ class DFA[Q, A](
   )
 
   def renamed: DFA[Int, A] = {
-    var stateMap = (states zip LazyList.from(0)).toMap
+    val stateMap = (states zip LazyList.from(0)).toMap
     new DFA(
       stateMap.values.toSet,
       alpha,
@@ -408,7 +407,7 @@ class DFA[Q, A](
     states,
     alpha,
     Set(()),
-    transition.map { case ((q, a), r) => (q, a, Map(() -> List(Cop1(()), Cop2(a))), r) } toSet,
+    transition.map { case ((q, a), r) => (q, a, Map(() -> List(Cop1(()), Cop2(a))), r) }.toSet,
     q0,
     finalStates.map(q => q -> Set(List[Cop[Unit, A]](Cop1(())))).toMap
   )

@@ -1,7 +1,6 @@
 package com.github.kmn4.expresso.strategy
 
-import com.github.kmn4.expresso.math.Presburger
-import com.github.kmn4.expresso.machine.ParikhSST
+import com.github.kmn4.expresso.machine.ParikhAutomaton
 
 // parikhAutomata の要素 Seq[Parikh...] を conjunction と呼ぶ．
 // 条件: conjunction は非空

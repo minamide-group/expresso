@@ -1,8 +1,6 @@
 package com.github.kmn4.expresso
 
 import com.github.kmn4.expresso.math.Presburger
-import com.github.kmn4.expresso.machine.ParikhSST
-import com.github.kmn4.expresso.language.Constraint.ParikhConstraint
 import com.github.kmn4.expresso.language.Constraint
 
 /**

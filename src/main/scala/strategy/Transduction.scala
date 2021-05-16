@@ -4,7 +4,6 @@ import com.github.kmn4.expresso.graphToMap
 import com.github.kmn4.expresso.machine.ParikhAutomaton
 import com.github.kmn4.expresso.machine.ParikhSST
 import com.github.kmn4.expresso.math.Presburger
-import com.github.kmn4.expresso.math.Presburger.Sugar._
 
 // A*(#1)...(#k-1)A*, n1, ..., nl -> A*
 private trait Transduction[A, B] {

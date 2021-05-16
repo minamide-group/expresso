@@ -11,7 +11,6 @@ import smtlib.theories.Core
 import smtlib.trees.Tree
 import smtlib.trees.Terms
 import smtlib.trees.SimpleTreeTransformer
-import smtlib.theories.Operations
 
 package object smttool {
   val functionCollector = new TreeTransformer {

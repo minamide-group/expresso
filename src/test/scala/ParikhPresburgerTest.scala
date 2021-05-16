@@ -49,7 +49,6 @@ class ParikhPresburgerTest extends AnyFlatSpec {
   }
 
   "Found bug" should "be fixed" in {
-    import scala.collection.immutable.{HashMap, HashSet}
     import com.microsoft.z3
     val List(a, b, x, y) = "abxy".toList
     val n = NSST[Int, Char, Char, Char](

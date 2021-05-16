@@ -1,6 +1,5 @@
 package com.github.kmn4.expresso.machine
 
-import com.github.kmn4.expresso._
 import scala.math.max
 import com.github.kmn4.expresso.math._
 
@@ -370,11 +369,5 @@ class CompositionTest extends AnyFlatSpec {
     assert(s.transduce("".toList) == Set("", "b").map(_.toList))
     assert(s.transduce("a".toList) == Set("", "a", "ab", "aba").map(_.toList))
     info(s.toString())
-  }
-  {
-    import scala.collection.immutable.{HashSet, HashMap}
-    val Seq(a, b) = "ab".toSeq
-    val Seq(x, y, z) = "xyz".toSeq
-    // MSST(HashSet(Some((0, Map(y -> (1, 1), x -> (0, 1)))), Some((0, Map(y -> (0, 0), x -> (0, 0)))), Some((0, Map(y -> (0, 1), x -> (0, 0)))), Some((0, Map(y -> (1, 1), x -> (0, 0))))), Set(a, b), Set(x, y), Set(z), Map((Some((0, Map(x -> (0, 0), y -> (0, 0)))), a) -> Set((Some((0, Map(y -> (0, 0), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(a))))), y -> List(Cop2(Map(z -> List(Cop1(z), Cop2(a)))), Cop1(y))))), (Some((0, Map(x -> (0, 0), y -> (0, 1)))), b) -> Set((Some((0, Map(y -> (0, 1), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(b))))), y -> List(Cop2(Map(z -> List(Cop1(z), Cop2(b)))), Cop1(y))))), (Some((0, Map(x -> (0, 0), y -> (1, 1)))), a) -> Set((Some((0, Map(y -> (0, 1), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(a))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y)))), (Some((0, Map(y -> (1, 1), x -> (0, 1)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y)))), (Some((0, Map(y -> (1, 1), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(a))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y))))), (Some((0, Map(x -> (0, 1), y -> (1, 1)))), b) -> Set((Some((0, Map(y -> (1, 1), x -> (0, 1)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y))))), (Some((0, Map(x -> (0, 0), y -> (0, 1)))), a) -> Set((Some((0, Map(y -> (0, 1), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(a))))), y -> List(Cop2(Map(z -> List(Cop1(z), Cop2(a)))), Cop1(y))))), (Some((0, Map(x -> (0, 0), y -> (0, 0)))), b) -> Set((Some((0, Map(y -> (0, 0), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(b))))), y -> List(Cop2(Map(z -> List(Cop1(z), Cop2(b)))), Cop1(y))))), (Some((0, Map(x -> (0, 1), y -> (1, 1)))), a) -> Set((Some((0, Map(y -> (1, 1), x -> (0, 1)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y))))), (Some((0, Map(x -> (0, 0), y -> (1, 1)))), b) -> Set((Some((0, Map(y -> (1, 1), x -> (0, 1)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y)))), (Some((0, Map(y -> (1, 1), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(b))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y)))), (Some((0, Map(y -> (0, 1), x -> (0, 0)))), Map(x -> List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(b))))), y -> List(Cop2(Map(z -> List(Cop1(z)))), Cop1(y)))))), ???, HashMap(Some((0, Map(y -> (1, 1), x -> (0, 1)))) -> Set((List(Cop1(x), Cop2(Map(z -> List(Cop1(z)))), Cop1(y)), List(Cop1(z)))), Some((0, Map(y -> (0, 0), x -> (0, 0)))) -> Set((List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(b)))), Cop1(y)), List(Cop1(z)))), Some((0, Map(y -> (0, 1), x -> (0, 0)))) -> Set((List(Cop1(x), Cop2(Map(z -> List(Cop1(z), Cop2(b)))), Cop1(y)), List(Cop1(z)))), Some((0, Map(y -> (1, 1), x -> (0, 0)))) -> Set((List(Cop1(x), Cop2(Map(z -> List(Cop1(z)))), Cop1(y)), List(Cop1(z))))))
   }
 }

@@ -1,9 +1,8 @@
 package com.github.kmn4.expresso.language
 
 import com.github.kmn4.expresso._
-import com.github.kmn4.expresso.math._
-import com.github.kmn4.expresso.math.MonadPlus.MonadPlusOps
 import com.github.kmn4.expresso.machine._
+import com.github.kmn4.expresso.math._
 
 private sealed trait Tree[A] {
   def toSeq: Seq[A] = this match {

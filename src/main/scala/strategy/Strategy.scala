@@ -1,7 +1,5 @@
 package com.github.kmn4.expresso.strategy
 
-import com.github.kmn4.expresso.language.Constraint.ParikhConstraint
-
 trait Strategy {
   // 最初の呼び出し時のみ計算を行う．
   // NOTE 異なる constraint で複数回呼び出した場合でも 2 度目以降には再計算を行わないことに注意．

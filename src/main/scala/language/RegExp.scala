@@ -1,7 +1,5 @@
 package com.github.kmn4.expresso.language
 
-import com.github.kmn4.expresso._
-import com.github.kmn4.expresso.math._
 import com.github.kmn4.expresso.machine._
 
 sealed trait RegExp[+A] {

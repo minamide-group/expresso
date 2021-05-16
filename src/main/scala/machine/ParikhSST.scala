@@ -309,7 +309,6 @@ case class ParikhSST[Q, A, B, X, L, I](
 
     // Wrap states with Option so initial state be unique.
     type NWQ = Option[NQ]
-    val newStates = states.map[NWQ](Some.apply) + None
     val newEdges = {
       val wrapped =
         for ((q, a, mx, ml, r) <- edges)
@@ -418,10 +417,7 @@ case class ParikhSST[Q, A, B, X, L, I](
         ], I] = {
       require(xs.nonEmpty) // For a technical reason
       import MSST.{gamma, proj}
-      type Edges =
-        Set[(Q, A, Update[X, (Update[Y, C], ParikhSST.ParikhUpdate[K])], ParikhSST.ParikhUpdate[L], Q)]
       type M1Y = Map[Y, List[Y]]
-      type M2Y = Map[(Y, Boolean), List[C]]
       type S = Map[X, M1Y]
       type NQ = (Q, S)
       type Z = (X, Y, Boolean)
@@ -656,7 +652,7 @@ case class ParikhSST[Q, A, B, X, L, I](
               j <- ll.get(k)
             } yield l -> j
             val lv = {
-              var lv = collection.mutable.Map.from(ls.map(_ -> 0))
+              val lv = collection.mutable.Map.from(ls.map(_ -> 0))
               // n is added to l and l is to go to k, then n should be added to k.
               for {
                 (l, (n, _)) <- ml
@@ -822,7 +818,7 @@ case class ParikhSST[Q, A, B, X, L, I](
               j <- ll.get(k)
             } yield l -> j
             val lv = {
-              var lv = collection.mutable.Map.from(ls.map(_ -> 0))
+              val lv = collection.mutable.Map.from(ls.map(_ -> 0))
               // n is added to l and l is to go to k, then n should be added to k.
               for {
                 (l, (n, _)) <- ml

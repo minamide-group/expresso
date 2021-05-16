@@ -2,7 +2,7 @@ package com.github.kmn4.expresso
 
 import com.github.kmn4.expresso.strategy.PreImageStrategy
 
-import java.nio.file.{FileSystems, Files}
+import java.nio.file.FileSystems
 import com.typesafe.scalalogging.Logger
 import com.github.kmn4.expresso.strategy.ThesisStrategy
 

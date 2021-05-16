@@ -3,8 +3,6 @@ import smtlib.trees.Commands
 import smtlib.trees.Terms
 import smtlib.theories.Ints
 import smtlib.theories.Core
-import smtlib.trees.TreeTransformer
-import smtlib.trees.Tree
 import com.github.kmn4.expresso.smttool._
 
 // PyEx 用

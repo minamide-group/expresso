@@ -1,16 +1,13 @@
 package com.github.kmn4.expresso
 
-import com.github.kmn4.expresso.Solver._
 import com.github.kmn4.expresso.language.Constraint._
 import com.github.kmn4.expresso.language.RegExp._
 import com.github.kmn4.expresso.language._
-import com.github.kmn4.expresso.machine._
 import com.github.kmn4.expresso.math.Presburger.Sugar._
 import com.github.kmn4.expresso.math._
 import com.github.kmn4.expresso.smttool.Strings
 import com.github.kmn4.expresso.smttool.Strings.{StringSort}
 import com.github.kmn4.expresso.smttool.{SimpleQualID, SimpleApp}
-import com.microsoft.z3
 import com.typesafe.scalalogging.Logger
 import smtlib.theories.Ints
 import smtlib.theories.{Core => CoreTheory}
@@ -18,7 +15,6 @@ import smtlib.trees.Commands.{Command => SMTCommand}
 import smtlib.trees.Terms
 import smtlib.trees.Terms.SNumeral
 // import smtlib.trees.Terms.SString
-import smtlib.trees.Terms.SSymbol
 import smtlib.trees.Terms.Sort
 import smtlib.trees.Terms.{Term => SMTTerm}
 import smtlib.trees.{Commands => SMTCommands}
