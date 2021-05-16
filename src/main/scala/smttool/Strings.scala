@@ -22,6 +22,10 @@ object Strings {
     override val name: String = "str.prefixof"
   }
 
+  object ReplaceAll extends Operations.Operation3 {
+    override val name: String = "str.replace_all"
+  }
+
   object Regex {
     val Concat = ExpStrings.Regex.Concat
     val AllChar = ExpStrings.Regex.AllChar

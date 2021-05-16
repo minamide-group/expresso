@@ -110,12 +110,13 @@ class Preprocessor(provider: VarProvider) {
 
   private[expresso] def flatten(terms: Seq[Terms.Term]) = {
     val operations: PartialFunction[Terms.Term, Terms.Sort] = {
-      case Strings.Concat(_*)         => Strings.StringSort()
-      case Strings.At(_, _)           => Strings.StringSort()
-      case Strings.IndexOf(_, _, _)   => Ints.IntSort()
-      case Strings.Length(_)          => Ints.IntSort()
-      case Strings.Replace(_, _, _)   => Strings.StringSort()
-      case Strings.Substring(_, _, _) => Strings.StringSort()
+      case Strings.Concat(_*)          => Strings.StringSort()
+      case Strings.At(_, _)            => Strings.StringSort()
+      case Strings.IndexOf(_, _, _)    => Ints.IntSort()
+      case Strings.Length(_)           => Ints.IntSort()
+      case Strings.Replace(_, _, _)    => Strings.StringSort()
+      case Strings.Substring(_, _, _)  => Strings.StringSort()
+      case Strings.ReplaceAll(_, _, _) => Strings.StringSort()
     }
     val flattener = new Flattener(operations)
     flattener.flatten(terms)
