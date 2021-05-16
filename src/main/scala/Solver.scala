@@ -380,7 +380,7 @@ class Solver(
   }
 
   object SString {
-    private val unescape = Unescaper.unescape _
+    private val unescape = PyExEscape.unescape _
     def unapply(term: Terms.SString): Option[String] =
       Terms.SString.unapply(term).map(unescape)
   }
@@ -482,10 +482,14 @@ class Solver(
 
 }
 
+trait Escape  {
+  def unescape(w: String): String
+}
+
 // \f, \v, \r, \n, \t, \", \\, \xdd
 // NOTE 最新仕様ではエスケープ文字ではないが，PyEx では "\x61" == "a" と考えている
 //      Z3 でも 4.8.8 だとエスケープ文字扱いだが 4.11 では新しい仕様に基づき通常の文字扱いする
-object Unescaper {
+object PyExEscape extends Escape {
   private val hexCode = {
     val pat = raw"\\x([\dabcdef]{2})".r
     val fromHex = (s: String) => Integer.parseInt(s, 16).toChar.toString
@@ -511,4 +515,14 @@ object Unescaper {
     .reduce[String => String] { case (acc, f) => acc andThen f }
 
   def unescape(w: String): String = func(w)
+}
+
+// \u{61} => a
+object SMTLIBEscape extends Escape {
+  private val pat = raw"\\u\{([\da-f]{1,5})\}".r
+  private val fromHex = (s: String) => Integer.parseInt(s, 16).toChar.toString
+  def apply(s: String): String = s.map(c => s"\\u{${c.toHexString}}").mkString
+  // Java の Matcher#replaceAll は挙動がおかしいので \u{5c} に対して失敗する
+  // (replacer の結果内の \ をエスケープ用プレフィックスと考える)
+  def unescape(withEscape: String): String = pat.replaceAllIn(withEscape, m => fromHex(m.group(1)))
 }
