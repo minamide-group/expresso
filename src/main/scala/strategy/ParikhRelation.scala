@@ -24,35 +24,49 @@ private case class ParikhRelation[Q, A, L, I](
     val distinct = pas.distinct
     assert(distinct.length == pas.length)
   }
+
+  def lazyIntersect(that: ParikhRelation[Q, A, L, I]): ParikhRelation[Q, A, L, I] = {
+    val zip = parikhAutomata.zipAll(that.parikhAutomata, Seq.empty, Seq.empty)
+    val pas = zip.map { case (xs, ys) => xs ++ ys }
+    val phis = globalFormulas ++ that.globalFormulas
+    ParikhRelation(pas, phis)
+  }
+
 }
 
 private object ParikhRelation {
   type PA[A, I] = IdentifiedPA[Int, A, Int, I]
 
-  // 入力: [((PA, ..., PA), phi)] -- 「右辺の変数が属すべき言語と大域整数制約の組」のリスト
-  // 出力: this に入力を条件として課したときの PR
+  def eagerIntersect[A, I](rel: ParikhRelation[Int, A, Int, I]): ParikhRelation[Int, A, Int, I] = {
+    rel.parikhAutomata.indices.foldLeft(rel) { case (acc, idx) => ParikhRelation.eagerIntersect(acc, idx) }
+  }
+
+  def eagerIntersect[A, I](rel: ParikhRelation[Int, A, Int, I], idx: Int): ParikhRelation[Int, A, Int, I] = {
+    def intersect(pas: Seq[IdentifiedPA[Int, A, Int, I]]) = pas.headOption map { hd =>
+      val pa = pas.tail.foldLeft(hd.pa) { case (acc, p) => acc.intersect(p.pa).renamed }
+      IdentifiedPA(rel.maxID + 1, pa)
+    }
+    val automata = rel.parikhAutomata.updated(idx, intersect(rel.parikhAutomata(idx)).toSeq)
+    rel.copy(parikhAutomata = automata)
+  }
+
   def impose[A, I](
       rel: ParikhRelation[Int, A, Int, I],
-      preImages: Seq[(Seq[PA[A, I]], GlobalFormulas[I])],
-      rhs: Seq[Int]
+      preImages: ParikhRelation[Int, A, Int, I], // 右辺変数に新しく追加される制約
+      rhs: Seq[Int] // 右辺変数のリスト
   ): ParikhRelation[Int, A, Int, I] = {
-    val rhsLangs = preImages
-      .foldLeft(rhs.map(i => (i, Seq.empty[PA[A, I]]))) {
-        case (acc, (pas, _)) =>
-          acc.lazyZip(pas).map { case ((i, ps), p) => (i, (ps :+ p)) }
-      }
-      .toMap
-      .withDefaultValue(Seq.empty)
-    ParikhRelation(
-      rel.parikhAutomata.zipWithIndex.map {
-        case (pas, i) =>
-          assert(pas.length == 1)
-          val IdentifiedPA(id, pa) = pas.head
-          val intersection = rhsLangs(i).map(_.pa).fold(pa) { case (p, q) => (p intersect q).renamed }
-          Seq(IdentifiedPA(id, intersection))
-      },
-      rel.globalFormulas ++ preImages.flatMap { case (_, phi) => phi }
-    )
+    // require(rel.parikhAutomata.forall(_.size == 1))
+    val ParikhRelation(pas, phi) = preImages
+    val rhsPas = rhs zip preImages.parikhAutomata
+    val rhsPa = for {
+      (rh, pas) <- rhsPas
+      pa <- pas
+    } yield (rh, pa)
+    def f[A](iter: Iterable[(Int, A)]): Seq[Seq[A]] = {
+      val map = iter.groupMap(_._1)(_._2).withDefaultValue(Iterable.empty)
+      Seq.tabulate(rel.parikhAutomata.length) { i => map(i).toSeq }
+    }
+    rel.lazyIntersect(ParikhRelation(f(rhsPa), phi))
   }
 
 }

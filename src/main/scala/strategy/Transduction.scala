@@ -203,13 +203,16 @@ private object Transduction {
       for {
         pa <- pas
         (rel, phi) <- split(pa)
-      } yield (
-        rel,
-        phi ++ pa.acceptFormulas.map(_.renameVars {
-          case Right(l) => sumVar(maxID + arity, l)
-          case Left(i)  => i
-        })
-      )
+      } yield {
+        val paPhis = pa.acceptFormulas
+          .map(_.renameVars {
+            case Right(l) => sumVar(maxID + arity, l)
+            case Left(i)  => i
+          })
+        val wrapped = rel.map(Seq(_))
+        val formula = phi ++ paPhis
+        ParikhRelation(wrapped, formula)
+      }
     }
 
   }

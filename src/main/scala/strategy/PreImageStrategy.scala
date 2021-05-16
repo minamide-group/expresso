@@ -10,41 +10,75 @@ import com.typesafe.scalalogging.Logger
 
 /**
   * 逆像計算に基づくアルゴリズム．
+  *
+  * TODO
+  *  - 最後の eagerIntersect をしない
+  *  - CDCL 的に探索木を刈り取る ?
+  *  - 逆像計算自体の戻り値を Iterator にする
+  *  - IdentifiedPA を全体でユニークな ID が割り当てられるようにし，
+  *    同じ PA を (同じ PST で) 逆像するときはキャッシュを使う
   */
 class PreImageStrategy(logger: Logger) extends Strategy {
+  private type PA = IdentifiedPA[Int, Char, Int, String]
+  private type PR = ParikhRelation[Int, Char, Int, String]
+  private type PST = ParikhSST[Int, Either[Char, Int], Char, Int, Int, String]
+  private object WithTime {
+    private val time = collection.mutable.Map.empty[String, Long]
+    def apply[T](name: String)(body: => T): T = {
+      val start = System.nanoTime()
+      val t = body
+      val done = System.nanoTime()
+      time(name) = time.getOrElseUpdate(name, 0) + done - start
+      t
+    }
+    def info: Unit = time.foreach {
+      case (name, time) =>
+        logger.info(s"$name\t${time / 1000000}ms")
+    }
+  }
+
   // pr の satisfialibity を確認
   // sat なら x_0, x_1, ... の値と i_0, i_1, ... の値を返す
   // 等式の左辺に現れる変数の値は返さないことに注意
-  private def checkClause(pr: SolverPR[Char, String]): Option[(Seq[String], Map[String, Int])] = {
+  private def checkClause(pr: PR): Option[(Seq[String], Map[String, Int])] = {
     // 共通部分をとる
     // 異なる文字列変数に対応する PA のログ変数がかぶらないようにする
+    logger.trace("last intersect")
+    val uniqPR = WithTime("intersect")(ParikhRelation.eagerIntersect(pr))
+    val sizes = uniqPR.parikhAutomata.map { pas =>
+      val pa = pas.head.pa
+      pa.states.size
+    }
+    logger.info(s"intersect done\t$sizes")
     val psts: Seq[ParikhSST[Int, Char, Char, Unit, (Int /* index */, Int /* l */ ), String]] =
-      pr.parikhAutomata.zipWithIndex.map {
-        case (pas, idx) =>
-          val pa = pas.map(_.pa).reduce[ParikhAutomaton[Int, Char, Int, String]] {
-            case (p, q) => p.intersect(q).renamed
-          }
-          pa.toParikhSST.renamed(identity _, identity _, l => (idx, l))
+      uniqPR.parikhAutomata.zipWithIndex.map {
+        case (Seq(IdentifiedPA(_, pa)), idx) => pa.toParikhSST.renamed(identity _, identity _, l => (idx, l))
       }
     // 整数変数 int_*, ログ変数 log_*_*, 束縛変数 bound_*
-    val pstFormulas = psts.flatMap { pst =>
-      val accept = pst.acceptFormula.renameVars {
-        case Left(i)         => s"int_$i"
-        case Right((idx, l)) => s"log_${idx}_$l"
+    val formula = WithTime("formula") {
+      val pstFormulas = psts.flatMap { pst =>
+        val accept = pst.acceptFormula.renameVars {
+          case Left(i)         => s"int_$i"
+          case Right((idx, l)) => s"log_${idx}_$l"
+        }
+        val parikh = pst.parikhImageFormula.renameVars {
+          case Left(b)         => s"bound_$b"
+          case Right((idx, l)) => s"log_${idx}_$l"
+        }
+        Seq(accept, parikh)
       }
-      val parikh = pst.parikhImageFormula.renameVars {
-        case Left(b)         => s"bound_$b"
-        case Right((idx, l)) => s"log_${idx}_$l"
-      }
-      Seq(accept, parikh)
+      val globalFormulas = pr.globalFormulas.map(_.renameVars(i => s"int_$i"))
+      Presburger.Conj(pstFormulas ++ globalFormulas)
     }
-    val globalFormulas = pr.globalFormulas.map(_.renameVars(i => s"int_$i"))
-    val formula = Presburger.Conj(pstFormulas ++ globalFormulas)
-    withZ3Context { (ctx) =>
+    withZ3Context { ctx =>
       val solver = ctx.mkSolver()
       val z3Expr = Presburger.Formula.formulaToZ3Expr(ctx, Map.empty[String, z3.IntExpr], formula)
       solver.add(z3Expr)
-      if (solver.check() == z3.Status.SATISFIABLE) {
+      logger.debug("check start")
+      val status = WithTime("check")(solver.check())
+      logger.debug("check done")
+      if (status == z3.Status.SATISFIABLE) {
+        logger.debug("sat")
         val model = solver.getModel()
         def getValue(name: String): Int = model.eval(ctx.mkIntConst(name), false).toString().toInt
         // 得られたモデルの値を出力する入力文字列を探す
@@ -58,11 +92,16 @@ class PreImageStrategy(logger: Logger) extends Strategy {
           case i @ pat(name) => name -> getValue(i)
         }
         Some((inputs, intVarValues.toMap))
-      } else None
+      } else {
+        logger.debug("unsat")
+        None
+      }
     }
   }
   private var models: Output = None
   override def checkSat(constraint: Input): Boolean = {
+    java.lang.Runtime.getRuntime().addShutdownHook(new Thread(() => WithTime.info))
+    constraint.assignments.foreach(a => logger.trace(a.toString))
     val config @ Configuration(trans, _) = organize(constraint)
     val relIter = iteratePreImage(config)
     models = {
@@ -89,12 +128,11 @@ class PreImageStrategy(logger: Logger) extends Strategy {
       }
       iter.nextOption()
     }
+    WithTime.info
     models.nonEmpty
   }
-  override def getModel(): Output = models
 
-  private type PST = ParikhSST[Int, Either[Char, Int], Char, Int, Int, String]
-  private type SolverPR[C, I] = ParikhRelation[Int, C, Int, I]
+  override def getModel(): Output = models
 
   private def assingmentToPSST[S](assignment: AtomicAssignment[S], alphabet: Set[Char]): PST =
     assignment match {
@@ -217,7 +255,49 @@ class PreImageStrategy(logger: Logger) extends Strategy {
     def toExpPST(alphabet: Set[Char]): PST = assingmentToPSST(assignment, alphabet)
   }
 
-  private case class PreImagable(pst: PST, rhs: Seq[Int])
+  private case class PreImagable(pst: PST, rhs: Seq[Int]) {
+    // next() すると op^-1(lang) から1つずつ選んだ組を返す.
+    // PR において各変数の言語が単一の PA で表されれているので不要だが，
+    // そうでない場合も考えるかもしれないので残しておく．
+    def preImages(langs: Seq[PA], maxID: Int): Iterator[PR] = {
+      val idInc = rhs.length // maxID は逆像をとるたび idInc 分だけ増える
+      var mxid = maxID - idInc
+      val preImages: Seq[PreImage[Int, Char, Int, String]] = langs.map { lang =>
+        mxid += idInc
+        WithTime("preimage")(pst.preImage(lang, mxid))
+      }
+      val choices: Iterator[Seq[PR]] = choose(preImages)
+      val emptyRel: PR = ParikhRelation(Seq.empty, Seq.empty)
+      choices.map(seq => seq.fold(emptyRel)(_ lazyIntersect _))
+    }
+
+    // rel の最後の成分の逆像をとって，それより前の成分と組み合わせたものを返す:
+    // (x1, x2, .., xn) \in rel and xn = pst(rhs)
+    // <==> (x1, x2, .., x{n-1}) \in res
+    def preImages(rel: PR): Iterator[PR] = {
+      val lhs = rel.parikhAutomata.length - 1
+      logger.trace(s"LHS : ${lhs}")
+      val automata = rel.parikhAutomata(lhs)
+      val choices = preImages(automata, rel.maxID)
+      val res = choices.map { newRel => ParikhRelation.impose(rel, newRel, rhs) }
+      res.map { rel => rel.copy(parikhAutomata = rel.parikhAutomata.dropRight(1)) }
+    }
+
+    private def choose[A](ll: Seq[Seq[A]]): Seq[Seq[A]] =
+      if (ll.isEmpty) Seq(Seq.empty)
+      else
+        for {
+          l <- ll
+          a <- l
+          rec <- choose(ll.tail)
+        } yield a +: rec
+
+    private def choose[A](si: Seq[Iterator[A]]): Iterator[Seq[A]] =
+      if (si.isEmpty) Iterator.empty
+      else if (si.size == 1) si.head.map(a => Seq(a))
+      else choose(si.map(iter => LazyList.from(iter))).iterator
+
+  }
 
   // 条件: transductions は lhs について昇順
   // 条件: relation の PA は lhs について昇順で，0 から順にならぶ
@@ -236,6 +316,7 @@ class PreImageStrategy(logger: Logger) extends Strategy {
     // assignments から PST を構成
     val transes = constraint.assignments.map { a => PreImagable(a.toExpPST(alphabet), a.dependeeVars) }
     // assertions と arithFormulas から PR が得られる
+    logger.info("start to construct PR")
     val rel = {
       val langMap = constraint.assertions.groupMap(_.stringVar)(_.lang)
       val paMap = langMap.view.mapValues { langs =>
@@ -258,66 +339,21 @@ class PreImageStrategy(logger: Logger) extends Strategy {
       val withID = pas.zipWithIndex.map { case (pa, idx) => Seq(IdentifiedPA(idx, pa)) }
       ParikhRelation(withID, constraint.arithFormulas)
     }
+    logger.info("PR construction done")
     Configuration(transes, rel)
-  }
-
-  def choose[A](ll: Seq[Seq[A]]): Seq[Seq[A]] =
-    if (ll.isEmpty) Seq(Seq.empty)
-    else
-      for {
-        l <- ll
-        a <- l
-        rec <- choose(ll.tail)
-      } yield a +: rec
-
-  def choose[A](si: Seq[Iterator[A]]): Iterator[Seq[A]] = {
-    if (si.isEmpty) return Iterator.empty
-    if (si.size == 1) return si.head.map(a => Seq(a))
-    choose(si.map(iter => LazyList.from(iter))).iterator
   }
 
   // transductions が非空である間 relation の逆像を計算する
   // disjunction が現れると非決定的な選択をする．この非決定性は Iterator が表している．
   private def iteratePreImage(config: Configuration): Iterator[ParikhRelation[Int, Char, Int, String]] = {
-    import Transduction._
-    val Configuration(ts, rel) = config
-    ts.foldRight(Iterator(rel)) {
-        case (PreImagable(pst, rhs), acc) =>
-          type PA = IdentifiedPA[Int, Char, Int, String]
-          // next() すると pst^-1(lang) から1つずつ選んだ組を返す.
-          // PR において各変数の言語が単一の PA で表されれているので不要だが，
-          // そうでない場合も考えるかもしれないので残しておく．
-          def clauseChoices(
-              langs: Seq[PA],
-              maxID: Int
-          ): Iterator[Seq[(Seq[PA], GlobalFormulas[String])]] = {
-            val idInc = rhs.length // maxID は逆像をとるたび idInc 分だけ増える
-            var mxid = maxID - idInc
-            choose(
-              langs.map { lang =>
-                mxid += idInc
-                pst.preImage(lang, mxid)
-              }
-            )
-          }
-          for {
-            rel <- acc
-            choice <- {
-              val lhs = rel.parikhAutomata.length - 1
-              val automata = rel.parikhAutomata(lhs)
-              clauseChoices(automata, rel.maxID)
-            }
-          } yield {
-            // 1. rel から最右要素を除く
-            // 2. rel へ rhs に従って choice を追加する
-            ParikhRelation.impose(
-              rel.copy(parikhAutomata = rel.parikhAutomata.dropRight(1)),
-              choice,
-              rhs
-            )
-          }
-      }
-      .iterator
+    val Configuration(operations, relation) = config
+    operations.foldRight(Iterator(relation)) {
+      case (op, acc) =>
+        acc.flatMap { rel =>
+          val uniqLhsPR = ParikhRelation.eagerIntersect(rel, rel.parikhAutomata.length - 1)
+          op.preImages(uniqLhsPR)
+        }
+    }
   }
 
 }

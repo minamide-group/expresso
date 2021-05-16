@@ -34,6 +34,6 @@ package object strategy {
 
   private[strategy] type Formulas[I, L] = Seq[Presburger.Formula[Either[I, L]]]
   private[strategy] type GlobalFormulas[I] = Seq[Presburger.Formula[I]]
-  private[strategy] type PreImage[Q, A, L, I] = Iterator[(Seq[IdentifiedPA[Q, A, L, I]], GlobalFormulas[I])]
+  private[strategy] type PreImage[Q, A, L, I] = Iterator[ParikhRelation[Q, A, L, I]]
 
 }
