@@ -254,7 +254,7 @@ class Solver(
         val (pt1, cs1) = expectInt(t1)
         val (pt2, cs2) = expectInt(t2)
         (Presburger.Sub(pt1, pt2), cs1 ++ cs2)
-      case Strings.IndexOf(SimpleQualID(name), SString(w), SNumeral(c)) if c == 0 =>
+      case Strings.IndexOf(SimpleQualID(name), SString(w), SNumeral(c)) if c >= 0 =>
         val newVar = freshTemp()
         val constr = ParikhAssertion(name, ParikhLanguage.IndexOfConst(w, c.toInt, newVar))
         (Presburger.Var(newVar), Seq(constr))
