@@ -6,12 +6,18 @@ sealed trait Cop[+A, +B] extends Product with Serializable {
   def commute: Cop[B, A] = Cop.commute(this)
   def is1: Boolean
   def is2: Boolean = !is1
+  def toEither: Either[A, B] = this match {
+    case Cop1(a) => Left(a)
+    case Cop2(b) => Right(b)
+  }
 }
 case class Cop1[A, B](a: A) extends Cop[A, B] {
   def is1 = true
+  def copy[C]: Cop1[A, C] = Cop1(a)
 }
 case class Cop2[A, B](b: B) extends Cop[A, B] {
   def is1 = false
+  def copy[C]: Cop2[C, B] = Cop2(b)
 }
 object Cop {
   def flatten[A](a: Cop[A, A]): A = a match { case Cop1(a) => a; case Cop2(a) => a }

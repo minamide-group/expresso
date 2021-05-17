@@ -333,14 +333,15 @@ class ParikhSolverTest extends AnyFunSuite {
       assert(!z.matches("^(ab)*$"))
     }
 
-    testFileSAT("insert_opt") { (sm, im) =>
-      val (x, y, z, i) = (sm("x"), sm("y"), sm("z"), im("i"))
-      def insert(x: String, y: String, i: Int): String =
-        y.substring(0, i) ++ x ++ y.substring(i, y.length)
-      assert(x.matches("^(ab)*$"))
-      assert(y.matches("^(ab)*$"))
-      assert(z == insert(x, y, i))
-      assert(!z.matches("^(ab)*$"))
-    }
+    if (strategyName != "thesis")
+      testFileSAT("insert_opt") { (sm, im) =>
+        val (x, y, z, i) = (sm("x"), sm("y"), sm("z"), im("i"))
+        def insert(x: String, y: String, i: Int): String =
+          y.substring(0, i) ++ x ++ y.substring(i, y.length)
+        assert(x.matches("^(ab)*$"))
+        assert(y.matches("^(ab)*$"))
+        assert(z == insert(x, y, i))
+        assert(!z.matches("^(ab)*$"))
+      }
   }
 }

@@ -27,63 +27,7 @@ private object Transduction {
         maxID: Int
     ): PreImage[Int, A, Int, String] = {
       val IdentifiedPA(id, lang) = ipa
-      // lang を PSST とみなす
-      // PSST 同士の合成をする (LC-APSST まで)
-      // 受理状態を固定するごとに1つの PA をつくる
-      // PA を # で分割して PR にする
-
-      // lang を PSST とみなす
-      val langPST = {
-        // TODO PairkhAutomaton のメソッドを使う
-        ParikhSST[R, B, Nothing, Nothing, K, String](
-          lang.states,
-          lang.inSet,
-          Set.empty,
-          lang.ls,
-          lang.is,
-          lang.edges.map { case (q, b, v, r) => (q, b, Map.empty, v, r) },
-          lang.q0,
-          lang.acceptRelation.map { case (qf, v) => (qf, Nil, v) },
-          lang.acceptFormulas
-        )
-      }
-
-      // PSST 同士の合成をする (LC-PA まで)
-      val lcp = psst
-        .composeNsstsToMsst[R, Nothing, Nothing, K](psst, langPST)
-        .toLocallyConstrainedAffineParikhSST
-        .toLocallyConstrainedParikhSST
-        .renamed
-        .optimized
-
-      // lcp を受理状態ごとに PA へ分割
-      // NOTE 分割しないと遅くなる場合がある．
-      //      例えば 'group_sc' では 2 倍の差がある．
-      val pas: Iterator[ParikhAutomaton[Int, Either[A, Int], Int, String]] = {
-        val qf = lcp.states.maxOption.getOrElse(0) + 1 // 存在しなかったら Iterator が空
-        val states = lcp.states + qf
-        val lastSharp = Right(arity - 1)
-        val zero = lcp.ls.map(_ -> 0).toMap
-        // TODO 到達性で状態を減らす
-        // TODO 不要な L を削除
-        lcp.outGraph.iterator.map {
-          case (q, _, v, phi) =>
-            ParikhAutomaton(
-              states,
-              lcp.inSet + lastSharp,
-              lcp.ls,
-              lcp.is,
-              lcp.edges.map { case (q, a, _, v, r) => (q, a, v, r) } + ((q, lastSharp, v, qf)),
-              lcp.q0,
-              Set((qf, zero)),
-              lcp.globalAcceptFormulas :+ phi // TODO phi は Seq のほうがいいかも?
-            )
-        }
-      }
-
-      // val pas: Iterator[ParikhAutomaton[Int, Either[A, Int], Int, String]] = {
-      //   ???
-      // }
+      val pas = psst.preimageIter(lang)
 
       def copyVar[L](paID: Int, l: L) = s"copy_${paID}_${l}"
       def sumVar[L](paID: Int, l: L) = s"sum_${paID}_${l}"
@@ -154,11 +98,11 @@ private object Transduction {
             case _                       => throw new Exception("This cannot be the case.")
           }
 
-          val newID = maxID + i + 1
+          val newID = maxID + i + 2
 
-          if (i == 0) {
+          if (i < 0) {
             for {
-              sharp0 @ (q0, _, v, _) <- sharpEdge(0).iterator
+              (q0, v) <- pa.acceptRelation.iterator
               pa0 <- pruneBackward(q0).map { pa => pa.copy(acceptRelation = Set((q0, v))) }
             } yield {
               import Presburger._
@@ -169,17 +113,12 @@ private object Transduction {
               val ipa = IdentifiedPA(newID, newPA)
               (Seq(ipa), Seq.empty)
             }
-          } else if (i > 0) {
+          } else if (i >= 0) {
             for {
-              sharp1 @ (q1, _, _, r1) <- sharpEdge(i - 1).iterator
-              sharpI @ (qi, _, v, _) <- sharpEdge(i)
-              paI <- prune(r1, qi).map { pa => pa.copy(q0 = r1, acceptRelation = Set((qi, v))) }.toList
-              pa1 <- pruneBackward(q1).map { pa =>
-                // 再帰のため最後に #_i-1 で遷移するようにしたい
-                // TODO もう少し綺麗に書けるのでは
-                //      例えば PA は # 終端しない文字列組を受理することにする
-                pa.copy(states = pa.states + r1, edges = pa.edges + sharp1)
-              }.toList
+              (qi, _, vi, ri) <- sharpEdge(i).iterator
+              (qf, v) <- pa.acceptRelation.iterator
+              paI <- prune(ri, qf).map { pa => pa.copy(q0 = ri, acceptRelation = Set((qf, v))) }.iterator
+              pa1 <- pruneBackward(qi).iterator.map { pa => pa.copy(acceptRelation = Set((qi, vi))) }
               (relation1, formula) <- splitAux(pa1, i - 1)
             } yield {
               import Presburger._
@@ -201,7 +140,7 @@ private object Transduction {
           } else throw new Exception("i < 0")
         }
 
-        splitAux(pa, arity - 1)
+        splitAux(pa, arity - 2)
       }
 
       for {

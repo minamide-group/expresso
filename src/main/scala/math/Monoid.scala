@@ -50,5 +50,5 @@ object Monoid {
           case (q, m1) => delta(q, a).map { case (q, m2) => (q, monoid.combine(m1, m2)) }
         }
     }
-  def fold[M](ms: Iterable[M])(implicit monoid: Monoid[M]): M = ms.fold(monoid.unit)(monoid.combine)
+  def fold[M](ms: IterableOnce[M])(implicit monoid: Monoid[M]): M = ms.iterator.fold(monoid.unit)(monoid.combine)
 }

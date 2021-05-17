@@ -52,7 +52,6 @@ class ParikhSSTTest extends AnyFunSuite {
   }
   val substr2 = substr("j", "k")
   test("Compose two substr") {
-    val doubled = substr1.composeNsstsToMsst(substr1, substr2)
     implicit def conv(t: (Int, Int, Int, Int)): Map[String, Int] = t match {
       case (i, l, j, k) => Map("i" -> i, "l" -> l, "j" -> j, "k" -> k)
     }
@@ -68,16 +67,9 @@ class ParikhSSTTest extends AnyFunSuite {
       ("aabb", (0, 4, 0, 4), "aabb"),
       ("abcd", (0, 4, 0, 4), "abcd")
     )
-    val lc = doubled.toLocallyConstrainedAffineParikhSST
-    val equivCases = cases.map { case (w, i, _) => (w, i) }
-    testEquiv(doubled, lc)(equivCases)
-    val ap = lc.toAffineParikhSST
-    testEquiv(lc, ap)(equivCases)
-    val p = ap.toParikhSST
-    testEquiv(ap, p)(equivCases)
-    val direct = substr1 compose substr2
-    sizes(direct)
-    testExamples(direct)(cases)
+    val composed = substr1 compose substr2
+    sizes(composed)
+    testExamples(composed)(cases)
   }
 
   test("Compose three substr") {
@@ -110,7 +102,7 @@ class ParikhSSTTest extends AnyFunSuite {
   }
 
   def indexOf0(word: String, i: String) =
-    ParikhLanguage.IndexOfConst(word, 0, i).toParikhAutomaton("abcd".toSet).toParikhSST
+    ParikhLanguage.IndexOfConst(word, 0, i).toParikhAutomaton("abcd".toSet).toIdentityParikhSST
 
   test("Compose replaceAll and indexOf") {
     val replaceAll = Transduction.ReplaceAll("aab", "abc").toSST("abcd".toSet).toParikhSST[String, String]

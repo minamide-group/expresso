@@ -18,6 +18,14 @@ object Presburger {
       case Var(x) => Set(x)
       case _      => Set.empty
     }
+
+    def size: Int = this match {
+      case Const(i)    => 0
+      case Var(x)      => 0
+      case Add(ts)     => ts.map(_.size).sum + 1
+      case Sub(t1, t2) => t1.size + t2.size + 1
+      case Mult(c, t)  => c.size + t.size + 1
+    }
   }
   case class Const[X](i: Int) extends Term[X]
   case class Var[X](x: X) extends Term[X]
@@ -52,6 +60,18 @@ object Presburger {
       case Not(f)       => !f.eval(valuation)
       case Exists(_, _) => throw new UnsupportedOperationException("Cannot evaluate formula with quantifier.")
     }
+
+    def size: Int = this match {
+      case Top()         => 1
+      case Bot()         => 1
+      case Eq(t1, t2)    => t1.size + t2.size + 1
+      case Lt(t1, t2)    => t1.size + t2.size + 1
+      case Le(t1, t2)    => t1.size + t2.size + 1
+      case Conj(fs)      => fs.map(_.size).sum + 1
+      case Disj(fs)      => fs.map(_.size).sum + 1
+      case Not(f)        => f.size + 1
+      case Exists(vs, f) => vs.map(_.size).sum + f.size + 1
+    }
   }
   case class Top[X]() extends Formula[X]
   case class Bot[X]() extends Formula[X]
@@ -78,9 +98,21 @@ object Presburger {
   }
 
   object Formula {
-    def substitute[X](f: Formula[X])(subst: X => Term[X]): Formula[X] = {
-      def tm(t: Term[X]): Term[X] = {
-        def aux(t: Term[X]): Term[X] = t match {
+    // 代入前後の変数の型は同じでなければならない．
+    // ∃x φ(x) が与えられた時 φ(x) について再帰することを考える．
+    // φ だけみると x が束縛変数かどうかはわからない．
+    // そのため x => if (bounded(x)) Var(x) else subst(x) を新しい subst にして再帰する．
+    // 代入前後の型が異なると, then 節をどうすればよいか困る．
+    def substitute[X](f: Formula[X])(subst: X => Term[X]): Formula[X] =
+      substituteBound(f)(x => subst(x))(identity(_))
+
+    // 束縛変数は substBound で代入する
+    // 定義されていなかったら実行時エラーになる
+    def substituteBound[X, Y](
+        f: Formula[X]
+    )(subst: PartialFunction[X, Term[Y]])(substBound: PartialFunction[X, Y]): Formula[Y] = {
+      def tm(t: Term[X]): Term[Y] = {
+        def aux(t: Term[X]): Term[Y] = t match {
           case Const(i)          => Const(i)
           case Var(x)            => subst(x)
           case Add(ts)           => Add(ts.map(aux))
@@ -89,21 +121,38 @@ object Presburger {
         }
         aux(t)
       }
-      def aux(f: Formula[X]): Formula[X] = f match {
-        case Top() | Bot() => f
-        case Eq(t1, t2)    => Eq(tm(t1), tm(t2))
-        case Lt(t1, t2)    => Lt(tm(t1), tm(t2))
-        case Le(t1, t2)    => Le(tm(t1), tm(t2))
-        case Conj(fs)      => Conj(fs.map(aux))
-        case Disj(fs)      => Disj(fs.map(aux))
-        case Not(f)        => Not(aux(f))
+      def aux(f: Formula[X]): Formula[Y] = f match {
+        case Top()      => Top()
+        case Bot()      => Bot()
+        case Eq(t1, t2) => Eq(tm(t1), tm(t2))
+        case Lt(t1, t2) => Lt(tm(t1), tm(t2))
+        case Le(t1, t2) => Le(tm(t1), tm(t2))
+        case Conj(fs)   => Conj(fs.map(aux))
+        case Disj(fs)   => Disj(fs.map(aux))
+        case Not(f)     => Not(aux(f))
         case Exists(xs, f) =>
-          substitute(f) {
-            val bounded = xs.map { case Var(x) => x }.toSet
-            x => if (bounded(x)) Var(x) else subst(x)
+          val ys = xs.map { case Var(x) => Var(substBound(x)) }
+          val bounded = xs.map { case Var(x) => x }.toSet
+          val newSubst: PartialFunction[X, Term[Y]] = {
+            case x if bounded(x) => Var(substBound(x))
+            case x               => subst(x)
           }
+          Exists(ys, substituteBound(f)(newSubst)(substBound))
       }
       aux(f)
+    }
+
+    // B: 束縛出現するかもしれない型
+    // F: 束縛出現しないことが保証されている型
+    // N: F の変換後
+    def substituteFreeVars[F, B, N](
+        f: Formula[Either[B, F]]
+    )(subst: F => Term[Either[B, N]]): Formula[Either[B, N]] = {
+      substituteBound(f) {
+        case Left(b)     => Var(Left(b): Either[B, N])
+        case Right(free) => subst(free)
+      } { case Left(b) => Left(b) : Either[B, N] }
+
     }
     // NOTE renamer should be injective
     def renameVars[X, Y](f: Formula[X])(renamer: X => Y): Formula[Y] = {

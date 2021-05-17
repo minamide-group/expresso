@@ -44,11 +44,13 @@ class ThesisStrategy(logger: Logger) extends Strategy {
           case (psst, i) => logger.trace(s"#$i: ${psst.sizes}")
         }
         val pssts = asgnPSSTs :+ lastPSST
-        pssts.reduceLeft[SolverPSST[Char, String]] {
+        val res = pssts.reduceLeft[SolverPSST[Char, String]] {
           case (acc, p) =>
             logger.trace(s"compose ${acc.sizes} and ${p.sizes}")
             (acc compose p).renamed
         }
+        logger.trace("composition done")
+        res
       }
       witnessVector.getOr(psst(()).ilVectorOption).nonEmpty
     }
@@ -310,6 +312,6 @@ class ThesisStrategy(logger: Logger) extends Strategy {
     }
     // (i, j) -- state j of a PSST of i-th string variable
     val universalPA = ParikhAutomaton.universal[Int, Char, Int, String](0, alphabet)
-    solverPA((0 to lastVarIdx).map(idxPA.getOrElse(_, universalPA)), 0).toParikhSST.renamed
+    solverPA((0 to lastVarIdx).map(idxPA.getOrElse(_, universalPA)), 0).toIdentityParikhSST.renamed
   }
 }

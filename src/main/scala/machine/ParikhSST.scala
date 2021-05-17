@@ -51,7 +51,7 @@ case class ParikhSST[Q, A, B, X, L, I](
     graphToMap(outGraph) { case (q, xbs, _) => q -> xbs }
   )
   private val mxMonoid: Monoid[UpdateX] = updateMonoid(xs)
-  private val mlMonoid: Monoid[UpdateL] = ParikhSST.parikhMonoid(ls)
+  private val mlMonoid: Monoid[UpdateL] = Monoid.vectorMonoid(ls)
   private val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
 
   def transition(qs: Set[Q], w: Seq[A]): Set[(Q, UpdateXL)] =
@@ -172,691 +172,337 @@ case class ParikhSST[Q, A, B, X, L, I](
     )
   }
 
-  def composeNsstsToMsst[R, C, Y, K](
-      n1: ParikhSST[Q, A, B, X, L, I],
-      n2: ParikhSST[R, B, C, Y, K, I]
-  ): MonoidSST[Option[(Q, Map[X, (R, R)])], C, Y, K] = {
-    // logger.start(n1, n2)
-
-    type UpdateYK = n2.UpdateXL
-    type NQ = (Q, Map[X, (R, R)])
-
-    val invTransA: Map[(Q, A), Set[(Q, UpdateXL)]] =
-      graphToMap(n1.edges) { case (q, a, mx, ml, r) => (r, a) -> ((q, (mx, ml))) }
-
-    val invTransB: Map[(R, B), Set[(R, UpdateYK)]] =
-      graphToMap(n2.edges) { case (q, b, my, mk, r) => (r, b) -> (q, (my, mk)) }
-
-    // Think of product construction of two NSSTs.
-    // invTransX(p)(r, x) is a set of state `q`s where q may transition to r by reading
-    // a content of x at state p.
-    val invTransX: Map[Q, Map[(R, X), Set[R]]] = {
-      import scala.collection.mutable.{Map => MMap, Set => MSet}
-      // At n1.q0, all x can contain empty string, thus q2 can transition to q2.
-      // At other q1s, nothing is known about content of each x, hence empty destination set.
-      val res: MMap[(Q, X, R), MSet[R]] =
-        MMap.empty.withDefault {
-          case (q1, x, q2) => (if (q1 == n1.q0) MSet(q2) else MSet.empty)
+  // Think of product construction of two NSSTs.
+  // invTransX(p)(r, x) is a set of state `q`s where q may transition to r by reading
+  // a content of x at state p.
+  private def invTransX[R, M](
+      thatStates: Set[R],
+      thatTrans: (R, B) => Set[(R, M)]
+  ): Map[Q, Map[(R, X), Set[R]]] = {
+    import scala.collection.mutable.{Map => MMap, Set => MSet}
+    // At n1.q0, all x can contain empty string, thus q2 can transition to q2.
+    // At other q1s, nothing is known about content of each x, hence empty destination set.
+    val res: MMap[(Q, X, R), MSet[R]] =
+      MMap.empty.withDefault {
+        case (q1, x, q2) => (if (q1 == q0) MSet(q2) else MSet.empty)
+      }
+    def trans(transX: (R, X) => MSet[R])(q: R, xb: Cop[X, B]): Set[(R, Unit)] =
+      xb match {
+        case Cop1(x) => Set.from(transX(q, x).map((_, ())))
+        case Cop2(b) => thatTrans(q, b).map { case (r, _) => (r, ()) }
+      }
+    // q1 の xbs で q2 から到達可能な状態集合
+    def transition(q1: Q, xbs: XBS, q2: R): Set[R] =
+      Monoid.transition(Set(q2), xbs, trans { case (q, y) => res((q1, y, q)) }).map(_._1)
+    var updated = true
+    while (updated) {
+      updated = false
+      // q1 =[???/m]=> r1, q2 =[(m(x)@q1)/???]=> r2 then q2 =[(x@r1)/???]=> r2
+      for {
+        (q1, _, mx, ml, r1) <- edges
+        x <- xs
+        q2 <- thatStates
+      } {
+        val cur = res((r1, x, q2))
+        val added = transition(q1, mx(x), q2)
+        if (!(added subsetOf cur)) {
+          updated = true
+          cur ++= added
         }
-      def trans(transX: (R, X) => MSet[R])(q: R, xb: Cop[X, B]): Set[(R, Unit)] =
-        xb match {
-          case Cop1(x) => Set.from(transX(q, x).map((_, ())))
-          case Cop2(b) => n2.trans(q, b).map { case (r, _) => (r, ()) }
-        }
-      var updated = false
-      do {
-        updated = false
-        // q1 =[???/m]=> r1, q2 =[(m(x)@q1)/???]=> r2 then q2 =[(x@r1)/???]=> r2
-        for {
-          (q1, _, mx, ml, r1) <- n1.edges
-          x <- n1.xs
-          q2 <- n2.states
-        } {
-          val cur = res((r1, x, q2))
-          val added = Monoid.transition(Set(q2), mx(x), trans { case (q, y) => res((q1, y, q)) }).map(_._1)
-          if (!(added subsetOf cur)) {
-            updated = true
-            cur ++= added
+        res((r1, x, q2)) = cur
+      }
+    }
+
+    (for (((q1, x, q2), s) <- res; r2 <- s) yield (q1, x, q2, r2))
+      .groupMap(_._1) { case (_, x, q2, r2) => (x, q2, r2) }
+      .view
+      .mapValues(graphToMap(_) { case (x, q2, r2) => (r2, x) -> q2 })
+      .toMap
+      .withDefaultValue(Map.empty.withDefault { case (q2, _) => Set(q2) })
+  }
+
+  // xbs@q を読んで r1 から r2 にいけるような推測と効果
+  private def possiblePreviousGuess[R, M](
+      invTransB: Map[(R, B), Set[(R, M)]],
+      // x@q で r1 から r2 に行ける ⇒ r2 ∈ invTransX(q)(r1, x)
+      invTransX: Map[Q, Map[(R, X), Set[R]]]
+  )(q: Q, r1: R, r2: R, xbs: Cupstar[X, B]): Set[(Map[X, (R, R)], Cupstar[X, M])] = {
+    val invTransXAtQ = invTransX(q)
+    xbs
+      .foldRight[Set[(Map[X, (R, R)], (R, Cupstar[X, M]))]](
+        Set((Map.empty, (r2, Nil))) // accumulates a set of pairs of a mapping and configuration.
+      ) {
+        case (Cop1(x), acc) =>
+          acc.flatMap {
+            case (m, (r, xbs)) =>
+              invTransXAtQ(r, x).map(q => (m + (x -> (q, r)), (q, Cop1(x) :: xbs)))
           }
-          res((r1, x, q2)) = cur
-        }
-      } while (updated)
+        case (Cop2(a), acc) =>
+          acc.flatMap {
+            case (m, (r, xbs)) =>
+              invTransB(r, a).map { case (q, b) => (m, (q, Cop2(b) :: xbs)) }
+          }
+      }
+      .withFilter { case (_, (s, _)) => s == r1 }
+      .map { case (m, (_, xbs)) => (m, xbs) }
+  }
 
-      (for (((q1, x, q2), s) <- res; r2 <- s) yield (q1, x, q2, r2))
-        .groupMap(_._1) { case (_, x, q2, r2) => (x, q2, r2) }
-        .view
-        .mapValues(graphToMap(_) { case (x, q2, r2) => (r2, x) -> q2 })
-        .toMap
-        .withDefaultValue(Map.empty.withDefault { case (q2, _) => Set(q2) })
-    }
-    // logger.invTransX(invTransX)
+  private def andThenAux[R, C, Y, K](
+      that: ParikhSST[R, B, C, Y, K, I]
+  ) = {
+    // (PSST, PSST) => (Update[Y, C], Update[Y, V[K]])-PSST => Update[Y, C]-PSST
+    //// 中間的な状態やラベルの型
+    type V[T] = Map[T, Int]
+    type WithVL[T] = (T, V[L])
+    // the first intermediate MPSST
+    type G1 = Map[X, (R, R)] // guess
+    type Q1 = (Q, G1) // state
+    type E1 = Update[X, that.UpdateXL] // edge label
+    // output relation label
+    // the second intermediate MPSST
+    type G2 = Set[X] // guess
+    type Q2 = (Q1, G2) // state
+    type E2 = (Update[X, that.UpdateX], that.UpdateL) // edge label
+    type O2 = ((Cupstar[X, that.UpdateX], that.XBS), that.LVal) // output relation label
 
-    def possiblePreviousOf[Q, X, A, B](
-        q: Q,
-        r: Q,
-        invTransA: Map[(Q, A), Set[(Q, B)]],
-        invTransX: Map[(Q, X), Set[Q]], // For each q2 in invTransX(r2, x), reading x at q2 may lead to r2
-        xas: Cupstar[X, A]
-    ): Set[(Map[X, (Q, Q)], Cupstar[X, B])] = {
-      xas
-        .foldRight[Set[(Map[X, (Q, Q)], (Q, Cupstar[X, B]))]](
-          Set((Map.empty, (r, Nil))) // accumulates a set of pairs of a mapping and configuration.
-        ) {
-          case (Cop1(x), acc) =>
-            acc.flatMap {
-              case (m, (r, xbs)) =>
-                invTransX(r, x).map(q => (m + (x -> (q, r)), (q, Cop1(x) :: xbs)))
-            }
-          case (Cop2(a), acc) =>
-            acc.flatMap {
-              case (m, (r, xbs)) =>
-                invTransA(r, a).map { case (q, b) => (m, (q, Cop2(b) :: xbs)) }
-            }
-        }
-        .withFilter { case (_, (s, _)) => s == q }
-        .map { case (m, (_, xbs)) => (m, xbs) }
+    implicit val vkMonoid: Monoid[V[K]] = Monoid.vectorMonoid(that.ls)
+
+    //// MPA への変換
+    val invTransA: Map[(Q, A), Set[(Q, UpdateXL)]] =
+      graphToMap(edges) { case (q, a, mx, ml, r) => (r, a) -> ((q, (mx, ml))) }
+
+    val invTransB: Map[(R, B), Set[(R, that.UpdateXL)]] =
+      graphToMap(that.edges) { case (q, b, ycs, kv, r) => (r, b) -> (q, (ycs, kv)) }
+
+    val invTransX: Map[Q, Map[(R, X), Set[R]]] = this.invTransX(that.states, that.trans(_, _))
+
+    val previousGuess = this.possiblePreviousGuess(invTransB, invTransX) _
+    val countAndFold: Cupstar[X, V[K]] => (Set[X], V[K]) = xvs => {
+      val (xs, vs) = xvs.partitionMap(_.toEither)
+      (xs.toSet, Monoid.fold(vs))
     }
-    type NewUpdateX = Update[X, UpdateYK]
+    val countAndFoldUpdate: Update[X, V[K]] => X => (Set[X], V[K]) = update => x => countAndFold(update(x))
+
     // For each element (f, xbs) of the returned set, the following holds: q -[xas / xbs]-> r by using f.
-    def previousStates(nq: NQ, a: A): Set[(NQ, NewUpdateX, UpdateL)] = {
-      val (r, kt) = nq
-      invTransA(r, a).flatMap {
-        case (q, (mx, ml)) => { // q -[a / m]-> r (first NSST)
-          val candidates: List[(X, Set[(Map[X, (R, R)], Cupstar[X, UpdateYK])])] =
-            kt.map {
-              case (x, (k, t)) =>
+    def previousStates(mq: Q1, a: A): Iterator[WithVL[(Q1, Update[X, that.UpdateXL])]] = {
+      val (r, guess) = mq
+      invTransA(r, a).iterator.flatMap {
+        case (q, (mx, lv)) => // q -[a / m]-> r
+          val candidates: List[(X, Set[(Map[X, (R, R)], Cupstar[X, that.UpdateXL])])] =
+            guess.iterator.map {
+              case (x, (r1, r2)) =>
                 // Variables always empty at state q can be ignored
-                val nonEmptyAtQ = n1.nonEmptyVarsAt(q)
+                val nonEmptyAtQ = nonEmptyVarsAt(q)
                 val filtered: Cupstar[X, B] = mx(x).filter {
                   case Cop1(x) => nonEmptyAtQ(x)
                   case _       => true
                 }
-                x -> possiblePreviousOf(k, t, invTransB, invTransX(q), filtered)
+                x -> previousGuess(q, r1, r2, filtered)
             }.toList
+
           def aux(
-              candidates: List[(X, Set[(Map[X, (R, R)], Cupstar[X, UpdateYK])])]
-          ): Set[(Map[X, (R, R)], NewUpdateX)] =
+              candidates: List[(X, Set[(Map[X, (R, R)], Cupstar[X, that.UpdateXL])])]
+          ): Iterator[(Map[X, (R, R)], Update[X, that.UpdateXL])] =
             candidates match {
-              case Nil => Set((Map.empty, n1.xs.map(x => x -> Nil).toMap))
+              case Nil => Iterator((Map.empty, xs.map(x => x -> Nil).toMap))
               case (x, s) :: tl =>
-                for ((kt1, mu) <- aux(tl); (kt2, alpha) <- s) yield ((kt1 ++ kt2), mu + (x -> alpha))
+                for ((guess1, mu) <- aux(tl); (guess2, xms) <- s) yield ((guess1 ++ guess2), mu + (x -> xms))
             }
-          aux(candidates).map { case (kt, newMx) => ((q, kt), newMx, ml) }
-        }
+
+          aux(candidates).map { case (guess, newMx) => (((q, guess), newMx), lv) }
       }
     }
 
-    val outGraph: Set[(NQ, Cupstar[X, UpdateYK], Cupstar[Y, C], Map[L, Int], Map[K, Int])] = {
+    val mvOutGraph: Iterator[
+      WithVL[(Q1, (Cupstar[X, that.UpdateX], that.XBS), (Cupstar[X, that.UpdateL], that.LVal))]
+    ] = for {
+      (q, xbs, lv) <- outGraph.iterator
+      (r, s2) <- that.outF.iterator
+      (guess, xms) <- {
+        val nonEmptyAtQ1 = nonEmptyVarsAt(q)
+        val filtered = xbs.filter { case Cop1(x) => nonEmptyAtQ1(x); case _ => true }
+        previousGuess(q, that.q0, r, filtered)
+      }
+      (ycs, kv) <- s2
+    } yield {
+      val (xuys, xvs) = Cupstar.devideChars(xms)
+      (((q, guess), (xuys, ycs), (xvs, kv)), lv)
+    }
+
+    val mpsstOutIter: Iterator[WithVL[(Q2, (Cupstar[X, that.UpdateX], that.XBS), that.LVal)]] =
+      mvOutGraph.map {
+        case ((q, stringPart, (xvs, kv1)), lv) =>
+          val (outXs, kv2) = countAndFold(xvs)
+          val kv = Monoid.fold(Iterator(kv1, kv2))
+          (((q, outXs), stringPart, kv), lv)
+      }
+
+    //// 2nd-MPSST への変換
+
+    def mpsstPreviousStates(pr: Q2, a: A): IterableOnce[WithVL[(Q2, Update[X, that.UpdateX], V[K])]] = {
+      val (r, rXs) = pr
       for {
-        (q1, xbs, lv) <- n1.outGraph
-        (q2, s2) <- n2.outF
-        (kt, xms) <- {
-          val nonEmptyAtQ1 = n1.nonEmptyVarsAt(q1)
-          val filtered = xbs.filter { case Cop1(x) => nonEmptyAtQ1(x); case _ => true }
-          possiblePreviousOf(n2.q0, q2, invTransB, invTransX(q1), filtered)
+        ((q, update), lv) <- previousStates(r, a)
+      } yield {
+        val (stringUpdate, vectorUpdate) = Update.devideChars(update)
+        val iter = rXs.iterator.map(countAndFoldUpdate(vectorUpdate))
+        val (qXs, kv) = iter.fold((Set.empty[X], that.ls.map(_ -> 0).toMap)) {
+          case ((accXs, accV), (xs, v)) => (accXs | xs, Monoid[that.UpdateL].combine(accV, v))
         }
-        (ycs, kv) <- s2
-      } yield ((q1, kt), xms, ycs, lv, kv)
+        countAndFoldUpdate(vectorUpdate)
+        (((q, qXs), stringUpdate, kv), lv)
+      }
     }
 
-    val (states, edges) = searchStates(outGraph.map(_._1), n1.inSet)(previousStates)(
-      { case (q, _, _)           => q },
-      { case (r, a, (q, mx, ml)) => (q, a, mx, ml, r) }
+    def lks: Iterator[Either[L, K]] = this.ls.iterator.map(Left.apply) ++ that.ls.iterator.map(Right.apply)
+    val lkRename: Map[Either[L, K], Int] = lks.zipWithIndex.toMap
+    def combineLK(lv: this.LVal, kv: that.LVal): Map[Int, Int] =
+      lks.map {
+        case e @ Left(l)  => lkRename(e) -> lv(l)
+        case e @ Right(k) => lkRename(e) -> kv(k)
+      }.toMap
+    val formulas = {
+      val thisF = acceptFormulas.map(_.renameVars(_.map(l => lkRename(Left(l)))))
+      val paF = that.acceptFormulas.map(_.renameVars(_.map(k => lkRename(Right(k)))))
+      thisF ++ paF
+    }
+
+    (mpsstOutIter, mpsstPreviousStates _, lkRename.values.toSet, combineLK _, formulas)
+  }
+
+  def preimageIter[R, K](pa: ParikhAutomaton[R, B, K, I]): Iterator[ParikhAutomaton[Int, A, Int, I]] = {
+    val that = pa.toParikhSST
+    val intermediate = andThenAux(that)
+    val (paOutGraph, paPreviousStates, lks, combineLK, formulas) = intermediate
+    paOutGraph.flatMap { out =>
+      val ((qf, _, kv), lv) = out
+      val lkv = combineLK(lv, kv)
+
+      val (states, edges) = searchStates(Set(qf), inSet)(paPreviousStates)(
+        { case ((q, _, _), _)           => q },
+        { case (r, a, ((q, _, kv), lv)) => (q, a, combineLK(lv, kv), r) }
+      )
+
+      val initialStates =
+        states.withFilter {
+          case ((q, guess), _) => q == q0 && guess.forall { case (_, (r1, r2)) => r1 == r2 }
+        }
+
+      initialStates.map { q0 =>
+        // Remove all unreachable states.
+        val reachables = closure(Set(q0), graphToMap(edges) {
+          case (q, _, _, r) => q -> r
+        })
+        val newEdges = edges.filter { case (q, _, _, r) => reachables(q) && reachables(r) }
+        ParikhAutomaton(
+          reachables,
+          inSet,
+          lks,
+          is ++ pa.is,
+          newEdges,
+          q0,
+          Set((qf, lkv)),
+          formulas
+        ).renamed
+      }
+
+    }
+  }
+
+  def preimage[R, K](pa: ParikhAutomaton[R, B, K, I]): ParikhAutomaton[Int, A, Int, I] = {
+    val that = pa.toParikhSST
+    val psst = andThen[R, Nothing, Nothing, K](that)
+    ParikhAutomaton(
+      psst.states,
+      psst.inSet,
+      psst.ls,
+      psst.is,
+      psst.edges.map { case (q, a, _, v, r) => (q, a, v, r) },
+      psst.q0,
+      psst.outGraph.map { case (q, _, v) => (q, v) },
+      psst.acceptFormulas
     )
+  }
 
-    val initialStates =
-      states.filter { case (q, kt) => q == n1.q0 && kt.forall { case (_, (k, t)) => k == t } }
-
-    // Wrap states with Option so initial state be unique.
-    type NWQ = Option[NQ]
-    val newEdges = {
-      val wrapped =
-        for ((q, a, mx, ml, r) <- edges)
-          yield (Some(q), a, mx, ml, Option(r))
-      val fromNone =
-        for ((q, a, mx, ml, r) <- edges if initialStates(q))
-          yield (None, a, mx, ml, Option(r))
-      wrapped ++ fromNone
-    }
-    val newOutGraph: Set[(NWQ, Cupstar[X, UpdateYK], Cupstar[Y, C], Map[L, Int], Map[K, Int])] = {
-      val wrapped =
-        for ((q, xms, ycs, lv, kv) <- outGraph) yield (Some(q), xms, ycs, lv, kv)
-      val atNone =
-        for ((q, xms, ycs, lv, kv) <- outGraph if initialStates(q)) yield (None, xms, ycs, lv, kv)
-      wrapped ++ atNone
-    }
-
-    // Remove all unreachable states.
-    val reachables = closure[NWQ](Set(None), graphToMap(newEdges) {
-      case (q, _, _, _, r) => q -> r
-    })
-
-    val res = new MonoidSST[NWQ, C, Y, K](
-      reachables,
-      n2.xs,
-      n2.ls,
-      n1.is ++ n2.is,
-      newEdges.filter { case (q, _, _, _, r) => reachables(q) && reachables(r) },
-      None,
-      newOutGraph.filter { case (q, _, _, _, _) => reachables(q) },
-      n1.acceptFormulas,
-      n2.acceptFormulas
+  def andThen[R, C, Y, K](
+      that: ParikhSST[R, B, C, Y, K, I]
+  ): ParikhSST[Int, A, C, (X, Y, Boolean), Int, I] = {
+    val (mpsstOutIter, mpsstPreviousStates, lks, combineLK, formulas) = andThenAux(that)
+    val og = mpsstOutIter.toSet
+    val (newStates, newEdges) = searchStatesInt(og.map { case ((q, _, _), _) => q }, inSet)(mpsstPreviousStates)(
+      { case ((q, _, _), _)                => q },
+      { case (r, a, ((q, m, kv), lv), map) => (map(q), a, m, combineLK(lv, kv), map(r)) }
     )
-    // logger.msstConstructed(res)
-    res
+    val newOutGraph = og.map {
+      case ((q, stringPart, kv), lv) => (newStates(q), stringPart, combineLK(lv, kv))
+    }
+
+    val initialStates = for {
+      (((q, guess), _), qi) <- newStates if q == q0 && guess.forall { case (_, (r1, r2)) => r1 == r2 }
+    } yield qi
+
+    val mpsst = MonoidParikhSST[Int, A, C, X, Y, Int, I](
+      newStates.values.toSet,
+      inSet,
+      xs,
+      that.xs,
+      lks,
+      is ++ that.is,
+      newEdges.toSet,
+      initialStates.toSet,
+      newOutGraph,
+      formulas
+    )
+    mpsst.toParikhSST
+  }
+
+  def andThenIter[R, C, Y, K](
+      that: ParikhSST[R, B, C, Y, K, I]
+  ): Iterator[ParikhSST[Int, A, C, Int, Int, I]] = {
+    val (mpsstOutIter, mpsstPreviousStates, lks, combineLK, formulas) = andThenAux(that)
+    // 2nd-MPSST => PSST
+    // guess      : Map[Y, Seq[Y]]
+    // state      : (Q2, guess)
+    // edge label : (Update[X, C], that.UpdateL)
+    // out label  : (Cupstar[X, C], that.LVal)
+
+    mpsstOutIter.flatMap { out =>
+      val ((qf, stringPart, kv), lv) = out
+      val lkv = combineLK(lv, kv)
+
+      val (states, edges) = searchStates(Set(qf), inSet)(mpsstPreviousStates)(
+        { case ((q, _, _), _)           => q },
+        { case (r, a, ((q, m, kv), lv)) => (q, a, m, combineLK(lv, kv), r) }
+      )
+
+      val initialStates =
+        states.withFilter {
+          case ((q, guess), _) => q == q0 && guess.forall { case (_, (r1, r2)) => r1 == r2 }
+        }
+
+      initialStates.map { q0 =>
+        // 2nd-MPSST => PSST
+        val mpsst = MonoidParikhSST(
+          states,
+          inSet,
+          xs,
+          that.xs,
+          lks,
+          is ++ that.is,
+          edges,
+          Set(q0),
+          Set((qf, stringPart, lkv)),
+          formulas
+        )
+        val psst = mpsst.toParikhSST
+        psst.renamed
+      }
+
+    }
   }
 
   def compose[R, C, Y, K](that: ParikhSST[R, B, C, Y, K, I]): ParikhSST[Int, A, C, Int, Int, I] =
-    composeNsstsToMsst(this, that).toLocallyConstrainedAffineParikhSST.toAffineParikhSST.toParikhSST.renamed.removeRedundantVars.removeRedundantLogVars
-
-  case class MonoidSST[Q, C, Y, K](
-      states: Set[Q],
-      ys: Set[Y],
-      ks: Set[K],
-      is: Set[I],
-      edges: Set[
-        (Q, A, Update[X, (Update[Y, C], ParikhSST.ParikhUpdate[K])], ParikhSST.ParikhUpdate[L], Q)
-      ],
-      q0: Q,
-      outGraph: Set[
-        (
-            Q,
-            Cupstar[X, (Update[Y, C], ParikhSST.ParikhUpdate[K])],
-            Cupstar[Y, C],
-            Map[L, Int],
-            Map[K, Int]
-        )
-      ],
-      acceptFormulasL: Seq[Presburger.Formula[Either[I, L]]],
-      acceptFormulasK: Seq[Presburger.Formula[Either[I, K]]]
-  ) extends StringIntTransducer[A, C, I] {
-    type YCS = Cupstar[Y, C]
-    type UpdateY = Update[Y, C]
-    type UpdateK = ParikhSST.ParikhUpdate[K]
-    type UpdateYK = (UpdateY, UpdateK)
-    type UpdateX = Update[X, UpdateYK]
-    type UpdateXL = (UpdateX, UpdateL)
-    val myMonoid: Monoid[UpdateY] = updateMonoid(ys)
-    val mkMonoid: Monoid[UpdateK] = ParikhSST.parikhMonoid(ks)
-    val mykMonoid: Monoid[UpdateYK] = Monoid.productMonoid(myMonoid, mkMonoid)
-    val mxMonoid: Monoid[UpdateX] = updateMonoid(xs)
-    val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
-    val trans = graphToMap(edges) { case (q, a, mx, ml, r)        => (q, a) -> (r, (mx, ml)) }
-    val outF = graphToMap(outGraph) { case (q, xmms, ycs, lv, kv) => q -> (xmms, ycs, lv, kv) }
-    val acceptFormula: Presburger.Formula[Either[I, Cop[L, K]]] = {
-      val l = acceptFormulasL.map(_.renameVars(_.map[Cop[L, K]](Cop1.apply)))
-      val k = acceptFormulasK.map(_.renameVars(_.map[Cop[L, K]](Cop2.apply)))
-      Presburger.Conj(l ++ k)
-    }
-    def evalFormula(lkVal: Map[Cop[L, K], Int], iVal: Map[I, Int]): Boolean = acceptFormula.eval {
-      val lk = lkVal.map { case (l, n) => Right(l) -> n }
-      val i = iVal.map { case (i, n)   => Left(i) -> n }
-      (lk ++ i).toMap
-    }
-    def transition(qs: Set[Q], w: Seq[A]): Set[(Q, UpdateXL)] =
-      Monoid.transition(qs, w, (q: Q, a: A) => trans(q, a))(mxlMonoid)
-    def outputAt(q: Q, m: UpdateXL, n: Map[I, Int]): Set[Seq[C]] = {
-      val (mx, ml) = m
-      outF(q).flatMap {
-        case (xmms, ycs, lv, kv) =>
-          val mxys = erase1(flatMap1(xmms, mx))
-          val (my, mk) = Monoid.fold(mxys)(mykMonoid)
-          val klMap = mlMonoid.combine(ml, lv).map { case (l, n) => Cop1(l) -> n } ++
-            mkMonoid.combine(mk, kv).map { case (k, n)           => Cop2(k) -> n }
-          if (evalFormula(klMap.toMap, n)) Some(erase1(flatMap1(ycs, my)))
-          else None
-      }
-    }
-    def transduce(w: Seq[A], n: Map[I, Int]): Set[Seq[C]] = transition(Set(q0), w).flatMap {
-      case (q, m) => outputAt(q, m, n)
-    }
-    def toLocallyConstrainedAffineParikhSST
-        : LocallyConstrainedAffineParikhSST[(Q, Map[X, Map[Y, List[Y]]]), A, C, (X, Y, Boolean), Cop[
-          L,
-          (X, K)
-        ], I] = {
-      require(xs.nonEmpty) // For a technical reason
-      import MSST.{gamma, proj}
-      type M1Y = Map[Y, List[Y]]
-      type S = Map[X, M1Y]
-      type NQ = (Q, S)
-      type Z = (X, Y, Boolean)
-      type J = Cop[L, (X, K)]
-
-      type ZCS = Cupstar[Z, C]
-      type UpdateZ = Update[Z, C]
-      type JVal = Map[J, Int]
-      type UpdateJ = ParikhSST.AffineUpdate[J]
-      // Construct PresburgerSST[NQ, A, C, Z, J, I].
-      val zs: Set[Z] = for (x <- xs; y <- ys; b <- List(true, false)) yield (x, y, b)
-      val js: Set[J] = ls.map(Cop1.apply) ++ (for (x <- xs; k <- ks) yield (x, k)).map(Cop2.apply)
-
-      def iota(s: S)(x: X): Update[Y, Cop[Z, C]] = {
-        val prePost =
-          for (y <- ys; b <- List(false, true))
-            yield ((y, b) -> (if (b) List((x, y, b))
-                              else List((x, y, b))))
-        gamma(ys)(s(x), prePost.toMap).view
-          .mapValues(_.map { case Cop1(y) => Cop1(y); case Cop2(z) => Cop2(Cop1(z)) })
-          .toMap
-      }
-
-      def embedUpdate[X, A, C](m: Update[X, C]): Update[X, Cop[A, C]] = {
-        m.view
-          .mapValues(_.map {
-            case Cop1(x) => Cop1(x)
-            case Cop2(b) => Cop2(Cop2(b))
-          })
-          .toMap
-      }
-
-      type UpdateK2 = Map[K, (Int, Set[(X, K)])]
-      val mk2Monoid: Monoid[UpdateK2] = Monoid.vectorMonoid(ks) // product of (Int, +) and (Set, union)
-      val mykMonoidEmbed: Monoid[(Update[Y, Cop[Z, C]], UpdateK2)] =
-        Monoid.productMonoid(updateMonoid(ys), mk2Monoid)
-      // (S, List[X, Update]) has information for construct update of composed machine.
-      def assignFold(s: S, alpha: Cupstar[X, UpdateYK]): (Update[Y, Cop[Z, C]], UpdateK2) = {
-        val iotaS = iota(s) _
-        val ms: List[(Update[Y, Cop[Z, C]], UpdateK2)] = alpha.map {
-          case Cop1(x)        => (iotaS(x), ks.map(k => k -> (0, Set((x, k)))).toMap)
-          case Cop2((my, mk)) => (embedUpdate(my), mk.map { case (k, i) => k -> (i, Set.empty) })
-        }
-        Monoid.fold(ms)(mykMonoidEmbed)
-      }
-
-      def nextState(s: S, mx: UpdateX, ml: UpdateL): (S, Update[Z, C], UpdateJ) = {
-        val cache = xs.map { x =>
-          val (my, mk2) = assignFold(s, mx(x))
-          val (p1, p2) = proj(my)
-          x -> (p1, p2, mk2)
-        }.toMap
-        val nextS = cache.map { case (x, (perm, _, _)) => x -> perm }
-        val mz = zs.map { case (x, y, b) => (x, y, b) -> cache(x)._2(y, b) }.toMap
-        val mj = js.map[(J, (Int, Set[J]))] {
-          case j @ Cop1(l) => j -> (ml(l), Set(j))
-          case j @ Cop2((x, k)) =>
-            val (_, _, mk2) = cache(x)
-            val (i, s) = mk2(k)
-            j -> (i, s.map(Cop2.apply))
-        }
-        (nextS, mz, mj.toMap)
-      }
-
-      def nextStates(q: NQ, a: A): Set[(NQ, UpdateZ, UpdateJ)] = q match {
-        case (q, s) =>
-          this
-            .trans(q, a)
-            .map {
-              case (nextQ, (mx, ml)) => {
-                val (nextS, mz, mj) = nextState(s, mx, ml)
-                ((nextQ, nextS), mz, mj)
-              }
-            }
-      }
-
-      val newQ0 = {
-        val id = ys.map(y => y -> List(y)).toMap
-        val const = xs.map(x => x -> id).toMap
-        (q0, const)
-      }
-      val (newStates, newEdges) = searchStates(Set(newQ0), inSet)(nextStates)(
-        { case (r, _, _)           => r },
-        { case (q, a, (r, mz, mj)) => (q, a, mz, mj, r) }
-      )
-      val newOutGraph: Set[(NQ, ZCS, JVal, Presburger.Formula[Either[I, J]])] = {
-        for {
-          nq @ (q, s) <- newStates
-          (xmms, ycs, lv, kv) <- outF(q)
-        } yield {
-          val (my, mk) = assignFold(s, xmms)
-          val assigned = ycs.flatMap {
-            case Cop1(y) => erase1(my(y))
-            case Cop2(b) => List(Cop2(b))
-          }
-          val v: Iterable[(J, Int)] = js.map {
-            case j @ Cop1(l)      => j -> lv(l)
-            case j @ Cop2((x, k)) => j -> 0
-          }
-          val formula = {
-            type FormulaVar = Either[I, Cop[L, (X, K)]]
-            val x = xs.head // Here xs should not be empty
-            // TODO ここで Conj をとる意味がわからない
-            //      状態ごとの制約として Seq を許せば Conj は要らないはず
-            val formulaK = Presburger.Conj(acceptFormulasK.map(_.renameVars(_.map[Cop[L, K]](Cop2.apply))))
-            val renamed: Presburger.Formula[FormulaVar] = formulaK.renameVars(_.map {
-              case Cop1(l) => Cop1(l)
-              case Cop2(k) => Cop2((x, k))
-            })
-            Presburger.Formula.substitute(renamed) {
-              case Left(i)        => Presburger.Var(Left(i))
-              case Right(Cop1(l)) => Presburger.Var(Right(Cop1(l)))
-              case Right(Cop2((_, k))) =>
-                val (n, _) = mk(k)
-                val consts = Seq(kv(k), n).map(Presburger.Const.apply[FormulaVar])
-                Presburger.Add(consts ++ xmms.collect {
-                  case Cop1(x) => Presburger.Var[FormulaVar](Right(Cop2((x, k))))
-                })
-            }
-          }
-          (nq, assigned, v.toMap, formula)
-        }
-      }
-
-      LocallyConstrainedAffineParikhSST(
-        newStates,
-        inSet,
-        zs,
-        js,
-        is,
-        newEdges,
-        newQ0,
-        acceptFormulasL.map(_.renameVars(_.map[Cop[L, (X, K)]](Cop1.apply))),
-        newOutGraph
-      )
-    }
-  }
-
-  case class LocallyConstrainedAffineParikhSST[Q, A, B, X, L, I](
-      states: Set[Q],
-      inSet: Set[A],
-      xs: Set[X],
-      ls: Set[L],
-      is: Set[I],
-      edges: Set[(Q, A, Update[X, B], ParikhSST.AffineUpdate[L], Q)],
-      q0: Q,
-      globalAcceptFormulas: Seq[Presburger.Formula[Either[I, L]]],
-      outGraph: Set[(Q, Cupstar[X, B], Map[L, Int], Presburger.Formula[Either[I, L]])]
-  ) extends StringIntTransducer[A, B, I] {
-    type UpdateX = Update[X, B]
-    type UpdateL = ParikhSST.AffineUpdate[L]
-    type UpdateXL = (UpdateX, UpdateL)
-    val mxMonoid: Monoid[UpdateX] = updateMonoid(xs)
-    val mlMonoid: Monoid[UpdateL] = ParikhSST.affineMonoid(ls)
-    val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
-    val trans = graphToMap(edges) { case (q, a, mx, ml, r) => (q, a) -> (r, (mx, ml)) }
-    val outF = graphToMap(outGraph) { case (q, xbs, lv, f) => q -> (xbs, lv, f) }
-    def transition(qs: Set[Q], w: Seq[A]): Set[(Q, UpdateXL)] =
-      Monoid.transition(qs, w, (q: Q, a: A) => trans(q, a))(mxlMonoid)
-    def outputAt(q: Q, m: UpdateXL, n: Map[I, Int]): Set[Seq[B]] = {
-      val (mx, ml) = m
-      outF(q).flatMap {
-        case (xbs, lv, f) =>
-          val env = {
-            val lMap = ParikhSST.applyAffine(ml, lv)
-            val l = lMap.map { case (l, n) => Right(l) -> n }
-            val i = n.map { case (i, n)    => Left(i) -> n }
-            (l ++ i).toMap
-          }
-          if (Presburger.Conj(globalAcceptFormulas :+ f).eval(env)) Some(erase1(flatMap1(xbs, mx)))
-          else None
-      }
-    }
-    def transduce(w: Seq[A], n: Map[I, Int]): Set[Seq[B]] = transition(Set(q0), w).flatMap {
-      case (q, m) => outputAt(q, m, n)
-    }
-    def toAffineParikhSST: AffineParikhSST[Q, A, B, X, Option[L], I] = {
-      def embedLv(lv: Map[L, Int], forNone: Int): Map[Option[L], Int] =
-        lv.map { case (l, n) => Option(l) -> n } + (None -> forNone)
-      def embedMl(ml: ParikhSST.AffineUpdate[L]): ParikhSST.AffineUpdate[Option[L]] =
-        ml.map {
-          case (l, (n, s)) => Option(l) -> (n, s.map(Option.apply))
-        } + (None -> (0, Set()))
-      val formulaMap = (for ((_, _, _, f) <- outGraph) yield f).zipWithIndex.toMap
-      val newOutGraph = (for ((q, xbs, lv, f) <- outGraph) yield (q, xbs, embedLv(lv, formulaMap(f))))
-      val localFormulaDisj = Presburger.Disj(formulaMap.map {
-        case (f, n) =>
-          type NewVar = Either[I, Option[L]]
-          val renamed = f.renameVars(_.map(Option.apply))
-          Presburger.Conj(
-            Seq(Presburger.Eq(Presburger.Var[NewVar](Right(None)), Presburger.Const(n)), renamed)
-          )
-      }.toSeq)
-      val newFormulas = {
-        val global = globalAcceptFormulas.map(_.renameVars(_.map(Option.apply)))
-        global :+ localFormulaDisj
-      }
-      val newEdges = edges.map { case (q, a, mx, ml, r) => (q, a, mx, embedMl(ml), r) }
-      AffineParikhSST[Q, A, B, X, Option[L], I](
-        states,
-        inSet,
-        xs,
-        ls.map(Option.apply) + None,
-        is,
-        newEdges,
-        q0,
-        newOutGraph,
-        newFormulas
-      )
-    }
-
-    def toLocallyConstrainedParikhSST: LocallyConstrainedParikhSST[Option[(Q, Map[L, L])], A, B, X, L, I] = {
-      type NQ = (Q, Map[L, L])
-      type NewUpdateL = Map[L, Int]
-      val newOutGraph = {
-        val id = ls.map(l => l -> l).toMap
-        outGraph.map { case (q, xbs, lv, phi) => ((q, id), xbs, lv, phi) }
-      }
-      val backTrans = graphToMap(edges) { case (q, a, mx, ml, r) => (r, a) -> (q, mx, ml) }
-      // ll means Map[L, L], i.e. for each l, where it's going to?
-      def llOf(ml: ParikhSST.AffineUpdate[L]): Map[L, L] =
-        for ((l2, (_, s)) <- ml; l1 <- s) yield l1 -> l2
-      def prevStates(nq: NQ, a: A): Set[(NQ, (UpdateX, NewUpdateL))] = {
-        val (r, ll) = nq
-        backTrans((r, a)).map {
-          case (q, mx, ml) =>
-            val llMl = llOf(ml)
-            // l is assigned to k and k is to go to j, then l is to go to j.
-            val prevLL = for {
-              l <- ls
-              k <- llMl.get(l)
-              j <- ll.get(k)
-            } yield l -> j
-            val lv = {
-              val lv = collection.mutable.Map.from(ls.map(_ -> 0))
-              // n is added to l and l is to go to k, then n should be added to k.
-              for {
-                (l, (n, _)) <- ml
-                k <- ll.get(l)
-              } lv(k) += n
-              lv.toMap
-            }
-            ((q, prevLL.toMap), (mx, lv))
-        }
-      }
-      val (newStates, newEdges) =
-        searchStates(newOutGraph.map { case (q, _, _, _) => q }, inSet)(prevStates)(
-          { case (q, _)                => q },
-          { case (r, a, (q, (mx, ml))) => (q, a, mx, ml, r) }
-        )
-      val newQ0 = newStates.filter { case (q, _) => q == q0 }
-      val oStates = newStates.map(Option.apply) + None
-      val oEdges = {
-        val some = newEdges.map { case (q, a, mx, ml, r) => (Option(q), a, mx, ml, Option(r)) }
-        val fromNone = for ((q, a, mx, ml, r) <- newEdges if newQ0(q)) yield (None, a, mx, ml, Option(r))
-        some ++ fromNone
-      }
-      val oOutGraph = {
-        val some = newOutGraph.map { case (q, mx, ml, phi) => (Option(q), mx, ml, phi) }
-        val none = for ((q, mx, ml, phi) <- newOutGraph if newQ0(q)) yield (None, mx, ml, phi)
-        some ++ none
-      }
-      LocallyConstrainedParikhSST(
-        oStates,
-        inSet,
-        xs,
-        ls,
-        is,
-        oEdges,
-        None,
-        globalAcceptFormulas,
-        oOutGraph
-      )
-
-    }
-  }
-
-  case class LocallyConstrainedParikhSST[Q, A, B, X, L, I](
-      states: Set[Q],
-      inSet: Set[A],
-      xs: Set[X],
-      ls: Set[L],
-      is: Set[I],
-      edges: Set[(Q, A, Update[X, B], ParikhSST.ParikhUpdate[L], Q)],
-      q0: Q,
-      globalAcceptFormulas: Seq[Presburger.Formula[Either[I, L]]],
-      outGraph: Set[(Q, Cupstar[X, B], Map[L, Int], Presburger.Formula[Either[I, L]])]
-  ) {
-    type XBS = Cupstar[X, B]
-    type LVal = Map[L, Int]
-    def renamed: LocallyConstrainedParikhSST[Int, A, B, Int, Int, I] = {
-      val stateMap = (states.zipWithIndex).toMap
-      val xMap = (xs.zipWithIndex).toMap
-      val lMap = (ls.zipWithIndex).toMap
-      def renameXbs(xbs: XBS): Cupstar[Int, B] = xbs.map(_.map1(xMap))
-      def renameLVal(lv: LVal): Map[Int, Int] = lv.map { case (l, n) => lMap(l) -> n }
-      def renameFormula(phi: Presburger.Formula[Either[I, L]]): Presburger.Formula[Either[I, Int]] =
-        phi.renameVars(_.map(lMap))
-      copy(
-        states = states.map(stateMap),
-        xs = xs.map(xMap),
-        ls = ls.map(lMap),
-        edges =
-          for {
-            e @ (q, a, m, v, r) <- edges if states(q) && states(r)
-          } yield (
-            stateMap(q),
-            a,
-            m.map { case (x, xbs) => xMap(x) -> renameXbs(xbs) },
-            renameLVal(v),
-            stateMap(r)
-          ),
-        q0 = stateMap(q0),
-        globalAcceptFormulas = globalAcceptFormulas.map(renameFormula),
-        outGraph = outGraph.map {
-          case (q, xbs, lv, phi) => (stateMap(q), renameXbs(xbs), renameLVal(lv), renameFormula(phi))
-        }
-      )
-    }
-    // 到達不可能な状態を除去
-    def optimized: LocallyConstrainedParikhSST[Q, A, B, X, L, I] = {
-      val reachable = closure(Set(q0), graphToMap(edges) {
-        case (q, _, _, _, r) => q -> r
-      })
-      copy(
-        states = reachable,
-        edges = edges.filter { case (q, _, _, _, r) => reachable(q) && reachable(r) },
-        outGraph = outGraph.filter(e => reachable(e._1))
-      )
-    }
-  }
-
-  case class AffineParikhSST[Q, A, B, X, L, I](
-      states: Set[Q],
-      inSet: Set[A],
-      xs: Set[X],
-      ls: Set[L],
-      is: Set[I],
-      edges: Set[(Q, A, Update[X, B], ParikhSST.AffineUpdate[L], Q)],
-      q0: Q,
-      outGraph: Set[(Q, Cupstar[X, B], Map[L, Int])],
-      acceptFormulas: Seq[Presburger.Formula[Either[I, L]]]
-  ) extends StringIntTransducer[A, B, I] {
-    type XBS = Cupstar[X, B]
-    type LVal = Map[L, Int]
-    type UpdateX = Update[X, B]
-    type UpdateL = ParikhSST.AffineUpdate[L]
-    type UpdateXL = (UpdateX, UpdateL)
-    val trans: Map[(Q, A), Set[(Q, UpdateXL)]] = graphToMap(edges) {
-      case (q, a, mx, ml, r) => (q, a) -> (r, (mx, ml))
-    }
-    val outF: Map[Q, Set[(XBS, LVal)]] = graphToMap(outGraph) { case (q, xbs, lv) => q -> (xbs, lv) }
-    def evalFormula(lVal: Map[L, Int], iVal: Map[I, Int]): Boolean =
-      acceptFormulas.forall(_.eval {
-        val l = lVal.map { case (l, n) => Right(l) -> n }
-        val i = iVal.map { case (i, n) => Left(i) -> n }
-        (l ++ i).toMap
-      })
-
-    val mxMonoid: Monoid[UpdateX] = updateMonoid(xs)
-    val mlMonoid: Monoid[UpdateL] = ParikhSST.affineMonoid(ls)
-    val mxlMonoid: Monoid[UpdateXL] = Monoid.productMonoid(mxMonoid, mlMonoid)
-
-    def transition(qs: Set[Q], w: Seq[A]): Set[(Q, UpdateXL)] =
-      Monoid.transition(qs, w.toList, (q: Q, a: A) => trans(q, a))(mxlMonoid)
-    def outputAt(q: Q, m: UpdateXL, n: Map[I, Int]): Set[List[B]] = {
-      val (mx, ml) = m
-      outF(q).flatMap {
-        case (xbs, lv) =>
-          val lMap = ParikhSST.applyAffine(ml, lv)
-          if (evalFormula(lMap, n)) Some(erase1(flatMap1(xbs, mx)))
-          else None
-      }
-    }
-    def transduce(w: Seq[A], n: Map[I, Int]): Set[Seq[B]] = transition(Set(q0), w).flatMap {
-      case (q, m) => outputAt(q, m, n)
-    }
-    def toParikhSST: ParikhSST[Option[(Q, Map[L, L])], A, B, X, L, I] = {
-      type NQ = (Q, Map[L, L])
-      type NewUpdateL = Map[L, Int]
-      val newOutGraph = {
-        val id = ls.map(l => l -> l).toMap
-        outGraph.map { case (q, xbs, lv) => ((q, id), xbs, lv) }
-      }
-      val backTrans = graphToMap(edges) { case (q, a, mx, ml, r) => (r, a) -> (q, mx, ml) }
-      // ll means Map[L, L], i.e. for each l, where it's going to?
-      def llOf(ml: ParikhSST.AffineUpdate[L]): Map[L, L] =
-        for ((l2, (_, s)) <- ml; l1 <- s) yield l1 -> l2
-      def prevStates(nq: NQ, a: A): Set[(NQ, (UpdateX, NewUpdateL))] = {
-        val (r, ll) = nq
-        backTrans((r, a)).map {
-          case (q, mx, ml) =>
-            val llMl = llOf(ml)
-            // l is assigned to k and k is to go to j, then l is to go to j.
-            val prevLL = for {
-              l <- ls
-              k <- llMl.get(l)
-              j <- ll.get(k)
-            } yield l -> j
-            val lv = {
-              val lv = collection.mutable.Map.from(ls.map(_ -> 0))
-              // n is added to l and l is to go to k, then n should be added to k.
-              for {
-                (l, (n, _)) <- ml
-                k <- ll.get(l)
-              } lv(k) += n
-              lv.toMap
-            }
-            ((q, prevLL.toMap), (mx, lv))
-        }
-      }
-      val (newStates, newEdges) =
-        searchStates(newOutGraph.map { case (q, _, _) => q }, inSet)(prevStates)(
-          { case (q, _)                => q },
-          { case (r, a, (q, (mx, ml))) => (q, a, mx, ml, r) }
-        )
-      val newQ0 = newStates.filter { case (q, _) => q == q0 }
-      val oStates = newStates.map(Option.apply) + None
-      val oEdges = {
-        val some = newEdges.map { case (q, a, mx, ml, r) => (Option(q), a, mx, ml, Option(r)) }
-        val fromNone = for ((q, a, mx, ml, r) <- newEdges if newQ0(q)) yield (None, a, mx, ml, Option(r))
-        some ++ fromNone
-      }
-      val oOutGraph = {
-        val some = newOutGraph.map { case (q, mx, ml) => (Option(q), mx, ml) }
-        val none = for ((q, mx, ml) <- newOutGraph if newQ0(q)) yield (None, mx, ml)
-        some ++ none
-      }
-      ParikhSST(oStates, inSet, xs, ls, is, oEdges, None, oOutGraph, acceptFormulas)
-    }
-  }
-
-  // (p1: PST) * (p2: PST) -> (l: Iterator[PST])
-  // where p2(p1(w, n), n) = l.flatMap(_(w, n))
-  def lazyCompose[R, C, Y, K](
-      that: ParikhSST[R, B, C, Y, K, I]
-  ): Iterator[ParikhSST[Int, A, C, Int, Int, I]] = {
-    ???
-  }
+    andThen(that).renamed.removeRedundantVars
 
   def toLogVectorEpsNFT: ENFT[Option[Q], A, Map[L, Int]] = {
     implicit val mon: Monoid[ParikhSST.ParikhUpdate[L]] = Monoid.vectorMonoid(ls)
@@ -905,7 +551,10 @@ case class ParikhSST[Q, A, B, X, L, I](
       val solver = ctx.mkSolver()
       val z3Exprs = formulas.map(Presburger.Formula.formulaToZ3Expr(ctx, Map.empty[String, z3.IntExpr], _))
       solver.add(z3Exprs: _*)
-      if (solver.check() == z3.Status.SATISFIABLE) {
+      println("start checking")
+      val result = solver.check()
+      println("done checking")
+      if (result == z3.Status.SATISFIABLE) {
         val model = solver.getModel()
         val n = is.map(i => i -> model.eval(ctx.mkIntConst(s"int_$i"), false).toString.toInt)
         val v = ls.map(l => l -> model.eval(ctx.mkIntConst(s"log_$l"), false).toString.toInt)
@@ -932,27 +581,135 @@ case class ParikhSST[Q, A, B, X, L, I](
   }
 }
 
+private case class MonoidParikhSST[Q, A, B, X, Y, L, I](
+    states: Set[Q],
+    inSet: Set[A],
+    xs: Set[X],
+    ys: Set[Y],
+    ls: Set[L],
+    is: Set[I],
+    edges: Set[(Q, A, Update[X, Update[Y, B]], Map[L, Int], Q)],
+    q0s: Set[Q],
+    outGraph: Set[(Q, (Cupstar[X, Update[Y, B]], Cupstar[Y, B]), Map[L, Int])],
+    acceptFormulas: Seq[Presburger.Formula[Either[I, L]]]
+) {
+  import MSST.{M1, gamma, proj}
+  def toParikhSST: ParikhSST[Int, A, B, (X, Y, Boolean), L, I] = {
+    type S = Map[X, M1[Y]]
+    type NQ = (Q, S)
+    type Z = (X, Y, Boolean)
+    val zs: Set[Z] = for {
+      x <- xs
+      y <- ys
+      b <- List(true, false)
+    } yield (x, y, b)
+    implicit val updateYMonoid: Monoid[Update[Y, Cop[Z, B]]] = ys
+
+    def iota(s: S)(x: X): Update[Y, Cop[Z, B]] = {
+      val prePost =
+        for (y <- ys; b <- List(false, true))
+          yield ((y, b) -> (if (b) List((x, y, b))
+                            else List((x, y, b))))
+      gamma(ys)(s(x), prePost.toMap).view
+        .mapValues(_.map { case Cop1(y) => Cop1(y); case Cop2(z) => Cop2(Cop1(z)) })
+        .toMap
+    }
+
+    def embedUpdate[X, A, B](m: Update[X, B]): Update[X, Cop[A, B]] = {
+      m.view
+        .mapValues(_.map {
+          case Cop1(x) => Cop1(x)
+          case Cop2(b) => Cop2(Cop2(b))
+        })
+        .toMap
+    }
+
+    def assignFold(s: S, alpha: Cupstar[X, Update[Y, B]]): Update[Y, Cop[Z, B]] = {
+      val iotaS = iota(s) _
+      val ms: List[Update[Y, Cop[Z, B]]] = alpha.map {
+        case Cop1(x) => iotaS(x)
+        case Cop2(m) => embedUpdate(m)
+      }
+      Monoid.fold(ms)
+    }
+
+    def nextState(s: S, mu: Update[X, Update[Y, B]]): (S, Update[Z, B]) = {
+      val cache = xs.map(x => x -> proj(assignFold(s, mu(x)))).toMap
+      val nextS = cache.map { case (x, (perm, _)) => x -> perm }
+      val nextU: Update[Z, B] = zs.map { case (x, y, b) => (x, y, b) -> cache(x)._2(y, b) }.toMap
+      (nextS, nextU)
+    }
+
+    val transOne: Map[(Q, A), Set[(Q, Update[X, Update[Y, B]], Map[L, Int])]] = graphToMap(edges) {
+      case (q, a, m, v, r) => (q, a) -> (r, m, v)
+    }
+
+    def nextStates(q: NQ, a: A): Set[(NQ, Update[Z, B], Map[L, Int])] = q match {
+      case (q, s) =>
+        transOne(q, a)
+          .map {
+            case (nextQ, mu, v) => {
+              val (nextS, update) = nextState(s, mu)
+              ((nextQ, nextS), update, v)
+            }
+          }
+    }
+
+    val newQ0s = {
+      val id = ys.map(y => y -> List(y)).toMap
+      val const = xs.map(x => x -> id).toMap
+      q0s.map((_, const))
+    }
+    val (newStates, newEdges) = searchStatesInt(newQ0s, inSet)(nextStates)(
+      { case (r, _, _)              => r },
+      { case (q, a, (r, m, v), map) => (map(q), a, m, v, map(r)) }
+    )
+    val outF: Map[Q, Set[(Cupstar[X, Update[Y, B]], Cupstar[Y, B], Map[L, Int])]] = graphToMap(outGraph) {
+      case (q, (xms, xbs), v) => q -> (xms, xbs, v)
+    }
+    val newOutGraph: Set[(Int, Cupstar[Z, B], Map[L, Int])] = {
+      for {
+        nq @ (q, s) <- newStates.keySet
+        (xms, xbs, v) <- outF(q)
+      } yield {
+        val m = assignFold(s, xms)
+        val assigned = xbs.flatMap {
+          case Cop1(y) => m(y)
+          case Cop2(b) => List(Cop2(Cop2(b)))
+        }
+        (newStates(nq), erase1(assigned), v)
+      }
+    }.toSet
+
+    val isNewQ0 = newQ0s.map(newStates)
+    val additionalEdges = for {
+      (q, a, m, v, r) <- newEdges.iterator if isNewQ0(q)
+    } yield (-1, a, m, v, r)
+    val additionalOut = for {
+      (q, xbs, v) <- newOutGraph.iterator if isNewQ0(q)
+    } yield (-1, xbs, v)
+
+    ParikhSST[Int, A, B, (X, Y, Boolean), L, I](
+      newStates.values.toSet + (-1),
+      inSet,
+      zs,
+      ls,
+      is,
+      Set.from(additionalEdges ++ newEdges),
+      -1,
+      Set.from(additionalOut ++ newOutGraph),
+      acceptFormulas
+    )
+  }
+
+}
+
 object ParikhSST {
   type ParikhUpdate[L] = Map[L, Int]
-  def parikhMonoid[L](ls: Set[L]): Monoid[ParikhUpdate[L]] = Monoid.vectorMonoid(ls)
-  type AffineUpdate[L] = Map[L, (Int, Set[L])]
-  def affineMonoid[L](ls: Set[L]): Monoid[AffineUpdate[L]] = new Monoid[AffineUpdate[L]] {
-    val unit = ls.map(l => l -> (0, Set(l))).toMap
-    val mon: Monoid[(Int, Set[L])] = Monoid.productMonoid
-    def combine(m1: AffineUpdate[L], m2: AffineUpdate[L]): AffineUpdate[L] = m2.map {
-      case (l, (i, s)) =>
-        val (j, t) = Monoid.fold(s.map(m1))(mon)
-        l -> (i + j, t)
-    }
-  }
-  def applyAffine[L](m: AffineUpdate[L], v: Map[L, Int]): Map[L, Int] = m.map {
-    case (l, (i, s)) =>
-      l -> (s.map(v).sum + i)
-  }
 
   object Implicits {
     implicit class ParikhUpdateOps[L](ml: ParikhUpdate[L]) {
-      def apply(lv: Map[L, Int]) = ml.map { case (l, i) => l -> (i + lv(l)) }
+      def apply(lv: ParikhUpdate[L]) = ml.map { case (l, i) => l -> (i + lv(l)) }
     }
   }
 }

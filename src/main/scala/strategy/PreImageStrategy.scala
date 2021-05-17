@@ -52,7 +52,7 @@ class PreImageStrategy(logger: Logger) extends Strategy {
     logger.info(s"intersect done\t$sizes")
     val psts: Seq[ParikhSST[Int, Char, Char, Unit, (Int /* index */, Int /* l */ ), String]] =
       uniqPR.parikhAutomata.zipWithIndex.map {
-        case (Seq(IdentifiedPA(_, pa)), idx) => pa.toParikhSST.renamed(identity _, identity _, l => (idx, l))
+        case (Seq(IdentifiedPA(_, pa)), idx) => pa.toIdentityParikhSST.renamed(identity _, identity _, l => (idx, l))
       }
     // 整数変数 int_*, ログ変数 log_*_*, 束縛変数 bound_*
     val formula = WithTime("formula") {

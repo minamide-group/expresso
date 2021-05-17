@@ -19,6 +19,28 @@ package object expresso {
       }.toList
   }
 
+  object Cupstar {
+    def devideChars[X, A, B](xbs: Cupstar[X, (A, B)]): (Cupstar[X, A], Cupstar[X, B]) =
+      xbs.foldRight[(Cupstar[X, A], Cupstar[X, B])]((List.empty, List.empty)) {
+        case (x @ Cop1(_), (a1, a2))  => (x.copy :: a1, x.copy :: a2)
+        case (Cop2((a, b)), (a1, a2)) => (Cop2(a) :: a1, Cop2(b) :: a2)
+      }
+  }
+
+  object Update {
+    def devideChars[X, A, B](update: Update[X, (A, B)]): (Update[X, A], Update[X, B]) = {
+      val aBuilder = Map.newBuilder[X, Cupstar[X, A]]
+      val bBuilder = Map.newBuilder[X, Cupstar[X, B]]
+      update.map {
+        case (x, xabs) =>
+          val (xas, xbs) = Cupstar.devideChars(xabs)
+          aBuilder.addOne((x, xas))
+          bBuilder.addOne((x, xbs))
+      }
+      (aBuilder.result(), bBuilder.result())
+    }
+  }
+
   implicit class UpdateOps[X, B](m: Update[X, B]) {
     def subst(xbs: List[Cop[X, B]]): List[Cop[X, B]] = xbs.flatMap {
       case Cop1(x) => m(x)
@@ -59,7 +81,7 @@ package object expresso {
   def searchStates[Q, A, C, E](
       baseStates: Set[Q],
       inSet: Set[A]
-  )(nextConfigs: (Q, A) => Iterable[C])(toState: C => Q, toEdge: (Q, A, C) => E): (Set[Q], Set[E]) = {
+  )(nextConfigs: (Q, A) => IterableOnce[C])(toState: C => Q, toEdge: (Q, A, C) => E): (Set[Q], Set[E]) = {
     val states = collection.mutable.Set.from(baseStates)
     var edges: List[E] = Nil
     var stack: List[Q] = states.toList
@@ -68,7 +90,7 @@ package object expresso {
       stack = stack.tail
       for {
         a <- inSet
-        c <- nextConfigs(h, a)
+        c <- nextConfigs(h, a).iterator
       } {
         edges ::= toEdge(h, a, c)
         val q = toState(c)
@@ -78,6 +100,40 @@ package object expresso {
       }
     }
     (states.toSet, edges.toSet)
+  }
+
+  def searchStatesInt[Q, A, C, E](
+      baseStates: Set[Q],
+      inSet: Set[A]
+  )(
+      nextConfigs: (Q, A) => IterableOnce[C]
+  )(toState: C => Q, toEdge: (Q, A, C, collection.Map[Q, Int]) => E): (collection.Map[Q, Int], List[E]) = {
+    val states = collection.mutable.Map.empty[Q, Int]
+    val newState: Unit => Int = {
+      var q = -1
+      _ => q += 1; q
+    }
+    for (q <- baseStates) states(q) = newState(())
+    var edges: List[E] = Nil
+    var stack: List[Q] = baseStates.toList
+    while (stack.nonEmpty) {
+      val h = stack.head
+      stack = stack.tail
+      for {
+        a <- inSet
+        c <- nextConfigs(h, a).iterator
+      } {
+        val q = toState(c)
+        states.get(q) match {
+          case Some(_) =>
+          case None =>
+            states(q) = newState(())
+            stack ::= q
+        }
+        edges ::= toEdge(h, a, c, states)
+      }
+    }
+    (states, edges)
   }
 
   /** Breadth-first search for an input by which given system can transition to final state. */

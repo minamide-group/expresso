@@ -116,7 +116,7 @@ private object Compiler {
       sstVars,
       edges ++ q0Loop,
       q0,
-      Map(q0 -> Set(List[Cop[SSTVar[X], A]](Cop1(Out()))))
+      Map(q0 -> Set(List(Cop1(Out()))))
     )
   }
   // state Cop1(s): vars in s is opened, Cop2(false): initial state, Cop2(true): already replaced once
@@ -144,11 +144,12 @@ private object Compiler {
       case Left(a)  => (qf, Left(a), unitUpdate + (Out() -> List(Cop1(Out()), Cop2(a))), qf)
       case Right(p) => (qf, Right(p), unitUpdate + (Out() -> List(Cop1(Out()))), qf)
     }
+    val out = List[Cop[SSTVar[X], A]](Cop1(Out()))
     repetitive.copy(
       states = states,
       edges = edges,
       q0 = q0,
-      partialF = Map(q0 -> Set(List(Cop1(Out()))), qf -> Set(List(Cop1(Out()))))
+      partialF = Map(q0 -> Set(out), qf -> Set(out))
     )
   }
 
