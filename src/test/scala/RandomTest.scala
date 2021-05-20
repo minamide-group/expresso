@@ -1,6 +1,6 @@
 package com.github.kmn4.expresso
 
-import com.github.kmn4.expresso.machine.{MSST, NSST}
+import com.github.kmn4.expresso.machine.{NSST, MSST}
 import com.github.kmn4.expresso.math._
 import org.scalatest.flatspec._
 
@@ -161,48 +161,5 @@ class RandomTest extends AnyFlatSpec {
       }
     }
     info(s"Maximum state size: ${maxStates}")
-  }
-
-  "Presburger formula of randomly generated NSSTs" should
-    "be sat iff the domain is nonempty" in {
-    import com.microsoft.z3
-    val cfg = new java.util.HashMap[String, String]()
-    cfg.put("model", "true")
-    val out = Seq('a', 'b')
-    for (i <- 0 until 100) {
-      val n = {
-        val in = Set('a', 'b')
-        val out = in
-        val vars = Set('X', 'Y')
-        val maxStates = 10
-        val maxFNum = 2
-        val maxRepeatB = 2
-        val maxTransition = 2
-        randomNSST(
-          new NextState().nextState _,
-          in,
-          out,
-          vars,
-          maxStates,
-          maxFNum,
-          maxRepeatB,
-          maxTransition
-        )
-      }
-      val f = n.presburgerFormula
-      val ctx = new z3.Context(cfg)
-      val freeVars = out.map(a => s"y$a").map(y => y -> ctx.mkIntConst(y))
-      val zero = ctx.mkInt(0)
-      val positives = freeVars.map { case (_, v) => ctx.mkGe(v, zero) }
-      val expr = Presburger.Formula.formulaToZ3Expr(ctx, freeVars.toMap, f)
-      val solver = ctx.mkSolver()
-      solver.add(expr +: positives: _*)
-      if (solver.check() == z3.Status.SATISFIABLE) {
-        assert(!n.isEmpty)
-      } else {
-        assert(n.isEmpty)
-      }
-      ctx.close()
-    }
   }
 }

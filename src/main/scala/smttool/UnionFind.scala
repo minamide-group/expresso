@@ -1,6 +1,6 @@
 package com.github.kmn4.expresso.smttool
 
-trait UnionFind[A] extends PartialFunction[A, A] {
+private[smttool] trait UnionFind[A] extends PartialFunction[A, A] {
   // union と find の引数は既に make されていることを仮定
   def union(x: A, y: A): Unit
   def find(x: A): A
@@ -8,7 +8,7 @@ trait UnionFind[A] extends PartialFunction[A, A] {
 }
 
 // ナイーブな実装．悪質な入力に対しては効率が悪い
-object PrioUnionFind {
+private[smttool] object PrioUnionFind {
   private class Tree[A](val elem: A) {
     private var parent: Option[Tree[A]] = None
     def root: Tree[A] = parent match {

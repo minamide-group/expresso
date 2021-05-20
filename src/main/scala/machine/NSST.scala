@@ -150,52 +150,6 @@ case class NSST[Q, A, B, X](
     )
   }
 
-  def parikhEnft: ENFT[Int, A, Map[B, Int]] = NSST.convertNsstParikhNft(this).unifyInitAndFinal
-
-  /**
-    * Generate a Presburger formula that is satisfied by any assignment which represents a Parikh image of
-    * an output string of this NSST.
-    * Variables representing the number of each output symbol are its `toString` value prefixed with 'y'.
-    *
-    * @return
-    */
-  def presburgerFormula: Presburger.Formula[String] = {
-    val coutingNft = NSST.convertNsstParikhNft(this)
-    val formula = Parikh.parikhEnftToPresburgerFormula(coutingNft.unifyInitAndFinal)
-    type E = (Int, Parikh.Image[B], Int)
-    type X = Parikh.EnftVar[Int, B, E]
-    class Renamer() {
-      var i = 0
-      private def newVar() = {
-        i += 1
-        i
-      }
-      var eMap: Map[E, String] = Map.empty
-      var qMap: Map[Int, String] = Map.empty
-      def renamer(x: X): String = x match {
-        case Parikh.BNum(b)     => s"y${b}"
-        case Parikh.EdgeNum(e)  => eMap.getOrElse(e, { val s = s"x${newVar()}"; eMap += e -> s; s })
-        case Parikh.Distance(q) => qMap.getOrElse(q, { val s = s"x${newVar()}"; qMap += q -> s; s })
-      }
-    }
-    Presburger.Formula.renameVars(formula)(new Renamer().renamer _)
-  }
-
-  /** Returns an input string that give some output.
-    * If this NSST is empty, then exception will be thrown.
-    */
-  def takeInput: List[A] = {
-    transitionSystemBFS[Q, A](
-      states,
-      in, {
-        val m = graphToMap(edges) { case (q, a, m, r) => (q, a) -> r }
-        (q, a) => m((q, a))
-      },
-      q0,
-      outF.filter { case (_, s) => s.nonEmpty }.keySet
-    )
-  }
-
   /** Construct NSST that transduce w to that.transduce(this.transduce(w)). */
   def compose[R, C, Y](that: NSST[R, B, C, Y]): NSST[Int, A, C, Int] = {
     if (!this.isCopyless) {
@@ -210,67 +164,6 @@ case class NSST[Q, A, B, X](
     val res = nsst.renamed.removeRedundantVars
     // logger.redundantVarsRemoved(res)
     res
-  }
-
-  // Returns SST S' that satisfies the following condition:
-  // for all w, S'(w) contains w'b (here b is in bs) iff there exist w' and w'' s.t. S(w) contains w' b w''.
-  def sstEndsWith(bs: Set[B]): NSST[(Q, Option[X]), A, B, X] = {
-    val newOutF = {
-      val graph =
-        for {
-          (q, xbs) <- outGraph
-          i <- 0 until xbs.length
-        } yield xbs(i) match {
-          case Cop1(x)          => Some(((q, Some(x)), xbs.take(i + 1)))
-          case Cop2(b) if bs(b) => Some((q, None), xbs.take(i + 1))
-          case _                => None
-        }
-      graphToMap(graph.flatten)(identity)
-    }
-    type NQ = (Q, Option[X])
-    val backTrans = graphToMap(edges) { case (q, a, m, r) => (r, a) -> (q, m) }
-    def prevStates(nq: NQ, a: A): Iterable[(NQ, Update[X, B])] = {
-      // q -[a / m]-> r
-      val (r, x) = nq
-      x match {
-        case Some(x) => {
-          // If q -[a / m]-> r and m(x) = u y v, then
-          // (q, y) -[a / m[x mapsto u y]]-> (r, x)
-          val assignY =
-            for {
-              (q, m) <- backTrans((r, a))
-              (y, uy) <- {
-                val mx = m(x)
-                mx.zipWithIndex.flatMap {
-                  case (Cop1(y), i) => Some((y, mx.take(i + 1)))
-                  case _            => None
-                }
-              }
-            } yield ((q, Some(y)), m + (x -> uy))
-          // Also, if q -[a / m]-> r and m(x) = u b v and b is in bs,
-          // then (q, _) -[a / m[x mapsto u b]]-> (r, x)
-          val assignB =
-            for {
-              (q, m) <- backTrans((r, a))
-              ub <- {
-                val mx = m(x)
-                mx.zipWithIndex.flatMap {
-                  case (Cop2(b), i) if bs(b) => Some(mx.take(i + 1))
-                  case _                     => None
-                }
-              }
-            } yield ((q, None), m + (x -> ub))
-          assignY ++ assignB
-        }
-        case None => backTrans((r, a)).map { case (q, m) => ((q, None), m) }
-      }
-    }
-
-    val (newStates, newEdges) = searchStates(newOutF.keySet, in)(prevStates)(
-      { case (q, m)         => q },
-      { case (r, a, (q, m)) => (q, a, m, r) }
-    )
-    NSST(newStates, in, variables, newEdges, (q0, None), newOutF)
   }
 
   def toParikhSST[L, I](ls: Set[L]): ParikhSST[Q, A, B, X, L, I] = ParikhSST(
@@ -490,43 +383,6 @@ object NSST {
     res
   }
   // End of composeNsstsToMsst
-
-  /** Convert the given NSST to a NFT that transduces each input to the Parikh image of the output of the NSST. */
-  def convertNsstParikhNft[Q, A, B, X](
-      nsst: NSST[Q, A, B, X]
-  ): MNFT[(Q, Set[X]), A, Map[B, Int]] = {
-    type NQ = (Q, Set[X])
-    type V = Map[B, Int]
-    def charsVecOf(alpha: Cupstar[X, B]): V = alpha.foldLeft[V](Map.empty.withDefaultValue(0)) {
-      case (acc, Cop2(b)) => acc.updated(b, acc(b) + 1)
-      case (acc, _)       => acc
-    }
-    val backTrans = graphToMap(nsst.edges) { case (q, a, m, r) => (r, a) -> (q, m) }
-    val vectorMonoid: Monoid[V] = Monoid.vectorMonoid(nsst.out)(Monoid.intAdditiveMonoid)
-    def prevStates(nq: NQ, a: A): Set[(NQ, V)] = {
-      val (r, p) = nq
-      for ((q, m) <- backTrans(r, a)) yield {
-        (
-          (q, p.flatMap(m andThen varsIn _)),
-          Monoid.fold(p.toList.map(m andThen charsVecOf _))(vectorMonoid)
-        )
-      }
-    }
-    val outF: Map[NQ, Set[V]] = graphToMap {
-      nsst.outGraph.map { case (q, alpha) => (q, varsIn(alpha)) -> charsVecOf(alpha) }
-    }(identity)
-    val (newStates, newEdges) = searchStates(outF.keySet, nsst.in)(prevStates)(
-      { case (q, _)         => q },
-      { case (r, a, (q, m)) => (q, a, m, r) }
-    )
-    new MNFT[NQ, A, V](
-      newStates,
-      nsst.in,
-      newEdges,
-      newStates.filter(_._1 == nsst.q0).toSet,
-      outF
-    )(vectorMonoid).optimized
-  }
 
   def apply(
       states: Iterable[Int],
