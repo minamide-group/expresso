@@ -233,11 +233,11 @@ class ParikhSolverTest extends AnyFunSuite {
 (check-sat)
 """)
 
-    testFileSAT("group_sc") { (sm, _) =>
-      val (x, y) = (sm("x"), sm("y"))
-      assert(y == x.replaceFirst("\\{(.*?):(.*?)\\}", "<$1>$2</$1>"))
-      assert(y.matches("^.*<sc>.*</sc>.*$"))
-    }
+//    testFileSAT("group_sc") { (sm, _) =>
+//      val (x, y) = (sm("x"), sm("y"))
+//      assert(y == x.replaceFirst("\\{(.*?):(.*?)\\}", "<$1>$2</$1>"))
+//      assert(y.matches("^.*<sc>.*</sc>.*$"))
+//    }
 
     implicit class AtMostSubstring(s: String) {
       def atmostSubstring(idx: Int, len: Int): String = {

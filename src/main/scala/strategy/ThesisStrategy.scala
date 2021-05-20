@@ -49,7 +49,7 @@ class ThesisStrategy(logger: Logger) extends Strategy {
             logger.trace(s"compose ${acc.sizes} and ${p.sizes}")
             (acc compose p).renamed
         }
-        logger.trace("composition done")
+        logger.trace(s"composition done: ${res.sizes}")
         res
       }
       witnessVector.getOr(psst(()).ilVectorOption).nonEmpty

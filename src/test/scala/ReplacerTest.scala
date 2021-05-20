@@ -1,8 +1,8 @@
 package com.github.kmn4.expresso.language
 
 import org.scalatest.funsuite._
-
 import com.github.kmn4.expresso.language.PCRE._
+import org.scalactic.source.Position
 
 class ReplacerTest extends AnyFunSuite {
   private type ParsedChar[A, X] = PCRE[A, X]#ParsedChar
@@ -53,8 +53,19 @@ class ReplacerTest extends AnyFunSuite {
 
   def testReplaceAll(e: PCRE[Char, String], replacement: Replacement[Char, String])(
       cases: (Seq[Char], Seq[Char])*
-  ) = test(s"Replace all $e with $replacement") {
+  )(implicit pos: Position) = test(s"Replace all $e with $replacement") {
     val s = Compiler.replaceAllSST(e, replacement, alphabet)
+    for ((w, expected) <- cases) {
+      val got = s.transduce(w)
+      assert(got.size == 1)
+      assert(got.head == expected)
+    }
+  }
+
+  def testReplace(e: PCRE[Char, String], replacement: Replacement[Char, String])(
+      cases: (Seq[Char], Seq[Char])*
+  )(implicit pos: Position) = test(s"Replace the first $e with $replacement") {
+    val s = Compiler.replaceSST(e, replacement, alphabet)
     for ((w, expected) <- cases) {
       val got = s.transduce(w)
       assert(got.size == 1)
@@ -68,6 +79,13 @@ class ReplacerTest extends AnyFunSuite {
       case s: String => Right(Some(s))
       case 0         => Right(None)
     }
+  )
+
+  testReplace("a", replacement('b'))(
+    ("", ""),
+    ("aaa", "baa"),
+    ("baa", "bba"),
+    ("bbb", "bbb")
   )
 
   testReplaceAll(cat("a", greedy(alt("b", "c"))), replacement('a', 0, 'a'))(

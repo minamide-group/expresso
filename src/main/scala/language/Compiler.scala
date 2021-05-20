@@ -55,7 +55,7 @@ private object Compiler {
   ): NSST[Int, A, A, Int] = {
     val repetitiveRE = repetitiveMatch(re, alphabet)
     val repetitiveParser = repetitiveRE.toParser(alphabet)
-    (repetitiveParser andThenNSST  repetitiveReplaceSST(re, rep, alphabet)).renamed
+    (repetitiveParser andThenNSST repetitiveReplaceSST(re, rep, alphabet)).renamed
   }
 
   private def repetitiveReplaceSST[A, X](
@@ -137,9 +137,10 @@ private object Compiler {
       updateMonoid[SSTVar[X], A](repXs.toSet + Out()).unit
     }
     val edges = repetitive.edges.map[E] {
-      case (q, a, m, r) if q == Set.empty => (q0, a, m, Cop1(r))
-      case (q, a, m, r) if r == Set.empty => (Cop1(q), a, m, qf)
-      case (q, a, m, r)                   => (Cop1(q), a, m, Cop1(r))
+      case (q, a @ Left(_), m, r) if q.isEmpty => (q0, a, m, q0)
+      case (q, x @ Right(_), m, r) if q.isEmpty => (q0, x, m, Cop1(r))
+      case (q, a, m, r) if r.isEmpty => (Cop1(q), a, m, qf)
+      case (q, a, m, r)              => (Cop1(q), a, m, Cop1(r))
     } ++ repetitive.in.collect[E] { // loop in qf
       case Left(a)  => (qf, Left(a), unitUpdate + (Out() -> List(Cop1(Out()), Cop2(a))), qf)
       case Right(p) => (qf, Right(p), unitUpdate + (Out() -> List(Cop1(Out()))), qf)
