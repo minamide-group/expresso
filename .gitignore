@@ -2,6 +2,7 @@
 /.bsp/
 .bloop/
 /.idea/
+Test Results - *.html
 
 /project/target/
 /project/project/
@@ -31,3 +32,4 @@
 /doc/*
 !/doc/*.tex
 !/doc/*.pdf
+/doc/_region_*
