@@ -45,7 +45,7 @@ private object Compiler {
   ): NSST[Int, A, A, Int] = {
     val repetitiveRE = repetitiveMatch(re, alphabet)
     val repetitiveParser = repetitiveRE.toParser(alphabet)
-    repetitiveParser compose oneTimeReplaceSST(re, rep, alphabet)
+    (repetitiveParser andThenNSST oneTimeReplaceSST(re, rep, alphabet)).renamed
   }
 
   def replaceAllSST[A, X](
@@ -55,7 +55,7 @@ private object Compiler {
   ): NSST[Int, A, A, Int] = {
     val repetitiveRE = repetitiveMatch(re, alphabet)
     val repetitiveParser = repetitiveRE.toParser(alphabet)
-    repetitiveParser compose repetitiveReplaceSST(re, rep, alphabet)
+    (repetitiveParser andThenNSST  repetitiveReplaceSST(re, rep, alphabet)).renamed
   }
 
   private def repetitiveReplaceSST[A, X](

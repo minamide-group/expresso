@@ -1,51 +1,9 @@
 package com.github.kmn4.expresso.language
 
 import com.github.kmn4.expresso._
-import com.github.kmn4.expresso.machine._
+import com.github.kmn4.expresso.machine.{NGSM, NSST, ParikhSST}
 import com.github.kmn4.expresso.math._
 import com.github.kmn4.expresso.math.Presburger.Sugar._
-
-private case class NGSM[Q, A, B](
-    states: Set[Q],
-    inSet: Set[A],
-    edges: Set[(Q, A, Seq[B], Q)],
-    q0: Q,
-    outGraph: Set[(Q, Seq[B])]
-) {
-  private def lift(bs: Seq[B]): Map[Unit, List[Cop[Unit, B]]] =
-    Map(() -> (Cop1(()) +: bs.map(Cop2.apply)).toList)
-  def toNSST: NSST[Q, A, B, Unit] = NSST(
-    states,
-    inSet,
-    Set(()),
-    edges.map(e => e.copy(_3 = lift(e._3))),
-    q0,
-    graphToMap(outGraph) { case (q, bs) => q -> lift(bs)(()) }
-  )
-}
-
-private case class ParikhNGSM[Q, A, B, L](
-    states: Set[Q],
-    inSet: Set[A],
-    ls: Set[L],
-    edges: Set[(Q, A, Seq[B], Map[L, Int], Q)],
-    q0: Q,
-    outGraph: Set[(Q, Seq[B], Map[L, Int])]
-) {
-  private def lift(bs: Seq[B]): Map[Unit, List[Cop[Unit, B]]] =
-    Map(() -> (Cop1(()) +: bs.map(Cop2.apply)).toList)
-  def toParikhSST[I]: ParikhSST[Q, A, B, Unit, L, I] = ParikhSST(
-    states,
-    inSet,
-    Set(()),
-    ls,
-    Set.empty,
-    edges.map(e => e.copy(_3 = lift(e._3))),
-    q0,
-    outGraph.map(o => o.copy(_2 = lift(o._2)(()))),
-    Seq.empty
-  )
-}
 
 /** Unary transduction */
 trait Transduction[C] {

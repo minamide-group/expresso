@@ -99,7 +99,7 @@ sealed trait PCRE[A, X] {
 
   private[language] def toParser(
       alphabet: Set[A]
-  ): NSST[NonEmptyDistinctSeq[PCRE[A, X]], A, ParsedChar, Unit] = {
+  ): NGSM[NonEmptyDistinctSeq[PCRE[A, X]], A, ParsedChar] = {
     require(usedChars subsetOf alphabet)
     type Q = NonEmptyDistinctSeq[PCRE[A, X]]
     val q0 = NonEmptyDistinctSeq(this, Seq.empty)
@@ -129,15 +129,12 @@ sealed trait PCRE[A, X] {
       q @ NonEmptyDistinctSeq(lowest, highers) <- states if highers.forall(_.deriveEps.isEmpty)
       w <- lowest.deriveEps.headOption
     } yield q -> w
-    NSST(
+    NGSM(
       states,
       alphabet,
-      Set(()),
-      edges.map { case (q, a, w, r) => (q, a, Map(() -> (Cop1(()) +: w.map(Cop2.apply)).toList), r) },
+      edges,
       q0,
-      graphToMap(outGraph.map {
-        case (q, w) => q -> (Cop1(()) +: w.map(Cop2.apply)).toList
-      })(identity)
+      outGraph
     )
   }
 
