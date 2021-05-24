@@ -93,7 +93,7 @@ object RandomTest {
       q
     }
   }
-  def randomNsstCustomized() = {
+  def randomNsstCustomized(): NSST[Int, Char, Char, Char] = {
     val in = Set('a', 'b')
     val out = in
     val vars = Set('X', 'Y')
@@ -116,31 +116,6 @@ object RandomTest {
 
 class RandomTest extends AnyFlatSpec {
   import RandomTest._
-  "Construction of MSST" should "be done correctly" in {
-    for (_ <- 0 until 100) {
-      val n1 = randomNsstCustomized()
-      val n2 = randomNsstCustomized()
-      val composedTransduction = NSST.composeNsstsToMsst(n1, n2).transduce _
-      val metaComposed = metaComposition(n1, n2)
-      for (_ <- 0 until 10) {
-        val w = nextAs(List('a', 'b'), 3)
-        assert(composedTransduction(w) == metaComposed(w))
-      }
-    }
-  }
-  "Conversion of MSST to NSST" should "be done correctly" in {
-    for (_ <- 0 until 100) {
-      val n1 = randomNsstCustomized()
-      val n2 = randomNsstCustomized()
-      val msst = NSST.composeNsstsToMsst(n1, n2)
-      val msstTransduction = msst.transduce _
-      val nsstTransduction = MSST.convertMsstToNsst(msst).transduce _
-      for (_ <- 0 until 10) {
-        val w = nextAs(List('a', 'b'), 3)
-        assert(msstTransduction(w) == nsstTransduction(w))
-      }
-    }
-  }
   "Composition of randomly generated NSSTs" should "be done correctly" in {
     import scala.math.max
     var maxStates = 0

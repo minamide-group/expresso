@@ -254,16 +254,8 @@ case class ParikhSST[Q, A, B, X, L, I](
     //// 中間的な状態やラベルの型
     type V[T] = Map[T, Int]
     type WithVL[T] = (T, V[L])
-    // the first intermediate MPSST
-    type G1 = Map[X, (R, R)] // guess
-    type Q1 = (Q, G1) // state
-    type E1 = Update[X, that.UpdateXL] // edge label
-    // output relation label
-    // the second intermediate MPSST
-    type G2 = Set[X] // guess
-    type Q2 = (Q1, G2) // state
-    type E2 = (Update[X, that.UpdateX], that.UpdateL) // edge label
-    type O2 = ((Cupstar[X, that.UpdateX], that.XBS), that.LVal) // output relation label
+    type Q1 = (Q, Map[X, (R, R)]) // guess how `that` transitions on each x
+    type Q2 = (Q1, Set[X]) // guess which Xs contribute to V[K] output
 
     implicit val vkMonoid: Monoid[V[K]] = Monoid.vectorMonoid(that.ls)
 
