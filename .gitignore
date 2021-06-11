@@ -13,9 +13,6 @@ Test Results - *.html
 /target/scala-2.13/*
 !target/scala-2.13/expresso-assembly*.jar
 
-.dir-locals.el
-.sbt-hydra-history
-
 /archive
 /constraints/nondet/
 /constraints/pyex-*
@@ -29,7 +26,3 @@ Test Results - *.html
 *.fish
 *.log
 
-/doc/*
-!/doc/*.tex
-!/doc/*.pdf
-/doc/_region_*
