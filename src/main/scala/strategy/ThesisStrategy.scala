@@ -10,6 +10,7 @@ import collection.mutable.{Map => MMap}
 
 class ThesisStrategy(logger: Logger) extends Strategy {
   private type SolverPSST[C, I] = ParikhSST[Int, Option[C], Option[C], Int, Int, I]
+  private type SolverPA[C, I] = ParikhAutomaton[Int, Option[C], Int, I]
 
   private type Memo[A] = MMap[Unit, A]
 
@@ -22,7 +23,9 @@ class ThesisStrategy(logger: Logger) extends Strategy {
 
   private val witnessVector: Memo[Option[(Map[String, Int], Map[Int, Int])]] = MMap.empty
 
-  private val psst: Memo[SolverPSST[Char, String]] = MMap.empty
+  private val pa: Memo[SolverPA[Char, String]] = MMap.empty
+
+  private val transductions: Memo[Map[String, Int] => Seq[Option[Char]] => Set[Seq[Option[Char]]]] = MMap.empty
 
   private val models: Memo[Output] = MMap.empty
 
@@ -30,37 +33,42 @@ class ThesisStrategy(logger: Logger) extends Strategy {
     sat.getOr {
       val Input(alphabet, stringVarNumber, assignments, assertions, arithFormulas) = constraint
       val maxVar = stringVarNumber - 1
-      psst(()) = {
+      pa(()) = {
         val asgnPSSTs = assignments.map(a => assignmentToPSST(a, alphabet))
         val idxLangs = assertions.groupMap(_.stringVar)(_.lang)
-        val lastPSST = {
+        val lastPA = {
           val p = compileParikhAssertions(idxLangs, alphabet, maxVar)
           val is = arithFormulas.flatMap(_.freeVars)
           val formulas = arithFormulas.map(_.renameVars[Either[String, Int]](Left.apply))
           p.copy(is = p.is ++ is, acceptFormulas = p.acceptFormulas ++ formulas)
         }
         logger.trace("got the following PSSTs:")
-        (asgnPSSTs :+ lastPSST).zipWithIndex.foreach {
+        asgnPSSTs.zipWithIndex.foreach {
           case (psst, i) => logger.trace(s"#$i: ${psst.sizes}")
         }
-        val pssts = asgnPSSTs :+ lastPSST
-        val res = pssts.reduceLeft[SolverPSST[Char, String]] {
-          case (acc, p) =>
-            logger.trace(s"compose ${acc.sizes} and ${p.sizes}")
-            (acc compose p).renamed
+        transductions(()) = v => {
+          type S = Seq[Option[Char]]
+          val compose = (f: S => Set[S], g: S => Set[S]) => (w: S) => f(w).flatMap(g)
+          asgnPSSTs.map(p => (w: S) => p.transduce(w, v)).foldLeft[S => Set[S]](Set(_))(compose)
         }
-        logger.trace(s"composition done: ${res.sizes}")
+        val res = asgnPSSTs.foldRight(lastPA) {
+          case (acc, p) =>
+            logger.trace(s"compose ${acc.sizes} and ${p.states.size}")
+            (acc preimage p).renamed
+        }
+        logger.trace(s"composition done: ${res.states.size}")
         res
       }
-      witnessVector.getOr(psst(()).ilVectorOption).nonEmpty
+      witnessVector.getOr(pa(()).ilVectorOption).nonEmpty
     }
 
   override def getModel(): Output =
     models.getOr {
-      val p = psst.shouldGet
+      val p = pa.shouldGet
       witnessVector.shouldGet.map {
         case (iv, lv) =>
-          val (_, output) = p.inputOutputFor(lv)
+          val (in, _) = p.psst.inputOutputFor(lv)
+          val output = transductions.shouldGet(iv)(in).head
           val ss = parseStrModel(output)
           (ss, iv)
       }
@@ -161,7 +169,7 @@ class ThesisStrategy(logger: Logger) extends Strategy {
     * Its output function value will be `Set(output)` on state (n, 0), and empty on other ones.
     * So the NSST reads string of the form "w0 None w1 None ... w(n-1) None" and
     * outputs `output` where `inputVariable` is replaced with "w0 None ... w(n-1) None". */
-  def solverNsstTemplate[C, X](
+  private def solverNsstTemplate[C, X](
       n: Int,
       alphabet: Set[C],
       inputVariable: X,
@@ -201,7 +209,7 @@ class ThesisStrategy(logger: Logger) extends Strategy {
 
   /** Construct NSST which output concatenation of `rhs`.
     * Right(j) in `rhs` is `j`-th input delemited by #. */
-  def concatNSST[C](i: Int, rhs: Seq[Either[Seq[C], Int]], alphabet: Set[C]): SolverSST[C] = {
+  private def concatNSST[C](i: Int, rhs: Seq[Either[Seq[C], Int]], alphabet: Set[C]): SolverSST[C] = {
     trait X
     case object XIn extends X
     case class XJ(j: Int, id: Int) extends X
@@ -231,7 +239,7 @@ class ThesisStrategy(logger: Logger) extends Strategy {
   /** Returns ParikhAutomaton that accepts an input iff it meets constriant given by `pas`.
     * That is, it reads an input of the form w0#w1#...w(n-1)# (where n = dfas.length and # = None) and
     * accepts if pas(i) accepts w(i) for all i. */
-  def solverPA[Q, A, L, I](
+  private def solverPA[Q, A, L, I](
       pas: Seq[ParikhAutomaton[Q, A, L, I]], // ordered by corresponding string variables.
       q: Q // this will be used as "default state", and any value of type Q will suffice.
   ): ParikhAutomaton[(Int, Q), Option[A], (Int, L), I] = {
@@ -280,13 +288,13 @@ class ThesisStrategy(logger: Logger) extends Strategy {
     )
   }
 
-  def compileParikhAssertions(
+  private def compileParikhAssertions(
       assertions: Map[Int, Seq[ParikhLanguage[Char, String]]],
       alphabet: Set[Char],
       lastVarIdx: Int
-  ): SolverPSST[Char, String] = {
+  ): ParikhAutomaton[Int, Option[Char], Int, String] = {
     require(
-      assertions.isEmpty || lastVarIdx >= assertions.map(_._1).max,
+      assertions.isEmpty || lastVarIdx >= assertions.keys.max,
       "All LHS of PA assertions should be less than or equal to max LHS of assignments."
     )
     val idxRegularsParikhs = {
@@ -312,6 +320,6 @@ class ThesisStrategy(logger: Logger) extends Strategy {
     }
     // (i, j) -- state j of a PSST of i-th string variable
     val universalPA = ParikhAutomaton.universal[Int, Char, Int, String](0, alphabet)
-    solverPA((0 to lastVarIdx).map(idxPA.getOrElse(_, universalPA)), 0).toIdentityParikhSST.renamed
+    solverPA((0 to lastVarIdx).map(idxPA.getOrElse(_, universalPA)), 0).renamed
   }
 }
