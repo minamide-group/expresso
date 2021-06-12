@@ -8,7 +8,7 @@ private[smttool] trait UnionFind[A] extends PartialFunction[A, A] {
 }
 
 // ナイーブな実装．悪質な入力に対しては効率が悪い
-private[smttool] object PrioUnionFind {
+object PrioUnionFind {
   private class Tree[A](val elem: A) {
     private var parent: Option[Tree[A]] = None
     def root: Tree[A] = parent match {
