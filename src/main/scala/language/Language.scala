@@ -122,7 +122,8 @@ object ParikhLanguage {
         // On each state q, DFA has partially matched prefix of target string.
         states.map(q => (q, Map(0 -> 0, 1 -> (q % target.length), 2 -> 0)))
       val acceptFormulas = Seq(
-        skipped === i,
+        (i < 0 || input <= i) ==> (j === -1),
+        (i >= 0 && i < input) ==> (skipped === i),
         (input <= untilMatch) ==> (j === -1),
         (input > untilMatch) ==> (j === untilMatch)
       )
