@@ -22,10 +22,15 @@ object Main extends App {
     case s          => throw new Exception(s"Invalid strategy: ${s}\nPossible values are: preimage, thesis")
   }
 
+  // alpahbet to be added
+  val alphabet = ('a' to 'c').toSet
+//  val alphabet = ('!' to '~').toSet
+//  val alphabet = (0 to 127).toSet
+
   new Solver(
     checker = checker,
     print = true,
     logger = logger,
-    alphabet = "ab".toSet // Ensure that alphabet includes at least 2 letters.
+    alphabet = alphabet
   ).executeScript(script)
 }

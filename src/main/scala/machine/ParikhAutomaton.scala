@@ -13,6 +13,9 @@ case class ParikhAutomaton[Q, A, L, I](
     acceptRelation: Set[(Q, Map[L, Int])],
     acceptFormulas: Seq[Presburger.Formula[Either[I, L]]]
 ) {
+
+  lazy val sizes = (states.size, edges.size)
+
   val trans = graphToMap(edges) { case (q, a, v, r)         => (q, a) -> (r, v) }
   val acceptFunc = graphToMap(acceptRelation) { case (q, v) => q -> v }
 

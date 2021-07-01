@@ -21,7 +21,7 @@
     <logger name="nop" level="OFF" />
 
 <!--    <logger name="bench" level="OFF" additivity="false">-->
-         <logger name="bench" level="ALL" additivity="false">
+         <logger name="bench" level="INFO" additivity="false">
         <appender-ref ref="console" />
         <!-- <appender-ref ref="file" /> -->
     </logger>

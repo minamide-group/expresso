@@ -111,6 +111,13 @@ class ReplacerTest extends AnyFunSuite {
 
   testReplaceAll(greedy("a"), replacement('(', 0, ')'))(("", "()"), ("a", "(a)()"))
 
+  testReplaceAll(cat(nonGreedy("a"), "b"), replacement('c'))(("baab", "cc"))
+  testReplaceAll(cat(greedy("a"), "b"), replacement('c'))(("baab", "cc"))
+  testReplaceAll(cat(nonGreedy("abc"), "b"), replacement('c'))(("abb", "cc"))
+  testReplaceAll(cat(greedy("abc"), "b"), replacement('c'))(("abb", "c"))
+
+  testReplaceAll(cat(group(nonGreedy("abc"), "x"), "b"), replacement('c', "x"))(("abb", "cac"))
+
   // Bugs (nullable regexes that put higher precedence on the empty string)
   // testReplaceAll(eps, replacement('(', 0, ')'))(("a", "()a()"))
   // testReplaceAll(alt(eps, "a"), replacement('(', 0, ')'))(("", "()"), ("a", "()(a)()"))

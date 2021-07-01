@@ -53,10 +53,10 @@ class ThesisStrategy(logger: Logger) extends Strategy {
         }
         val res = asgnPSSTs.foldRight(lastPA) {
           case (acc, p) =>
-            logger.trace(s"compose ${acc.sizes} and ${p.states.size}")
+            logger.info(s"compose ${acc.sizes} and ${p.sizes}")
             (acc preimage p).renamed
         }
-        logger.trace(s"composition done: ${res.states.size}")
+        logger.info(s"composition done: ${res.sizes}")
         res
       }
       witnessVector.getOr(pa(()).ilVectorOption).nonEmpty

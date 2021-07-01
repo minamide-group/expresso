@@ -224,7 +224,7 @@ case class ParikhSST[Q, A, B, X, L, I](
   // xbs@q を読んで r1 から r2 にいけるような推測と効果
   private def possiblePreviousGuess[R, M](
       invTransB: Map[(R, B), Set[(R, M)]],
-      // x@q で r1 から r2 に行ける ⇒ r2 ∈ invTransX(q)(r1, x)
+      // x@q で r1 から r2 に行ける ⇒ r1 ∈ invTransX(q)(r2, x)
       invTransX: Map[Q, Map[(R, X), Set[R]]]
   )(q: Q, r1: R, r2: R, xbs: Cupstar[X, B]): Set[(Map[X, (R, R)], Cupstar[X, M])] = {
     val invTransXAtQ = invTransX(q)
@@ -267,6 +267,7 @@ case class ParikhSST[Q, A, B, X, L, I](
       graphToMap(that.edges) { case (q, b, ycs, kv, r) => (r, b) -> (q, (ycs, kv)) }
 
     val invTransX: Map[Q, Map[(R, X), Set[R]]] = this.invTransX(that.states, that.trans(_, _))
+//    val invTransX: Map[Q, Map[(R, X), Set[R]]] = this.invTransX(that.states, that.trans(_, _))
 
     val previousGuess = this.possiblePreviousGuess(invTransB, invTransX) _
     val countAndFold: Cupstar[X, V[K]] => (Set[X], V[K]) = xvs => {
@@ -543,9 +544,7 @@ case class ParikhSST[Q, A, B, X, L, I](
       val solver = ctx.mkSolver()
       val z3Exprs = formulas.map(Presburger.Formula.formulaToZ3Expr(ctx, Map.empty[String, z3.IntExpr], _))
       solver.add(z3Exprs: _*)
-      println("start checking")
       val result = solver.check()
-      println("done checking")
       if (result == z3.Status.SATISFIABLE) {
         val model = solver.getModel()
         val n = is.map(i => i -> model.eval(ctx.mkIntConst(s"int_$i"), false).toString.toInt)
