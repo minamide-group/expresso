@@ -267,6 +267,15 @@ class ParikhSolverTest extends AnyFunSuite {
         assert(!"ab".r.matches(y))
     }
 
+    testSAT(""";; Bug fixed on 2021-07-05
+(declare-const x String)
+(declare-const i Int)
+(assert (str.in.re x (str.to.re "abcaabd")))
+(assert (= i (str.indexof x "abcabd" 0)))
+(check-sat)
+(get-model)
+""") { (_, m) => assert(m("i") == -1) }
+
     testFileSAT("indexof_sat") { (m, _) =>
       val (x, y) = (m("x"), m("y"))
       assert(y == x.atmostSubstring(x.indexOf("aab"), x.length))

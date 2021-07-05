@@ -19,12 +19,24 @@ package object language {
   /** Construct DFA which accepts strings whose suffix is target.
     *  Each state i represents target.substring(0, i). */
   private[language] def postfixDFA[A](target: Seq[A], in: Set[A]): DFA[Int, A] = {
-    // KMP backtracking table
-    val table: Vector[Int] = {
-      var t = Vector(-1)
-      for (i <- 1 until target.length) {
-        val prev = t(i - 1)
-        t = t.appended(prev + (if (target(i - 1) == target(prev + 1)) 1 else 0))
+    require(target.length > 0)
+    // KMP backtracking table (taken and adapted from Wikipedia)
+    val table: Vector[Int] = if (target.length == 1) Vector(-1) else {
+      // target.length >= 2
+      var t = Vector(-1, 0)
+      var i = 2
+      var j = 0
+      while (i < target.length) {
+        if (target(i-1) == target(j)) {
+          t = t.appended(j+1)
+          i += 1
+          j += 1
+        } else if (j > 0) {
+          j = t(j)
+        } else {
+          t = t.appended(0)
+          i += 1
+        }
       }
       t
     }
@@ -48,6 +60,12 @@ package object language {
       q0,
       Set(qf)
     )
+  }
+
+  def postfixDOT(target: String) = {
+    import com.github.kmn4.expresso.machine.DOTMaker._
+    val dot = postfixDFA(target, target.toSet).toDOT
+    println(dot)
   }
 
 }
