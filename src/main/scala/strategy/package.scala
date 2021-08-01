@@ -6,8 +6,8 @@ import com.github.kmn4.expresso.language.Constraint
 /**
   * 制約を解くアルゴリズムを表現するクラス Strategy を提供する．
   *
-  * 現在は卒論で用いたアルゴリズム ThesisStrategy と逆像計算に基づく PreImageStrategy
-  * の 2 つを提供している．
+  * 現在は JSSST 2021 予稿で示したアルゴリズム JSSST2021Strategy と
+  * 逆像計算に基づく PreImageStrategy の 2 つを提供している．
   *
   * アルゴリズムの入力はペア
   *   (アルファベット, 文字列変数の集合，代入文の列，言語制約の集合，整数制約)．

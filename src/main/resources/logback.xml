@@ -1,16 +1,8 @@
 <configuration>
     <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.err</target>
         <encoder>
-            <!-- <pattern>%date{MM-dd HH:mm:ss.SSS} %logger{0} - %msg%n</pattern> -->
             <pattern>%date{HH:mm:ss.SSS} - %msg%n</pattern>
-        </encoder>
-    </appender>
-
-    <appender name="file" class="ch.qos.logback.core.FileAppender">
-        <file>./constraints/bench/log</file>
-        <encoder>
-            <!-- <pattern>%date{MM-dd HH:mm:ss.SSS} Main.%logger{0} - %msg%n</pattern> -->
-            <pattern>%date{MM-dd HH:mm:ss.SSS} %logger{0} - %msg%n</pattern>
         </encoder>
     </appender>
 
@@ -18,11 +10,7 @@
         <appender-ref ref="console" />
     </root>
 
-    <logger name="nop" level="OFF" />
-
-<!--    <logger name="bench" level="OFF" additivity="false">-->
-         <logger name="bench" level="INFO" additivity="false">
+    <logger name="bench" level="INFO" additivity="false">
         <appender-ref ref="console" />
-        <!-- <appender-ref ref="file" /> -->
     </logger>
 </configuration>

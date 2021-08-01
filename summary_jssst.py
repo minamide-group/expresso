@@ -1,4 +1,4 @@
-# 戦略 thesis のログ出力を要約する
+# 戦略 jssst のログ出力を要約する
 from collections import namedtuple
 import re
 import datetime as dt

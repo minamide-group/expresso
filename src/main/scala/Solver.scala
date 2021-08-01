@@ -449,7 +449,7 @@ class Solver(
     val dependencyGraph = TopSort.Graph(vars, edges.toMap.withDefaultValue(Seq.empty))
     TopSort.sort(dependencyGraph).map { sorted =>
       // 代入文の左辺が後半に連続して現れるようにする
-      // ThesisStrategy, PreImageStrategy はこの仮定に依存している
+      // JSSST2021Strategy, PreImageStrategy はこの仮定に依存している
       val independent = vars -- dependers
       val (_, dependent) = sorted.partition(independent)
       independent.toSeq ++ dependent

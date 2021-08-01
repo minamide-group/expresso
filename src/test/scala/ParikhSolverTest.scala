@@ -4,12 +4,12 @@ import com.typesafe.scalalogging.Logger
 import org.scalactic.source.Position
 import org.scalatest.funsuite._
 import com.github.kmn4.expresso.strategy.Strategy
-import com.github.kmn4.expresso.strategy.ThesisStrategy
+import com.github.kmn4.expresso.strategy.JSSST2021Strategy
 import com.github.kmn4.expresso.strategy.PreImageStrategy
 
 class ParikhSolverTest extends AnyFunSuite {
   val strategySpecs = Seq(
-    ("thesis", new ThesisStrategy(_)),
+    ("jssst", new JSSST2021Strategy(_)),
     ("preimage", new PreImageStrategy(_))
   )
 
@@ -342,7 +342,7 @@ class ParikhSolverTest extends AnyFunSuite {
       assert(!z.matches("^(ab)*$"))
     }
 
-    if (strategyName != "thesis")
+    if (strategyName != "jssst")
       testFileSAT("insert_opt") { (sm, im) =>
         val (x, y, z, i) = (sm("x"), sm("y"), sm("z"), im("i"))
         def insert(x: String, y: String, i: Int): String =

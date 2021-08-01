@@ -2,7 +2,6 @@
 /.bsp/
 .bloop/
 /.idea/
-Test Results - *.html
 
 /project/target/
 /project/project/
@@ -13,16 +12,9 @@ Test Results - *.html
 /target/scala-2.13/*
 !target/scala-2.13/expresso-assembly*.jar
 
-/archive
-/constraints/nondet/
-/constraints/pyex-*
+/lib
+
 /constraints/bench/log
-/dump/
-/bak/
-*.bak
-/bin/
-/bench/
+/archive
 *.org
 *.fish
-*.log
-
