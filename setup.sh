@@ -1,8 +1,8 @@
 #!/bin/sh
 
 case "$(uname)" in
-    "Darwin"*) platform="osx-10.14.6"; ext="dylib";;
-    "Linux"*) platform="ubuntu-16.04"; ext="so";;
+    "Darwin") platform="osx-10.14.6"; ext="dylib";;
+    "Linux") platform="ubuntu-16.04"; ext="so";;
     *) echo 'not supported system: $(uname)'; exit;;
 esac
 
