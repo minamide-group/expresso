@@ -18,23 +18,38 @@ docker run --rm -i -v $(pwd):/workdir kamasaki/expresso:jssst2021 CONSTRAINT [ST
 
 ## 手動ビルド
 
-`sbt assembly` する．
-ビルド時と実行時に以下の依存性がある．
+Ubuntu 20.04 LTS と macOS Big Sur でのビルドをサポートする．
+なお，Windows では WSL2 により Ubuntu を利用できる．
+
+必要なもの
+- OpenJDK 11
+- sbt
+- Z3 4.8.8
+- scala-smtlib
+
+セットアップスクリプト ([./setup.sh](./setup.sh)) は以下の依存性を準備してビルドし，
+成果物が実行できるか確認する（JDK と sbt は事前に準備すること）．
+スクリプトは最初の一回だけ使えば良い．
+あとは通常通り sbt を使える．
 
 ### [Z3](https://github.com/Z3Prover/z3)
-配布しているバイナリはバージョン
-[4.8.8](https://github.com/Z3Prover/z3/releases/tag/z3-4.8.8)
-の Z3 を利用している．
-リンクから環境に応じた Zip ファイルをダウンロードする．
+プログラムは Z3 バージョン 4.8.8 の Java API を利用しているため，
+ビルド時と実行時にそれぞれライブラリが必要．
+[ここ](https://github.com/Z3Prover/z3/releases/tag/z3-4.8.8)から
+環境に応じた Zip ファイルをダウンロードする．
 
-`/bin` ディレクトリから次のファイルを適切な場所 (`/usr/lib` など) にコピーする．
-- `libz3.so`
-- `libz3java.so`
-
-また Z3 の `/bin/com.microsoft.z3.jar` をビルドディレクトリの `lib/` に配置する．
+- Z3 の `bin` ディレクトリから共有ライブラリを適切な場所にコピーする．
+   + Ubuntu の場合．`libz3.so` と `libz3java.so` を `/usr/local/lib`
+	 などに配置
+   + macOS Big Sur の場合．`libz3.dylib` と `libz3java.dylib` を，
+     `java -jar`を実行するのと同じディレクトリに配置（`/usr/local/lib`
+     などに配置すると System Integrity Protection により読み込みがブロッ
+     クされる）
+- Z3 の `bin/com.microsoft.z3.jar` を，ビルドディレクトリの `lib/` に
+  配置する．
 
 ### [scala-smtlib](https://github.com/regb/scala-smtlib)
-Scala 2.13 対応のバイナリは自動で解決されないので，自分でビルドしたものを `lib/` 以下に配置
+Scala 2.13 対応のバイナリは自動で解決されないので，自分でビルドしたものを `lib/` 以下に配置する
 ([ビルド方法](https://github.com/regb/scala-smtlib#building-the-sources))．
 
 # 制約
