@@ -34,6 +34,23 @@ object ParikhLanguage {
       )
   }
 
+  case class CountChar[A, I](charNum: I, targetChar: A) extends ParikhLanguage[A, I] {
+    def usedAlphabet: Set[A] = Set(targetChar)
+    def toParikhAutomaton(alphabet: Set[A]): ParikhAutomaton[Int, A, Int, I] =
+      ParikhAutomaton(
+        states = Set(0),
+        inSet = alphabet,
+        ls = Set(0),
+        is = Set(charNum),
+        edges = alphabet
+          .filterNot(_ == targetChar)
+          .map(a => (0, a, Map(0 -> 0), 0)) + ((0, targetChar, Map(0 -> 1), 0)),
+        q0 = 0,
+        acceptRelation = Set((0, Map(0 -> 0))),
+        acceptFormulas = Seq(Presburger.Eq(Presburger.Var(Left(charNum)), Presburger.Var(Right(0))))
+      )
+  }
+
   // (= j (str.indexof x w c)) --> IndexOfConst(w, c, j)
   case class IndexOfConst[A, I](target: Seq[A], from: Int, jName: I) extends ParikhLanguage[A, I] {
     def usedAlphabet: Set[A] = target.toSet

@@ -352,5 +352,11 @@ class ParikhSolverTest extends AnyFunSuite {
         assert(z == insert(x, y, i))
         assert(!z.matches("^(ab)*$"))
       }
+
+    testFileUNSAT("count_char_1")
+    testFileSAT("count_char_2") { (m, _) => 
+      val x = m("x")
+      assert(x == "aaaaabbbbb")
+    }
   }
 }

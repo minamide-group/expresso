@@ -138,17 +138,8 @@ class Solver(
       val (x, y) = (SimpleQualID(s1), SimpleQualID(s2))
       val i = SimpleQualID(freshTemp())
       // codeAt(x, i) != codeAt(y, i)
-      CoreTheory.Not(CoreTheory.Equals(CodeAt(x, i), CodeAt(y, i)))
+      CoreTheory.Not(CoreTheory.Equals(Strings.CodeAt(x, i), Strings.CodeAt(y, i)))
     case _ => t
-  }
-
-  // TODO ここではない
-  object CodeAt {
-    def apply(x: SMTTerm, i: SMTTerm): SMTTerm = SimpleApp("code_at", x, i)
-    def unapply(t: SMTTerm): Option[(SMTTerm, SMTTerm)] = t match {
-      case SimpleApp("code_at", Seq(x, i)) => Some(x, i)
-      case _                               => None
-    }
   }
 
   def expectRegExp(t: SMTTerm): RegExp[Char] =
@@ -242,7 +233,10 @@ class Solver(
       case Strings.Length(SimpleQualID(name)) =>
         val lenVar = provider.freshTemp()
         (Presburger.Var(lenVar), Seq(ParikhAssertion(name, ParikhLanguage.Length(lenVar))))
-      case CodeAt(SimpleQualID(name), i) if env.get(name).exists(_ == StringSort()) =>
+      case Strings.CountChar(SimpleQualID(name), SString(w)) if w.length == 1 =>
+        val charNum = provider.freshTemp()
+        (Presburger.Var(charNum), Seq(ParikhAssertion(name, ParikhLanguage.CountChar(charNum, w(0)))))
+      case Strings.CodeAt(SimpleQualID(name), i) if env.get(name).exists(_ == StringSort()) =>
         val c = freshTemp()
         val (j, cs) = parseAndAbstract(i)
         val assertion = ParikhAssertion(name, ParikhLanguage.CodeAt(j, c))
@@ -410,7 +404,7 @@ class Solver(
     case Strings.InRegex(SimpleQualID(name), t) =>
       val re = expectRegExp(t)
       (ParikhAssertion(name, ParikhLanguage.FromRegExp(re)), Seq.empty)
-    case _ => throw new Exception(s"${t.getPos}: Unsupported assertion: ${t}")
+    case _ => throw new Exception(s"${if (t.hasPos) t.getPos else -1}: Unsupported assertion: ${t}")
   }
 
   def execute(cmd: SMTCommand): Unit = cmd match {

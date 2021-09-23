@@ -114,6 +114,8 @@ class Preprocessor(provider: VarProvider) {
       case Strings.At(_, _)            => Strings.StringSort()
       case Strings.IndexOf(_, _, _)    => Ints.IntSort()
       case Strings.Length(_)           => Ints.IntSort()
+      case Strings.CodeAt(_, _)        => Ints.IntSort()
+      case Strings.CountChar(_, _)     => Ints.IntSort()
       case Strings.Replace(_, _, _)    => Strings.StringSort()
       case Strings.Substring(_, _, _)  => Strings.StringSort()
       case Strings.ReplaceAll(_, _, _) => Strings.StringSort()

@@ -60,4 +60,14 @@ object Strings {
       }
     }
   }
+
+  // 独自拡張
+  object CountChar extends Operations.Operation2 {
+    override val name: String = "str.count_char"
+  }
+
+  object CodeAt extends Operations.Operation2 {
+    override val name: String = "str.code_at"
+  }
+
 }
