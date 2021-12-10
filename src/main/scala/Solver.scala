@@ -252,9 +252,10 @@ class Solver(
         val newVar = freshTemp()
         val constr = ParikhAssertion(name, ParikhLanguage.IndexOfConst(w, c.toInt, newVar))
         (Presburger.Var(newVar), Seq(constr))
-      case Ints.Mul(SNumeral(c), t) =>
-        val (pt, cs) = expectInt(t)
-        (Presburger.Mult(Presburger.Const(c.toInt), pt), cs)
+      case Ints.Mul(c, t) =>
+        val (pt1, cs1) = expectInt(c)
+        val (pt2, cs2) = expectInt(t)
+        (Presburger.Mult(pt1, pt2), cs1 ++ cs2)
       case Strings.IndexOf(SimpleQualID(name), SString(w), t) =>
         val (i, cs) = parseAndAbstract(t)
         val j = freshTemp()
