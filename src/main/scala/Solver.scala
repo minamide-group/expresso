@@ -264,7 +264,16 @@ class Solver(
     }
   }
 
-  // (substr x t1 t2) where t1 or t2 is not numeral
+  def abstractA(a: SMTTerm): (String, Seq[ParikhConstraint]) = a match {
+    case SimpleQualID(i) => (i, Seq.empty)
+    case SNumeral(c) =>
+      val i = freshTemp()
+      (i, Seq(Presburger.Var(i) === Presburger.Const(c.toInt)))
+    case _ => throw new MatchError("abstractA: argument is neither a variable nor numeral: " + a)
+  }
+
+  // t を文字列から文字列への関数を適用する式として解釈する．
+  // ただし，t の部分式で整数値または文字列値のであるものは，変数か定数であることを仮定する．
   def expectParikhTransduction(
       t: SMTTerm
   ): (String, ParikhTransduction[Char, String], Seq[ParikhConstraint]) = t match {
