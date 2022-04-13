@@ -2,7 +2,7 @@ name := "expresso"
 
 version := "0.3.0-SNAPSHOT"
 
-scalaVersion := "2.13.7"
+scalaVersion := "2.13.8"
 
 libraryDependencies ++= Seq(
   "org.scalatest" %% "scalatest" % "3.1.0" % "test",
