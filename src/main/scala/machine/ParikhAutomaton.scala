@@ -14,6 +14,11 @@ case class ParikhAutomaton[Q, A, L, I](
     acceptFormulas: Seq[Presburger.Formula[Either[I, L]]]
 ) {
 
+  // Require that all vectors be positive.
+  // This will not change expressivenes
+  //  and might make satisfiability checking simpler.
+  require(edges.forall { case (_, _, v, _) => v.forall { case (_, n) => n >= 0 } })
+
   lazy val sizes = (states.size, edges.size)
 
   val trans = graphToMap(edges) { case (q, a, v, r)         => (q, a) -> (r, v) }
