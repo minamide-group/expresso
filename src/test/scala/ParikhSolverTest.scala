@@ -381,6 +381,15 @@ trait ConstraintTestCases extends TestsSAT {
     val x = m("x")
     assert(x == "aaaaabbbbb")
   }
+
+  testFileSAT("split_concat") { (sm, im) =>
+    val Seq(x, y, z, w) = Seq("x", "y", "z", "w").map(sm)
+    val i = im("i")
+    assert(y == x.atmostSubstring(0, i))
+    assert(z == x.atmostSubstring(i, x.length - i))
+    assert(w == y ++ z)
+  }
+
 }
 
 class JSSST2021StrategyTest extends AnyFunSuite with ConstraintTestCases with UsesJSSST

@@ -25,6 +25,7 @@ object Operation {
 }
 
 trait IntValuedOperation extends Operation {
+
   /**
     * この操作 f が i = f(x, i1, ..., in) のように使われているとき，
     * x \in Lang(i, i1, ..., in) がこの等式と等価になるような言語．
@@ -262,14 +263,14 @@ object IntValuedOperation {
           alphabet.flatMap { a =>
             Iterable(
               (q0, a, Map(0 -> 1, 1 -> 1, 2 -> 0), q0),
-              (q0, a, Map(0 -> 1, 1 -> 0, 2 -> a.toInt), qf),
+              (q0, a, Map(0 -> 1, 1 -> 0, 2 -> (a.toInt + 1)), qf),
               (qf, a, Map(0 -> 1, 1 -> 0, 2 -> 0), qf)
             )
           },
           q0,
-          Set((q0, Map(0 -> 0, 1 -> 0, 2 -> -1)), (qf, Map(0 -> 0, 1 -> 0, 2 -> 0))),
+          Set((q0, Map(0 -> 0, 1 -> 0, 2 -> 0)), (qf, Map(0 -> 0, 1 -> 0, 2 -> 0))),
           binding ++ Seq(
-            (i >= 0 && i < input) ==> (i === index && c === code),
+            (i >= 0 && i < input) ==> (i === index && c + 1 === code),
             (i < 0 || input <= i) ==> (c === -1)
           )
         )
