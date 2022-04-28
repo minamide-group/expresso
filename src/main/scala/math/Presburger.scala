@@ -39,14 +39,11 @@ object Presburger {
     def renameVars[Y](renamer: X => Y): Formula[Y] = Formula.renameVars(this)(renamer)
 
     def freeVars: Set[X] = this match {
-      case Top() | Bot() => Set.empty
-      case Eq(t1, t2)    => t1.freeVars ++ t2.freeVars
-      case Lt(t1, t2)    => t1.freeVars ++ t2.freeVars
-      case Le(t1, t2)    => t1.freeVars ++ t2.freeVars
-      case Conj(fs)      => fs.flatMap(_.freeVars).toSet
-      case Disj(fs)      => fs.flatMap(_.freeVars).toSet
-      case Not(f)        => f.freeVars
-      case Exists(vs, f) => f.freeVars -- vs.map(_.x)
+      case f: Connective[X] => f.process(_.flatMap(_.freeVars).toSet)
+      case Eq(t1, t2)       => t1.freeVars ++ t2.freeVars
+      case Lt(t1, t2)       => t1.freeVars ++ t2.freeVars
+      case Le(t1, t2)       => t1.freeVars ++ t2.freeVars
+      case f: Quantified[X] => f.process { case (vs, f) => f.freeVars -- vs.map(_.x) }
     }
 
     def boundVars: Set[X] = this match {
@@ -54,47 +51,63 @@ object Presburger {
       case Conj(fs)                                       => fs.flatMap(_.boundVars).toSet
       case Disj(fs)                                       => fs.flatMap(_.boundVars).toSet
       case Not(f)                                         => f.boundVars
-      case Exists(vs, f)                                  => f.boundVars ++ vs.map(_.x)
+      case f: Quantified[X] => f.process { case (vs, f) => f.boundVars ++ vs.map(_.x) }
     }
 
     /** @throws java.lang.UnsupportedOperationException if this contains Exists. */
     def eval(valuation: Map[X, Int]): Boolean = this match {
-      case Top()        => true
-      case Bot()        => false
-      case Eq(t1, t2)   => t1.eval(valuation) == t2.eval(valuation)
-      case Lt(t1, t2)   => t1.eval(valuation) < t2.eval(valuation)
-      case Le(t1, t2)   => t1.eval(valuation) <= t2.eval(valuation)
-      case Conj(fs)     => fs.find(!_.eval(valuation)).isEmpty
-      case Disj(fs)     => fs.find(_.eval(valuation)).nonEmpty
-      case Not(f)       => !f.eval(valuation)
-      case Exists(_, _) => throw new UnsupportedOperationException("Cannot evaluate formula with quantifier.")
+      case Top()      => true
+      case Bot()      => false
+      case Eq(t1, t2) => t1.eval(valuation) == t2.eval(valuation)
+      case Lt(t1, t2) => t1.eval(valuation) < t2.eval(valuation)
+      case Le(t1, t2) => t1.eval(valuation) <= t2.eval(valuation)
+      case Conj(fs)   => fs.find(!_.eval(valuation)).isEmpty
+      case Disj(fs)   => fs.find(_.eval(valuation)).nonEmpty
+      case Not(f)     => !f.eval(valuation)
+      case Exists(_, _) | Forall(_, _) =>
+        throw new UnsupportedOperationException("Cannot evaluate formula with quantifier.")
     }
 
     def size: Int = this match {
-      case Top()         => 1
-      case Bot()         => 1
-      case Eq(t1, t2)    => t1.size + t2.size + 1
-      case Lt(t1, t2)    => t1.size + t2.size + 1
-      case Le(t1, t2)    => t1.size + t2.size + 1
-      case Conj(fs)      => fs.map(_.size).sum + 1
-      case Disj(fs)      => fs.map(_.size).sum + 1
-      case Not(f)        => f.size + 1
-      case Exists(vs, f) => vs.map(_.size).sum + f.size + 1
+      case f: Connective[X] => f.process(_.map(_.size).sum + 1)
+      case Eq(t1, t2)       => t1.size + t2.size + 1
+      case Lt(t1, t2)       => t1.size + t2.size + 1
+      case Le(t1, t2)       => t1.size + t2.size + 1
+      case f: Quantified[X] => f.process { case (vs, f) => vs.map(_.size).sum + f.size + 1 }
     }
   }
-  case class Top[X]() extends Formula[X]
-  case class Bot[X]() extends Formula[X]
+  sealed abstract class Connective[X] extends Formula[X] {
+    protected def fs: Seq[Formula[X]]
+    def process[Y](op: Seq[Formula[X]] => Y): Y = op(fs)
+  }
+  case class Top[X]() extends Connective[X] { protected def fs: Seq[Formula[X]] = Seq() }
+  case class Bot[X]() extends Connective[X] { protected def fs: Seq[Formula[X]] = Seq() }
   case class Eq[X](t1: Term[X], t2: Term[X]) extends Formula[X]
   case class Lt[X](t1: Term[X], t2: Term[X]) extends Formula[X]
   case class Le[X](t1: Term[X], t2: Term[X]) extends Formula[X]
   def Gt[X](t1: Term[X], t2: Term[X]): Formula[X] = Lt(t2, t1)
   def Ge[X](t1: Term[X], t2: Term[X]): Formula[X] = Le(t2, t1)
-  case class Conj[X](fs: Seq[Formula[X]]) extends Formula[X]
-  case class Disj[X](fs: Seq[Formula[X]]) extends Formula[X]
-  case class Not[X](f: Formula[X]) extends Formula[X]
+  case class Conj[X](fs: Seq[Formula[X]]) extends Connective[X]
+  case class Disj[X](fs: Seq[Formula[X]]) extends Connective[X]
+  case class Not[X](f: Formula[X]) extends Connective[X] { protected def fs: Seq[Formula[X]] = Seq(f) }
   def Implies[X](pre: Formula[X], post: Formula[X]): Formula[X] = Disj(Seq(Not(pre), post))
   def Equiv[X](f1: Formula[X], f2: Formula[X]): Formula[X] = Conj(Seq(Implies(f1, f2), Implies(f2, f1)))
-  case class Exists[X](vs: Seq[Var[X]], f: Formula[X]) extends Formula[X]
+  sealed abstract class Quantified[X] extends Formula[X] {
+    def vs: Seq[Var[X]]
+    def f: Formula[X]
+    protected def make[Y]: (Seq[Var[Y]], Formula[Y]) => Quantified[Y]
+    def transform[Y](op: (Seq[Var[X]], Formula[X]) => (Seq[Var[Y]], Formula[Y])): Quantified[Y] = {
+      val (newVs, newF) = op(vs, f)
+      make(newVs, newF)
+    }
+    def process[Y](op: (Seq[Var[X]], Formula[X]) => Y): Y = op(vs, f)
+  }
+  case class Exists[X](vs: Seq[Var[X]], f: Formula[X]) extends Quantified[X] {
+    protected def make[Y] = Exists.apply
+  }
+  case class Forall[X](vs: Seq[Var[X]], f: Formula[X]) extends Quantified[X] {
+    protected def make[Y] = Forall.apply
+  }
 
   object Term {
     def termToSMTLIB[X](t: Term[X]): String = t match {
@@ -139,14 +152,16 @@ object Presburger {
         case Conj(fs)   => Conj(fs.map(aux))
         case Disj(fs)   => Disj(fs.map(aux))
         case Not(f)     => Not(aux(f))
-        case Exists(xs, f) =>
-          val ys = xs.map { case Var(x) => Var(substBound(x)) }
-          val bounded = xs.map { case Var(x) => x }.toSet
-          val newSubst: PartialFunction[X, Term[Y]] = {
-            case x if bounded(x) => Var(substBound(x))
-            case x               => subst(x)
+        case f: Quantified[X] =>
+          f.transform { case (xs, f) =>
+            val ys = xs.map { case Var(x) => Var(substBound(x)) }
+            val bounded = xs.map { case Var(x) => x }.toSet
+            val newSubst: PartialFunction[X, Term[Y]] = {
+              case x if bounded(x) => Var(substBound(x))
+              case x               => subst(x)
+            }
+            (ys, substituteBound(f)(newSubst)(substBound))
           }
-          Exists(ys, substituteBound(f)(newSubst)(substBound))
       }
       aux(f)
     }
@@ -176,15 +191,16 @@ object Presburger {
         aux(t)
       }
       def aux(f: Formula[X]): Formula[Y] = f match {
-        case Top()         => Top()
-        case Bot()         => Bot()
-        case Eq(t1, t2)    => Eq(tm(t1), tm(t2))
-        case Lt(t1, t2)    => Lt(tm(t1), tm(t2))
-        case Le(t1, t2)    => Le(tm(t1), tm(t2))
-        case Conj(fs)      => Conj(fs.map(aux))
-        case Disj(fs)      => Disj(fs.map(aux))
-        case Not(f)        => Not(aux(f))
-        case Exists(xs, f) => Exists(xs.map { case Var(x) => Var(renamer(x)) }, aux(f))
+        case Top()      => Top()
+        case Bot()      => Bot()
+        case Eq(t1, t2) => Eq(tm(t1), tm(t2))
+        case Lt(t1, t2) => Lt(tm(t1), tm(t2))
+        case Le(t1, t2) => Le(tm(t1), tm(t2))
+        case Conj(fs)   => Conj(fs.map(aux))
+        case Disj(fs)   => Disj(fs.map(aux))
+        case Not(f)     => Not(aux(f))
+        case formula: Quantified[X] =>
+          formula.transform { case (xs, f) => (xs.map { case Var(x) => Var(renamer(x)) }, aux(f)) }
       }
       aux(f)
     }
@@ -206,6 +222,10 @@ object Presburger {
       case Exists(xs, f) => {
         val xsString = xs.map { case Var(x) => s"(${x.toString()} Int)" }.mkString(" ")
         s"(exists (${xsString}) ${formulaToSMTLIB(f)})"
+      }
+      case Forall(xs, f) => {
+        val xsString = xs.map { case Var(x) => s"(${x.toString()} Int)" }.mkString(" ")
+        s"(forall (${xsString}) ${formulaToSMTLIB(f)})"
       }
     }
 
@@ -243,6 +263,11 @@ object Presburger {
           val xs = vs.map { case Var(x) => newVar(x) }
           val body = formulaToZ3Expr(ctx, varMap, f)
           ctx.mkExists(xs.toArray, body, 0, null, null, null, null)
+        }
+        case Forall(vs, f) => {
+          val xs = vs.map { case Var(x) => newVar(x) }
+          val body = formulaToZ3Expr(ctx, varMap, f)
+          ctx.mkForall(xs.toArray, body, 0, null, null, null, null)
         }
       }
       fromFormula(f)

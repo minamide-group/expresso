@@ -124,7 +124,32 @@ package object smttool {
     }
   }
 
-  abstract class BottomUpTermTransformer extends PrePostTreeTransformer {
+  abstract class PrePostTermTransformer extends PrePostTreeTransformer {
+
+    final override def pre(sort: Terms.Sort, context: C): (Terms.Sort, C) =
+      (sort, context)
+
+    final override def post(sort: Terms.Sort, result: R): (Terms.Sort, R) =
+      (sort, result)
+
+  }
+
+  abstract class DownUpTermTransformer extends TreeTransformer {
+
+    /** 結果が transform の再帰呼び出しに渡される */
+    def down(term: Term, context: C): C
+
+    /** サブタームの transform とその結果の combine 後に呼び出されて、term の変換をする */
+    def up(term: Term, context: C, result: R): (Term, R)
+
+    override def transform(term: Term, context: C): (Term, R) = {
+      val downContext = down(term, context)
+      val (upTerm, upResult) = super.transform(term, downContext)
+      up(upTerm, context, upResult)
+    }
+  }
+
+  abstract class BottomUpTermTransformer extends PrePostTermTransformer {
 
     type C = Unit
 
@@ -135,27 +160,15 @@ package object smttool {
 
     final override def pre(term: Term, context: C): (Term, C) = (term, context)
 
-    final override def pre(sort: Terms.Sort, context: C): (Terms.Sort, C) =
-      (sort, context)
-
-    final override def post(sort: Terms.Sort, result: R): (Terms.Sort, R) =
-      (sort, result)
-
   }
 
-  abstract class TopDownTransformer extends PrePostTreeTransformer {
+  abstract class TopDownTransformer extends PrePostTermTransformer {
     type C = R
 
     def combine(results: Seq[R]): R
 
     final override def combine(tree: Tree, context: C, results: Seq[R]): R =
       combine(context +: results)
-
-    final override def pre(sort: Terms.Sort, context: C): (Terms.Sort, C) =
-      (sort, context)
-
-    final override def post(sort: Terms.Sort, result: R): (Terms.Sort, R) =
-      (sort, result)
 
     def post(term: Term, result: R): (Term, R) = (term, result)
 

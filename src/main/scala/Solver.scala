@@ -227,12 +227,12 @@ class Solver(
   // ex2. (* 4 (- 3 i)) はそのまま Presburger.Term に変換される
   def expectInt(t: SMTTerm): (Presburger.Term[String], Seq[ParikhConstraint]) = {
     def linearExp: PartialFunction[SMTTerm, Presburger.Term[String]] = {
-      case SNumeral(i)              => Presburger.Const(i.toInt)
-      case SimpleQualID(name)       => Presburger.Var(name)
-      case Ints.Neg(t)              => Presburger.Const(0) - linearExp(t)
-      case SimpleApp("+", ts)       => Presburger.Add(ts.map(linearExp))
-      case Ints.Sub(t1, t2)         => Presburger.Sub(linearExp(t1), linearExp(t2))
-      case Ints.Mul(c, t) => Presburger.Mult(linearExp(c), linearExp(t))
+      case SNumeral(i)        => Presburger.Const(i.toInt)
+      case SimpleQualID(name) => Presburger.Var(name)
+      case Ints.Neg(t)        => Presburger.Const(0) - linearExp(t)
+      case SimpleApp("+", ts) => Presburger.Add(ts.map(linearExp))
+      case Ints.Sub(t1, t2)   => Presburger.Sub(linearExp(t1), linearExp(t2))
+      case Ints.Mul(c, t)     => Presburger.Mult(linearExp(c), linearExp(t))
     }
     val flatApp: PartialFunction[SMTTerm, (String, ParikhConstraint)] =
       intOps.map(_.expectInt).reduce(_ orElse _)
@@ -335,6 +335,12 @@ class Solver(
           if (sub.exists(_.isEmpty)) return None
           val (fs, css) = sub.map(_.get).unzip
           Some((Presburger.Disj(fs), css.flatten))
+        case CoreTheory.Implies(IntConstraint(f1, cs1), IntConstraint(f2, cs2)) =>
+          Some((Presburger.Implies(f1, f2), cs1 ++ cs2))
+        case Terms.Forall(sv, svs, IntConstraint(f, cs)) =>
+          Some((Presburger.Forall((sv +: svs).map(sv => Presburger.Var(sv.name.name)), f), cs))
+        case Terms.Exists(sv, svs, IntConstraint(f, cs)) =>
+          Some((Presburger.Exists((sv +: svs).map(sv => Presburger.Var(sv.name.name)), f), cs))
         case _ => None
       }
     }

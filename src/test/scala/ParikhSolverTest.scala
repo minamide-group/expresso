@@ -390,6 +390,10 @@ trait ConstraintTestCases extends TestsSAT {
     assert(w == y ++ z)
   }
 
+  testFileSAT("forall") { (sm, _) =>
+    assert(sm("x") == "aaa")
+  }
+
 }
 
 class JSSST2021StrategyTest extends AnyFunSuite with ConstraintTestCases with UsesJSSST
