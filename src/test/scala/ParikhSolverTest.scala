@@ -281,13 +281,12 @@ trait ConstraintTestCases extends TestsSAT {
 (assert (str.in.re y (re.comp (str.to.re "ab"))))
 
 (check-sat)
-""") {
-    case (sModel, iModel) =>
-      val (x, y, i) = (sModel("x"), sModel("y"), iModel("i"))
-      assert("(ab)+".r.matches(x))
-      assert(0 <= i && i < x.length)
-      assert(y == x.atmostSubstring(i, 2))
-      assert(!"ab".r.matches(y))
+""") { case (sModel, iModel) =>
+    val (x, y, i) = (sModel("x"), sModel("y"), iModel("i"))
+    assert("(ab)+".r.matches(x))
+    assert(0 <= i && i < x.length)
+    assert(y == x.atmostSubstring(i, 2))
+    assert(!"ab".r.matches(y))
   }
 
   testSAT(""";; Bug fixed on 2021-07-05
