@@ -54,6 +54,7 @@ object Operation {
       case Ints.Add(t1, t2) => aux(Seq(t1, t2))
       case Ints.Sub(t1, t2) => aux(Seq(t1, t2))
       case Ints.Mul(t1, t2) => aux(Seq(t1, t2))
+      case Ints.Mod(t1, t2) => aux(Seq(t1, t2))
       // string-valued
       case Strings.Concat(ts @ _*)        => aux(ts)
       case Strings.At(t1, t2)             => aux(Seq(t1, t2))

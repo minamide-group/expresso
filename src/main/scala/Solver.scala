@@ -233,6 +233,7 @@ class Solver(
       case SimpleApp("+", ts) => Presburger.Add(ts.map(linearExp))
       case Ints.Sub(t1, t2)   => Presburger.Sub(linearExp(t1), linearExp(t2))
       case Ints.Mul(c, t)     => Presburger.Mult(linearExp(c), linearExp(t))
+      case Ints.Mod(t1, t2)   => Presburger.Mod(linearExp(t1), linearExp(t2))
     }
     val flatApp: PartialFunction[SMTTerm, (String, ParikhConstraint)] =
       intOps.map(_.expectInt).reduce(_ orElse _)

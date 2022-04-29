@@ -129,7 +129,7 @@ class Preprocessor(operations: Seq[Operation]) {
       def combine(results: Seq[R]): R = results.flatten
 
       def pre(term: Terms.Term, context: C /* この context は Nil のはず */ ): (Terms.Term, C) = term match {
-        case Ints.Neg(_) | SimpleApp("+", _) | Ints.Sub(_, _) | Ints.Mul(Terms.SNumeral(_), _) =>
+        case Ints.Neg(_) | SimpleApp("+", _) | Ints.Sub(_, _) | Ints.Mul(_, _) | Ints.Mod(_, _) =>
           val i = StdProvider.freshTemp()
           registerSort(i, Ints.IntSort())
           (SimpleQualID(i), Seq((i, term)))

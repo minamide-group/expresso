@@ -4,6 +4,8 @@ import com.microsoft.z3
 
 object Presburger {
 
+  def eucMod(m: Int, n: Int): Int = (if (m < 0) m % n + math.abs(n) else m % math.abs(n))
+
   /** Types and constructers for Presburger formula */
   sealed trait Term[X] {
     def eval(valuation: Map[X, Int]): Int = this match {
@@ -12,6 +14,7 @@ object Presburger {
       case Add(ts)     => ts.map(_.eval(valuation)).sum
       case Sub(t1, t2) => t1.eval(valuation) - t2.eval(valuation)
       case Mult(i, t)  => i.eval(valuation) * t.eval(valuation)
+      case Mod(t1, t2) => eucMod(t1.eval(valuation), t2.eval(valuation))
     }
 
     def freeVars: Set[X] = this match {
@@ -25,6 +28,7 @@ object Presburger {
       case Add(ts)     => ts.map(_.size).sum + 1
       case Sub(t1, t2) => t1.size + t2.size + 1
       case Mult(c, t)  => c.size + t.size + 1
+      case Mod(t1, t2) => t1.size + t2.size + 1
     }
   }
   case class Const[X](i: Int) extends Term[X]
@@ -33,6 +37,7 @@ object Presburger {
   case class Sub[X](t1: Term[X], t2: Term[X]) extends Term[X]
   // Mult は当初定数倍を意図していたが，その後の変更で任意の掛け算として使われるようになった．
   case class Mult[X](c: Term[X], t: Term[X]) extends Term[X]
+  case class Mod[X](t1: Term[X], t2: Term[X]) extends Term[X]
   sealed trait Formula[X] {
     def smtlib: String = Formula.formulaToSMTLIB(this)
 
@@ -116,6 +121,7 @@ object Presburger {
       case Add(ts)      => s"""(+ 0 ${ts.map(termToSMTLIB).mkString(" ")})"""
       case Sub(t1, t2)  => s"(- ${termToSMTLIB(t1)} ${termToSMTLIB(t2)})"
       case Mult(t1, t2) => s"(* ${termToSMTLIB(t1)} ${termToSMTLIB(t2)})"
+      case Mod(t1, t2)  => s"(% ${termToSMTLIB(t1)} ${termToSMTLIB(t2)})"
     }
   }
 
@@ -140,6 +146,7 @@ object Presburger {
           case Add(ts)     => Add(ts.map(aux))
           case Sub(t1, t2) => Sub(aux(t1), aux(t2))
           case Mult(i, t)  => Mult(aux(i), aux(t))
+          case Mod(t1, t2) => Mod(aux(t1), aux(t2))
         }
         aux(t)
       }
@@ -187,6 +194,7 @@ object Presburger {
           case Add(ts)     => Add(ts.map(aux))
           case Sub(t1, t2) => Sub(aux(t1), aux(t2))
           case Mult(i, t)  => Mult(aux(i), aux(t))
+          case Mod(t1, t2) => Mod(aux(t1), aux(t2))
         }
         aux(t)
       }
@@ -243,12 +251,13 @@ object Presburger {
         varMap += (x -> e)
         e
       }
-      def fromTerm(t: Term[X]): z3.ArithExpr = t match {
+      def fromTerm(t: Term[X]): z3.ArithExpr[z3.IntSort] = t match {
         case Const(i)    => ctx.mkInt(i)
         case Var(x)      => varMap.getOrElse(x, newVar(x))
         case Add(ts)     => ctx.mkAdd(ts.map(fromTerm): _*)
         case Sub(t1, t2) => ctx.mkSub(fromTerm(t1), fromTerm(t2))
         case Mult(c, t)  => ctx.mkMul(fromTerm(c), fromTerm(t))
+        case Mod(t1, t2) => ctx.mkMod(fromTerm(t1), fromTerm(t2))
       }
       def fromFormula(f: Formula[X]): z3.BoolExpr = f match {
         case Top()      => trueExpr
