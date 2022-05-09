@@ -390,9 +390,10 @@ trait ConstraintTestCases extends TestsSAT {
     assert(w == y ++ z)
   }
 
-  testFileSAT("forall") { (sm, _) =>
-    assert(sm("x") == "aaa")
-  }
+  testFileSAT("forall") { (sm, _) => assert(sm("x") == "aaa") }
+
+  testFileUNSAT("test-forall-1")
+  testFileUNSAT("test-forall-2")
 
 }
 

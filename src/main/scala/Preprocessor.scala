@@ -27,15 +27,11 @@ class Preprocessor(operations: Seq[Operation]) {
     // (replace (replace x y z) w (substr x i j)) のような項を
     // (replace x1 w x2), ((x1, (replace x y z)), (x2, (substr x i j)))
     // のように変形する
-    private object FlatTermBinder extends DownUpTermTransformer {
+    private object FlatTermBinder extends TermTransformerUsingBoundVars {
 
-      type C = Set[String] // quantifiedVars
       type R = Seq[(String, Terms.Term)] // (lhsVar, assignedTerm)
 
       override def combine(tree: Tree, context: C, results: Seq[R]): R = results.flatten
-
-      override def down(term: Terms.Term, context: C): C =
-        context ++ quantifiedVars.applyOrElse(term, (_: Terms.Term) => Nil)
 
       override def up(term: Terms.Term, context: C, result: R): (Terms.Term, R) =
         term match {
@@ -47,14 +43,6 @@ class Preprocessor(operations: Seq[Operation]) {
             (SimpleQualID(x), Seq((x, term)))
           case _ => (term, result)
         }
-
-      private val quantifiedVars: PartialFunction[Terms.Term, Seq[String]] = {
-        case Terms.Forall(sv, svs, _) => (sv +: svs) map sortedVar2Pair
-        case Terms.Exists(sv, svs, _) => (sv +: svs) map sortedVar2Pair
-      }
-      private val sortedVar2Pair: Terms.SortedVar => String = {
-        case Terms.SortedVar(Terms.SSymbol(name), _) => name
-      }
 
     }
 
@@ -245,22 +233,38 @@ class Preprocessor(operations: Seq[Operation]) {
       (checkSat + 1 == getModel && getModel == commands.length - 1) // (check-sat), (get-model)
     }
 
-    // ユーザー宣言変数にプレフィックスを加える
+    // ユーザー宣言変数と束縛変数にプレフィックスを加える
     commands = {
       val vars = SortStore(commands: _*).map.keySet
-      val f: PartialFunction[Terms.Term, Terms.Term] = {
-        case SimpleQualID(x) if vars(x) => SimpleQualID(provider.UserVar(x))
-      }
-      val prefixer = new SubstTransformer(f) {
+      val prefixer = new TermTransformerUsingBoundVars {
+        type R = Unit
+        def combine(tree: Tree, boundVars: C, results: Seq[R]): R = ()
+
+        def up(term: Terms.Term, boundVars: C, result: R): (Terms.Term, R) =
+          term match {
+            case SimpleQualID(x) if vars(x) || boundVars(x) => (SimpleQualID(provider.UserVar(x)), ())
+            case Terms.Exists(sv, svs, t) => (Terms.Exists(userVar(sv), userVar(svs), t), ())
+            case Terms.Forall(sv, svs, t) => (Terms.Forall(userVar(sv), userVar(svs), t), ())
+            case _                        => (term, ())
+          }
+
+        private def userVar(sv: Terms.SortedVar): Terms.SortedVar = {
+          val Terms.SortedVar(sym, sort) = sv
+          val Terms.SSymbol(name) = sym
+          Terms.SortedVar(Terms.SSymbol(provider.UserVar(name)), sort)
+        }
+        private def userVar(sv: Seq[Terms.SortedVar]): Seq[Terms.SortedVar] = sv.map(userVar)
+
         // (declare-const name sort) において name は SSymbol であり Term ではないので，
         // SSymbol 用に定義し直さなければならない．
-        override def transformSymbol(symbol: Terms.SSymbol, context: C): (Terms.SSymbol, R) = {
+        override def transformSymbol(symbol: Terms.SSymbol, boundVars: C): (Terms.SSymbol, R) = {
           val x = symbol.name
-          val newSym = if (vars(x)) Terms.SSymbol(provider.UserVar(x)) else symbol
-          (newSym, combine(symbol, context, Seq()))
+          val newSym = if (vars(x) || boundVars(x)) Terms.SSymbol(provider.UserVar(x)) else symbol
+          (newSym, combine(symbol, boundVars, Seq()))
         }
+
       }
-      commands.map(prefixer.transform(_, ())).map(_._1)
+      commands.map(prefixer.transform(_, Set())).map(_._1)
     }
 
     // - (= (ite b 0 1) 0) のような式を b などに置き換える

@@ -149,6 +149,23 @@ package object smttool {
     }
   }
 
+  abstract class TermTransformerUsingBoundVars extends DownUpTermTransformer {
+
+    type C = Set[String] // bound variables
+
+    override def down(term: Terms.Term, context: C): C =
+      context ++ quantifiedVars.applyOrElse(term, (_: Terms.Term) => Nil)
+
+    private val quantifiedVars: PartialFunction[Terms.Term, Seq[String]] = {
+      case Terms.Forall(sv, svs, _) => (sv +: svs) map sortedVar2Pair
+      case Terms.Exists(sv, svs, _) => (sv +: svs) map sortedVar2Pair
+    }
+    private val sortedVar2Pair: Terms.SortedVar => String = { case Terms.SortedVar(Terms.SSymbol(name), _) =>
+      name
+    }
+
+  }
+
   abstract class BottomUpTermTransformer extends PrePostTermTransformer {
 
     type C = Unit
