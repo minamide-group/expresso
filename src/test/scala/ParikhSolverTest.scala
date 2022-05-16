@@ -281,13 +281,12 @@ trait ConstraintTestCases extends TestsSAT {
 (assert (str.in.re y (re.comp (str.to.re "ab"))))
 
 (check-sat)
-""") {
-    case (sModel, iModel) =>
-      val (x, y, i) = (sModel("x"), sModel("y"), iModel("i"))
-      assert("(ab)+".r.matches(x))
-      assert(0 <= i && i < x.length)
-      assert(y == x.atmostSubstring(i, 2))
-      assert(!"ab".r.matches(y))
+""") { case (sModel, iModel) =>
+    val (x, y, i) = (sModel("x"), sModel("y"), iModel("i"))
+    assert("(ab)+".r.matches(x))
+    assert(0 <= i && i < x.length)
+    assert(y == x.atmostSubstring(i, 2))
+    assert(!"ab".r.matches(y))
   }
 
   testSAT(""";; Bug fixed on 2021-07-05
@@ -389,6 +388,30 @@ trait ConstraintTestCases extends TestsSAT {
     assert(z == x.atmostSubstring(i, x.length - i))
     assert(w == y ++ z)
   }
+
+  testFileSAT("forall") { (sm, _) => assert(sm("x") == "aaa") }
+
+  testFileUNSAT("test-forall-1")
+  testFileUNSAT("test-forall-2")
+
+  val primes = {
+    def sieve(l: LazyList[Int]): LazyList[Int] = {
+      val hd = l.head
+      lazy val tl = sieve(l.tail.filterNot(_ % hd == 0))
+      hd #:: tl
+    }
+    sieve(LazyList.from(2))
+  }
+
+  def isPrime(n: Int): Boolean = primes.dropWhile(_ < n).head == n
+
+  // testFileSAT("prime-sat") { (sm, _) =>
+  //   val x = sm("x")
+  //   val l = x.length
+  //   assert(isPrime(l), s"length of x was non-prime number $l")
+  //   assert(l > 7)
+  //   assert(x.matches("(ab)+a"))
+  // }
 
 }
 

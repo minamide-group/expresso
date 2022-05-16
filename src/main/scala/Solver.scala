@@ -49,7 +49,7 @@ class Solver(
     alphabet: Set[Char] = Set.empty, // ADDED to the alphabet of constraints
     operations: Seq[Operation] = Operation.builtins
 ) {
-  val intOps = operations.collect { case o: IntValuedOperation    => o }
+  val intOps = operations.collect { case o: IntValuedOperation => o }
   val strOps = operations.collect { case o: StringValuedOperation => o }
 
   type ParikhConstraint = Constraint.ParikhConstraint[String]
@@ -171,7 +171,7 @@ class Solver(
       case SimpleApp("re.comp", Seq(e)) => CompExp(expectRegExp(e))
       case Strings.Regex.AllChar()      => DotExp
       case SimpleQualID("re.all")       => StarExp(DotExp)
-      case _                            => throw new Exception(s"Cannot interpret given S-expression as regular expression: $t")
+      case _ => throw new Exception(s"Cannot interpret given S-expression as regular expression: $t")
     }
 
   type SolverOption = Unit
@@ -210,7 +210,7 @@ class Solver(
           case SString(w)            => w.map(Left.apply)
           case SNumeral(i) if i == 0 => Seq(Right(None))
           case SNumeral(i) if i > 0  => Seq(Right(Some(i.toInt)))
-          case t                     => throw new Exception(s"${t.getPos}: PCRE Replacement component expected but found: $t")
+          case t => throw new Exception(s"${t.getPos}: PCRE Replacement component expected but found: $t")
         }
       )
     case _ => throw new Exception(s"${t.getPos}: PCRE Replacement expected but found: $t")
@@ -227,12 +227,13 @@ class Solver(
   // ex2. (* 4 (- 3 i)) はそのまま Presburger.Term に変換される
   def expectInt(t: SMTTerm): (Presburger.Term[String], Seq[ParikhConstraint]) = {
     def linearExp: PartialFunction[SMTTerm, Presburger.Term[String]] = {
-      case SNumeral(i)              => Presburger.Const(i.toInt)
-      case SimpleQualID(name)       => Presburger.Var(name)
-      case Ints.Neg(t)              => Presburger.Const(0) - linearExp(t)
-      case SimpleApp("+", ts)       => Presburger.Add(ts.map(linearExp))
-      case Ints.Sub(t1, t2)         => Presburger.Sub(linearExp(t1), linearExp(t2))
-      case Ints.Mul(c, t) => Presburger.Mult(linearExp(c), linearExp(t))
+      case SNumeral(i)        => Presburger.Const(i.toInt)
+      case SimpleQualID(name) => Presburger.Var(name)
+      case Ints.Neg(t)        => Presburger.Const(0) - linearExp(t)
+      case SimpleApp("+", ts) => Presburger.Add(ts.map(linearExp))
+      case Ints.Sub(t1, t2)   => Presburger.Sub(linearExp(t1), linearExp(t2))
+      case Ints.Mul(c, t)     => Presburger.Mult(linearExp(c), linearExp(t))
+      case Ints.Mod(t1, t2)   => Presburger.Mod(linearExp(t1), linearExp(t2))
     }
     val flatApp: PartialFunction[SMTTerm, (String, ParikhConstraint)] =
       intOps.map(_.expectInt).reduce(_ orElse _)
@@ -315,12 +316,11 @@ class Solver(
       (Ints.GreaterEquals, Presburger.Ge _)
     )
     def unapply(t: SMTTerm): Option[(Presburger.Formula[String], Seq[ParikhConstraint])] = {
-      val binOpt = binary.find { case (op, _) => op.unapply(t).nonEmpty }.map {
-        case (op, constructor) =>
-          val Some((t1, t2)) = op.unapply(t)
-          val (pt1, cs1) = expectInt(t1)
-          val (pt2, cs2) = expectInt(t2)
-          (constructor(pt1, pt2), cs1 ++ cs2)
+      val binOpt = binary.find { case (op, _) => op.unapply(t).nonEmpty }.map { case (op, constructor) =>
+        val Some((t1, t2)) = op.unapply(t)
+        val (pt1, cs1) = expectInt(t1)
+        val (pt2, cs2) = expectInt(t2)
+        (constructor(pt1, pt2), cs1 ++ cs2)
       }
       if (binOpt.nonEmpty) return Some(binOpt.get)
       t match {
@@ -335,6 +335,12 @@ class Solver(
           if (sub.exists(_.isEmpty)) return None
           val (fs, css) = sub.map(_.get).unzip
           Some((Presburger.Disj(fs), css.flatten))
+        case CoreTheory.Implies(IntConstraint(f1, cs1), IntConstraint(f2, cs2)) =>
+          Some((Presburger.Implies(f1, f2), cs1 ++ cs2))
+        case Terms.Forall(sv, svs, IntConstraint(f, cs)) =>
+          Some((Presburger.Forall((sv +: svs).map(sv => Presburger.Var(sv.name.name)), f), cs))
+        case Terms.Exists(sv, svs, IntConstraint(f, cs)) =>
+          Some((Presburger.Exists((sv +: svs).map(sv => Presburger.Var(sv.name.name)), f), cs))
         case _ => None
       }
     }
@@ -396,7 +402,7 @@ class Solver(
     case SMTCommands.Assert(assertion)                        => assert(assertion)
     case SMTCommands.CheckSat()                               => checkSat()
     case SMTCommands.GetModel()                               => getModel()
-    case _                                                    => throw new Exception(s"${cmd.getPos}: Unsupported command: ${cmd}")
+    case _ => throw new Exception(s"${cmd.getPos}: Unsupported command: ${cmd}")
   }
 
   private def preprocess(commands: Seq[SMTCommands.Command]): Seq[SMTCommands.Command] = {
@@ -446,7 +452,7 @@ class Solver(
         .collect { case a: AtomicAssignment[String] => a.renameVars(varIdx) }
         .sortBy(_.dependerVars.head)
       val assertions = constraints.collect { case a: ParikhAssertion[String] => a.renameVars(varIdx) }
-      val arithFormula = constraints.collect { case PureIntConstraint(f)     => f }
+      val arithFormula = constraints.collect { case PureIntConstraint(f) => f }
       strategy.Input(
         alphabet,
         stringVars.length,
@@ -481,11 +487,10 @@ object PyExEscape extends Escape {
     ('\\', '\\')
   )
   private val backslashes = backslashesSeq
-    .map {
-      case (target, replacement) =>
-        val t = "\\" + target
-        val r = replacement.toString
-        (w: String) => w.replace(t, r)
+    .map { case (target, replacement) =>
+      val t = "\\" + target
+      val r = replacement.toString
+      (w: String) => w.replace(t, r)
     }
   private val func = (Seq(hexCode) ++ backslashes)
     .reduce[String => String] { case (acc, f) => acc andThen f }
