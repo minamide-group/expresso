@@ -7,11 +7,11 @@ object Presburger {
   /** Types and constructers for Presburger formula */
   sealed trait Term[X] {
     def eval(valuation: Map[X, Int]): Int = this match {
-      case Const(i)          => i
-      case Var(x)            => valuation(x)
-      case Add(ts)           => ts.map(_.eval(valuation)).sum
-      case Sub(t1, t2)       => t1.eval(valuation) - t2.eval(valuation)
-      case Mult(i, t) => i.eval(valuation) * t.eval(valuation)
+      case Const(i)    => i
+      case Var(x)      => valuation(x)
+      case Add(ts)     => ts.map(_.eval(valuation)).sum
+      case Sub(t1, t2) => t1.eval(valuation) - t2.eval(valuation)
+      case Mult(i, t)  => i.eval(valuation) * t.eval(valuation)
     }
 
     def freeVars: Set[X] = this match {
@@ -47,6 +47,14 @@ object Presburger {
       case Disj(fs)      => fs.flatMap(_.freeVars).toSet
       case Not(f)        => f.freeVars
       case Exists(vs, f) => f.freeVars -- vs.map(_.x)
+    }
+
+    def boundVars: Set[X] = this match {
+      case Top() | Bot() | Eq(_, _) | Lt(_, _) | Le(_, _) => Set.empty
+      case Conj(fs)                                       => fs.flatMap(_.boundVars).toSet
+      case Disj(fs)                                       => fs.flatMap(_.boundVars).toSet
+      case Not(f)                                         => f.boundVars
+      case Exists(vs, f)                                  => f.boundVars ++ vs.map(_.x)
     }
 
     /** @throws java.lang.UnsupportedOperationException if this contains Exists. */
@@ -114,11 +122,11 @@ object Presburger {
     )(subst: PartialFunction[X, Term[Y]])(substBound: PartialFunction[X, Y]): Formula[Y] = {
       def tm(t: Term[X]): Term[Y] = {
         def aux(t: Term[X]): Term[Y] = t match {
-          case Const(i)          => Const(i)
-          case Var(x)            => subst(x)
-          case Add(ts)           => Add(ts.map(aux))
-          case Sub(t1, t2)       => Sub(aux(t1), aux(t2))
-          case Mult(i, t) => Mult(aux(i), aux(t))
+          case Const(i)    => Const(i)
+          case Var(x)      => subst(x)
+          case Add(ts)     => Add(ts.map(aux))
+          case Sub(t1, t2) => Sub(aux(t1), aux(t2))
+          case Mult(i, t)  => Mult(aux(i), aux(t))
         }
         aux(t)
       }
@@ -152,18 +160,18 @@ object Presburger {
       substituteBound(f) {
         case Left(b)     => Var(Left(b): Either[B, N])
         case Right(free) => subst(free)
-      } { case Left(b) => Left(b) : Either[B, N] }
+      } { case Left(b) => Left(b): Either[B, N] }
 
     }
     // NOTE renamer should be injective
     def renameVars[X, Y](f: Formula[X])(renamer: X => Y): Formula[Y] = {
       def tm(t: Term[X]): Term[Y] = {
         def aux(t: Term[X]): Term[Y] = t match {
-          case Const(i)          => Const(i)
-          case Var(x)            => Var(renamer(x))
-          case Add(ts)           => Add(ts.map(aux))
-          case Sub(t1, t2)       => Sub(aux(t1), aux(t2))
-          case Mult(i, t) => Mult(aux(i), aux(t))
+          case Const(i)    => Const(i)
+          case Var(x)      => Var(renamer(x))
+          case Add(ts)     => Add(ts.map(aux))
+          case Sub(t1, t2) => Sub(aux(t1), aux(t2))
+          case Mult(i, t)  => Mult(aux(i), aux(t))
         }
         aux(t)
       }

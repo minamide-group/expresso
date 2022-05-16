@@ -26,6 +26,15 @@ case class ParikhSST[Q, A, B, X, L, I](
     outGraph: Set[(Q, Cupstar[X, B], Map[L, Int])],
     acceptFormulas: Seq[Presburger.Formula[Either[I, L]]]
 ) extends StringIntTransducer[A, B, I] {
+
+  require {
+    val bound = for {
+      phi <- acceptFormulas
+      Right(x) <- phi.boundVars
+    } yield x
+    (ls intersect bound.toSet).isEmpty
+  }
+
   type XBS = Cupstar[X, B]
   type LVal = Map[L, Int]
   type UpdateX = Update[X, B]
@@ -422,10 +431,11 @@ case class ParikhSST[Q, A, B, X, L, I](
   ): ParikhSST[Int, A, C, (X, Y, Boolean), Int, I] = {
     val (mpsstOutIter, mpsstPreviousStates, lks, combineLK, formulas) = andThenAux(that)
     val og = mpsstOutIter.toSet
-    val (newStates, newEdges) = searchStatesInt(og.map { case ((q, _, _), _) => q }, inSet)(mpsstPreviousStates)(
-      { case ((q, _, _), _)                => q },
-      { case (r, a, ((q, m, kv), lv), map) => (map(q), a, m, combineLK(lv, kv), map(r)) }
-    )
+    val (newStates, newEdges) =
+      searchStatesInt(og.map { case ((q, _, _), _) => q }, inSet)(mpsstPreviousStates)(
+        { case ((q, _, _), _)                => q },
+        { case (r, a, ((q, m, kv), lv), map) => (map(q), a, m, combineLK(lv, kv), map(r)) }
+      )
     val newOutGraph = og.map {
       case ((q, stringPart, kv), lv) => (newStates(q), stringPart, combineLK(lv, kv))
     }
