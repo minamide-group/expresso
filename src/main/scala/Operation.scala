@@ -11,6 +11,7 @@ import com.github.kmn4.expresso.smttool.Strings
 import smtlib.theories.Ints
 import smtlib.trees.Terms
 import smtlib.trees.Terms.SNumeral
+import com.github.kmn4.expresso.smttool.BottomUpTermTransformer
 
 // Parikh オートマトンや Parikh SST で表して扱う文字列操作．
 sealed trait Operation {
@@ -22,6 +23,57 @@ sealed trait Operation {
 
 object Operation {
   val builtins: Seq[Operation] = IntValuedOperation.builtins ++ StringValuedOperation.builtins
+
+  private val strOps: PartialFunction[Terms.Term, Terms.Sort] = {
+    case Strings.Concat(_*)          => Strings.StringSort()
+    case Strings.At(_, _)            => Strings.StringSort()
+    case Strings.Replace(_, _, _)    => Strings.StringSort()
+    case Strings.Substring(_, _, _)  => Strings.StringSort()
+    case Strings.ReplaceAll(_, _, _) => Strings.StringSort()
+  }
+  // まだ StringValuedOperation.builtins が実装されていないので strOps が必要
+
+  // パターンとして使う．
+  // 特定の文字列操作 (例えば substr, indexof, replace) であるかどうか判定する．
+  // (substr _ _ _) -(unapply)-> StringSort
+  val WithSort = {
+    val lift: Operation => PartialFunction[Terms.Term, Terms.Sort] = op => {
+      case t if op.extractable(t) => op.rangeSort
+    }
+    val ops: PartialFunction[Terms.Term, Terms.Sort] = builtins.map(lift).reduce(_ orElse _)
+    ops orElse strOps
+  }
+
+  // 文字列操作や整数演算以外の項に対して呼び出すとマッチエラー
+  val freeVars: Terms.Term => Set[String] = {
+    def aux(ts: Seq[Terms.Term]): Seq[String] = ts flatMap {
+      // base case
+      case SimpleQualID(s)                => Seq(s)
+      case SNumeral(_) | Terms.SString(_) => Seq()
+      // int operations
+      case Ints.Add(t1, t2) => aux(Seq(t1, t2))
+      case Ints.Sub(t1, t2) => aux(Seq(t1, t2))
+      case Ints.Mul(t1, t2) => aux(Seq(t1, t2))
+      case Ints.Mod(t1, t2) => aux(Seq(t1, t2))
+      // string-valued
+      case Strings.Concat(ts @ _*)        => aux(ts)
+      case Strings.At(t1, t2)             => aux(Seq(t1, t2))
+      case Strings.Replace(t1, t2, t3)    => aux(Seq(t1, t2, t3))
+      case Strings.Substring(t1, t2, t3)  => aux(Seq(t1, t2, t3))
+      case Strings.ReplaceAll(t1, t2, t3) => aux(Seq(t1, t2, t3))
+      // int-valued
+      case Strings.Length(t)           => aux(Seq(t))
+      case Strings.CountChar(t1, t2)   => aux(Seq(t1, t2))
+      case Strings.IndexOf(t1, t2, t3) => aux(Seq(t1, t2))
+      case Strings.CodeAt(t1, t2)      => aux(Seq(t1, t2))
+      //
+      case _ => throw new MatchError(ts)
+    }
+    term => aux(Seq(term)).toSet
+  }
+
+//  val strVars: PartialFunction[Terms.Term, Set[String]]
+
 }
 
 trait IntValuedOperation extends Operation {

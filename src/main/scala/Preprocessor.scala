@@ -5,6 +5,7 @@ import smtlib.theories.Ints
 import smtlib.theories.Core
 import com.github.kmn4.expresso.smttool._
 import com.github.kmn4.expresso.math.Presburger
+import smtlib.trees.Tree
 
 // PyEx 用
 // SMT-LIB コマンド列の変換
@@ -12,12 +13,7 @@ class Preprocessor(operations: Seq[Operation]) {
 
   val provider = StdProvider
 
-  private class Flattener(
-      // パターンとして使う．
-      // 特定の文字列操作 (例えば substr, indexof, replace) であるかどうか判定する．
-      // (substr _ _ _) -(unapply)-> StringSort
-      StringOp: PartialFunction[Terms.Term, Terms.Sort]
-  ) {
+  private class Flattener {
     // あらゆるメソッド呼び出しで registerSort が呼ばれる点に注意
 
     private val sorts = SortStore()
@@ -31,22 +27,26 @@ class Preprocessor(operations: Seq[Operation]) {
     // (replace (replace x y z) w (substr x i j)) のような項を
     // (replace x1 w x2), ((x1, (replace x y z)), (x2, (substr x i j)))
     // のように変形する
-    private val flatTermBinder = new BottomUpTermTransformer {
-      type R = Seq[(String, Terms.Term)]
+    private object FlatTermBinder extends TermTransformerUsingBoundVars {
 
-      override def combine(results: Seq[R]): R = results.flatten
+      type R = Seq[(String, Terms.Term)] // (lhsVar, assignedTerm)
 
-      override def post(term: Terms.Term, result: R): (Terms.Term, R) =
+      override def combine(tree: Tree, context: C, results: Seq[R]): R = results.flatten
+
+      override def up(term: Terms.Term, context: C, result: R): (Terms.Term, R) =
         term match {
-          case StringOp(sort) if result.isEmpty =>
+          case Operation.WithSort(sort) if result.isEmpty /* 一番内側のときだけ */ =>
+            if ((context & Operation.freeVars(term)).nonEmpty)
+              throw new Exception("a string operation argument is quantified")
             val x = provider.freshTemp()
             registerSort(x, sort)
             (SimpleQualID(x), Seq((x, term)))
           case _ => (term, result)
         }
+
     }
 
-    private def bindInnermostFlatTerms(term: Terms.Term) = flatTermBinder.transform(term, ())
+    private def bindInnermostFlatTerms(term: Terms.Term) = FlatTermBinder.transform(term, Set())
 
     // f が必ずしも (A => B, A => Seq[C]) へと分解できない場合に使う
     def mapAndFlatMap[A, B, C](f: A => (B, Seq[C])): Seq[A] => (Seq[B], Seq[C]) =
@@ -110,10 +110,10 @@ class Preprocessor(operations: Seq[Operation]) {
         Seq[Terms.Term], // x = y, x = w, i + j < c など (リテラル)
         Map[String, Terms.Sort] // このメソッドで新たに導入した変数のソート
     ) = {
-      val (opsAssigns, opsFlattened) = flattenOps(terms)
+      val (opsAssigns, opsFlattened) = flattenOps(terms) // 文字列値／整数値関数の追い出し
       val flattenAssigns = (_: Seq[(String, Terms.Term)]) flatMap {
         case (x, t) =>
-          val (flattened, arithAssigns) = flattenArith(t)
+          val (flattened, arithAssigns) = flattenArith(t) // 整数演算 (+, -, *) の追い出し
           (x, flattened) +: arithAssigns
       }
       val assigns = flattenAssigns(opsAssigns)
@@ -129,7 +129,7 @@ class Preprocessor(operations: Seq[Operation]) {
       def combine(results: Seq[R]): R = results.flatten
 
       def pre(term: Terms.Term, context: C /* この context は Nil のはず */ ): (Terms.Term, C) = term match {
-        case Ints.Neg(_) | SimpleApp("+", _) | Ints.Sub(_, _) | Ints.Mul(Terms.SNumeral(_), _) =>
+        case Ints.Neg(_) | SimpleApp("+", _) | Ints.Sub(_, _) | Ints.Mul(_, _) | Ints.Mod(_, _) =>
           val i = StdProvider.freshTemp()
           registerSort(i, Ints.IntSort())
           (SimpleQualID(i), Seq((i, term)))
@@ -139,18 +139,7 @@ class Preprocessor(operations: Seq[Operation]) {
     private val flattenArith = (term: Terms.Term) => FlattenArith.transform(term, Nil)
   }
   private[expresso] val flatten = {
-    val strOps: PartialFunction[Terms.Term, Terms.Sort] = {
-      case Strings.Concat(_*)          => Strings.StringSort()
-      case Strings.At(_, _)            => Strings.StringSort()
-      case Strings.Replace(_, _, _)    => Strings.StringSort()
-      case Strings.Substring(_, _, _)  => Strings.StringSort()
-      case Strings.ReplaceAll(_, _, _) => Strings.StringSort()
-    }
-    val lift: Operation => PartialFunction[Terms.Term, Terms.Sort] = op => {
-      case t if op.extractable(t) => op.rangeSort
-    }
-    val ops: PartialFunction[Terms.Term, Terms.Sort] = operations.map(lift).reduce(_ orElse _)
-    val flattener = new Flattener(ops orElse strOps)
+    val flattener = new Flattener
     (terms: Seq[Terms.Term]) => flattener.flatten(terms)
   }
 
@@ -244,22 +233,38 @@ class Preprocessor(operations: Seq[Operation]) {
       (checkSat + 1 == getModel && getModel == commands.length - 1) // (check-sat), (get-model)
     }
 
-    // ユーザー宣言変数にプレフィックスを加える
+    // ユーザー宣言変数と束縛変数にプレフィックスを加える
     commands = {
       val vars = SortStore(commands: _*).map.keySet
-      val f: PartialFunction[Terms.Term, Terms.Term] = {
-        case SimpleQualID(x) if vars(x) => SimpleQualID(provider.UserVar(x))
-      }
-      val prefixer = new SubstTransformer(f) {
+      val prefixer = new TermTransformerUsingBoundVars {
+        type R = Unit
+        def combine(tree: Tree, boundVars: C, results: Seq[R]): R = ()
+
+        def up(term: Terms.Term, boundVars: C, result: R): (Terms.Term, R) =
+          term match {
+            case SimpleQualID(x) if vars(x) || boundVars(x) => (SimpleQualID(provider.UserVar(x)), ())
+            case Terms.Exists(sv, svs, t) => (Terms.Exists(userVar(sv), userVar(svs), t), ())
+            case Terms.Forall(sv, svs, t) => (Terms.Forall(userVar(sv), userVar(svs), t), ())
+            case _                        => (term, ())
+          }
+
+        private def userVar(sv: Terms.SortedVar): Terms.SortedVar = {
+          val Terms.SortedVar(sym, sort) = sv
+          val Terms.SSymbol(name) = sym
+          Terms.SortedVar(Terms.SSymbol(provider.UserVar(name)), sort)
+        }
+        private def userVar(sv: Seq[Terms.SortedVar]): Seq[Terms.SortedVar] = sv.map(userVar)
+
         // (declare-const name sort) において name は SSymbol であり Term ではないので，
         // SSymbol 用に定義し直さなければならない．
-        override def transformSymbol(symbol: Terms.SSymbol, context: C): (Terms.SSymbol, R) = {
+        override def transformSymbol(symbol: Terms.SSymbol, boundVars: C): (Terms.SSymbol, R) = {
           val x = symbol.name
-          val newSym = if (vars(x)) Terms.SSymbol(provider.UserVar(x)) else symbol
-          (newSym, combine(symbol, context, Seq()))
+          val newSym = if (vars(x) || boundVars(x)) Terms.SSymbol(provider.UserVar(x)) else symbol
+          (newSym, combine(symbol, boundVars, Seq()))
         }
+
       }
-      commands.map(prefixer.transform(_, ())).map(_._1)
+      commands.map(prefixer.transform(_, Set())).map(_._1)
     }
 
     // - (= (ite b 0 1) 0) のような式を b などに置き換える
@@ -291,7 +296,7 @@ class Preprocessor(operations: Seq[Operation]) {
     val (assigns, literals, newSorts) = flatten(bools)
     newSorts.foreach { case (name, sort) => sorts.register(name, sort) }
 
-    val lhsVars = assigns.iterator.map { case (x, _) => x }.toSet
+    val lhsVars = assigns.iterator.map { case (x, _) => x }.toSet // 整数変数も含む
     // literals の内 x = y (文字列変数の等式) が冗長．
     // 1. 等式から文字列変数の同値類を構成する．
     //    同値類に含まれる左辺変数は高々1つでなければならない (直線性より)．
@@ -310,6 +315,7 @@ class Preprocessor(operations: Seq[Operation]) {
       { case SimpleQualID(name) if sortsMap(name) == string => name }
     }
     // 1., 2.
+    // ここで文字列変数しか考えていないので、uf は整数変数の同値類を作らない
     for (Core.Equals(StringVariable(x), StringVariable(y)) <- literals) {
       uf.make(x)
       uf.make(y)
