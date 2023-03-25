@@ -46,20 +46,19 @@ package object smttool {
   val elimDoubleNegation = subst { case Core.Not(Core.Not(t)) => t }
   val elimITE = subst {
     case Core.Equals(
-        Core.ITE(t, Terms.SNumeral(n), Terms.SNumeral(m)),
-        Terms.SNumeral(l)
+          Core.ITE(t, Terms.SNumeral(n), Terms.SNumeral(m)),
+          Terms.SNumeral(l)
         ) =>
       if (n == l && m == l) Core.True()
       else if (n == l) t
       else if (m == l) Core.Not(t)
       else Core.False()
   }
-  val elimAt = subst {
-    case Strings.At(w, i) =>
-      Strings.Substring(w, i, Terms.SNumeral(BigInt(1)))
+  val elimAt = subst { case Strings.At(w, i) =>
+    Strings.Substring(w, i, Terms.SNumeral(BigInt(1)))
   }
-  def compose[A](f: A => A*): A => A = f.foldLeft[A => A](identity) {
-    case (acc, f) => acc andThen f
+  def compose[A](f: A => A*): A => A = f.foldLeft[A => A](identity) { case (acc, f) =>
+    acc andThen f
   }
   val simplify: Term => Term = compose(elimITE, elimDoubleNegation, elimAt)
 

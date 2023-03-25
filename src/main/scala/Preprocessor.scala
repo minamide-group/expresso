@@ -51,10 +51,9 @@ class Preprocessor(operations: Seq[Operation]) {
     // f が必ずしも (A => B, A => Seq[C]) へと分解できない場合に使う
     def mapAndFlatMap[A, B, C](f: A => (B, Seq[C])): Seq[A] => (Seq[B], Seq[C]) =
       s =>
-        s.foldLeft((Seq.empty[B], Seq.empty[C])) {
-          case ((accB, accC), a) =>
-            val (b, cs) = f(a)
-            (accB :+ b, accC ++ cs)
+        s.foldLeft((Seq.empty[B], Seq.empty[C])) { case ((accB, accC), a) =>
+          val (b, cs) = f(a)
+          (accB :+ b, accC ++ cs)
         }
 
     private val bindInnermost = mapAndFlatMap(bindInnermostFlatTerms)
@@ -69,10 +68,9 @@ class Preprocessor(operations: Seq[Operation]) {
         // 仮定: Iterable[B] は非空で，どの2つの Iterable[B] も共通部分が空
         map: Map[A, Iterable[B]]
     ): (Map[A, B], Map[B, B]) = {
-      map.foldLeft((Map.empty[A, B], Map.empty[B, B])) {
-        case ((accA, accB), (a, bb)) =>
-          val (b, bMap) = chooseRepr(bb)
-          (accA + (a -> b), accB ++ bMap)
+      map.foldLeft((Map.empty[A, B], Map.empty[B, B])) { case ((accA, accB), (a, bb)) =>
+        val (b, bMap) = chooseRepr(bb)
+        (accA + (a -> b), accB ++ bMap)
       }
     }
 
@@ -111,10 +109,9 @@ class Preprocessor(operations: Seq[Operation]) {
         Map[String, Terms.Sort] // このメソッドで新たに導入した変数のソート
     ) = {
       val (opsAssigns, opsFlattened) = flattenOps(terms) // 文字列値／整数値関数の追い出し
-      val flattenAssigns = (_: Seq[(String, Terms.Term)]) flatMap {
-        case (x, t) =>
-          val (flattened, arithAssigns) = flattenArith(t) // 整数演算 (+, -, *) の追い出し
-          (x, flattened) +: arithAssigns
+      val flattenAssigns = (_: Seq[(String, Terms.Term)]) flatMap { case (x, t) =>
+        val (flattened, arithAssigns) = flattenArith(t) // 整数演算 (+, -, *) の追い出し
+        (x, flattened) +: arithAssigns
       }
       val assigns = flattenAssigns(opsAssigns)
       (assigns, opsFlattened, sortMap(assigns.map(_._1)))
@@ -180,8 +177,8 @@ class Preprocessor(operations: Seq[Operation]) {
         val post = Strings.Regex.All()
         Strings.InRegex(t, Strings.Regex.Concat(pre, cr, post))
       case Core.Equals(
-          Strings.At(t1, Ints.Sub(t2, Terms.SNumeral(n))),
-          Terms.SString(c)
+            Strings.At(t1, Ints.Sub(t2, Terms.SNumeral(n))),
+            Terms.SString(c)
           ) if n - 1 >= 0 && c.length == 1 && t1 == t2 /* TODO 効率？ */ =>
         val pre = Strings.Regex.All()
         val cr = Strings.ToRegex(Terms.SString(c))
