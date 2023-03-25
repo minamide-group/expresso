@@ -390,6 +390,30 @@ trait ConstraintTestCases extends TestsSAT {
     assert(w == y ++ z)
   }
 
+  testFileSAT("forall") { (sm, _) => assert(sm("x") == "aaa") }
+
+  testFileUNSAT("test-forall-1")
+  testFileUNSAT("test-forall-2")
+
+  val primes = {
+    def sieve(l: LazyList[Int]): LazyList[Int] = {
+      val hd = l.head
+      lazy val tl = sieve(l.tail.filterNot(_ % hd == 0))
+      hd #:: tl
+    }
+    sieve(LazyList.from(2))
+  }
+
+  def isPrime(n: Int): Boolean = primes.dropWhile(_ < n).head == n
+
+  // testFileSAT("prime-sat") { (sm, _) =>
+  //   val x = sm("x")
+  //   val l = x.length
+  //   assert(isPrime(l), s"length of x was non-prime number $l")
+  //   assert(l > 7)
+  //   assert(x.matches("(ab)+a"))
+  // }
+
 }
 
 class JSSST2021StrategyTest extends AnyFunSuite with ConstraintTestCases with UsesJSSST
