@@ -3,7 +3,7 @@ oldpwd="$(pwd)"
 script_dir="$(dirname "${BASH_SOURCE[0]}")"
 cd "${script_dir}"
 
-scala_version=3.2.1
+scala_version=3.2.2
 case "$(uname)" in
     "Darwin") platform="osx-10.16"; ext="dylib";;
     "Linux") platform="glibc-2.31"; ext="so";;
