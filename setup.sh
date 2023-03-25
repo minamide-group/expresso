@@ -3,6 +3,7 @@ oldpwd="$(pwd)"
 script_dir="$(dirname "${BASH_SOURCE[0]}")"
 cd "${script_dir}"
 
+scala_version=3.2.1
 case "$(uname)" in
     "Darwin") platform="osx-10.16"; ext="dylib";;
     "Linux") platform="glibc-2.31"; ext="so";;
@@ -23,6 +24,6 @@ echo "#### Z3 done"
 read -p "try to build? (y/N)" yn; case "$yn" in [nN]*) exit;; esac
 sbt assembly
 read -p "try to solve one? (y/N)" yn; case "$yn" in [nN]*) exit;; esac
-java -jar target/scala-2.13/*.jar constraints/bench/deleteall.smt2 preimage
+java -jar target/scala-${scala_version}/*.jar constraints/bench/deleteall.smt2 --strategy preimage
 
 cd "${oldpwd}"
